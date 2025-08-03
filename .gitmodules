@@ -1,0 +1,6 @@
+[submodule "third_party/tt-mlir"]
+	path = third_party/tt-mlir
+	url = https://github.com/tenstorrent/tt-mlir.git
+[submodule "third_party/tt-metal"]
+	path = third_party/tt-metal
+	url = https://github.com/tenstorrent/tt-metal.git
