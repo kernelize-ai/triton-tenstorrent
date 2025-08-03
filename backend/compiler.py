@@ -138,18 +138,24 @@ class NPUBackend(BaseBackend):
         metadata["shared"] = 0
 
         flags = []
-        return llvm.translate_to_asm(src, npu.get_default_target_triple(), options.arch, '', flags,
+        ret = llvm.translate_to_asm(src, npu.get_default_target_triple(), options.arch, '', flags,
                                      options.enable_fp_fusion, False)
+        print("ASM generated for NPU backend", flush=True)
+        return ret
 
     @staticmethod
     def make_library(src, metadata, options):
+        print("building shared object for NPU backend", flush=True)
         with tempfile.TemporaryDirectory() as tmpdir:
             asm_path = os.path.join(tmpdir, "kernel.s")
-            Path(asm_path).write_text(src)
+            with open(asm_path, "w") as f:
+                f.write(src)
+            print(f"ASM written to {asm_path}", flush=True)
             lib_dirs = []
             libs = []
             include_dirs = []
             so = _build("kernel", asm_path, tmpdir, lib_dirs, include_dirs, libs, [])
+            print("build shared object for NPU backend done, re-reading", flush=True)
             with open(so, "rb") as f:
                 return f.read()
 

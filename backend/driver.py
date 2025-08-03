@@ -10,6 +10,7 @@ from pathlib import Path
 from triton.runtime.build import compile_module_from_src
 from triton.backends.driver import DriverBase
 from triton.backends.compiler import GPUTarget
+from triton._C.libtriton import npu
 
 
 @functools.lru_cache()
@@ -55,15 +56,9 @@ class NpuUtils(object):
         pass
 
     def load_binary(self, name, kernel, shared_mem, device):
-        with tempfile.NamedTemporaryFile(mode="wb", suffix=".so") as f:
-            f.write(kernel)
-            f.flush()
-            import ctypes
-            lib = ctypes.cdll.LoadLibrary(f.name)
-            fn_ptr = getattr(lib, name)
-            fn_ptr_as_void_p = ctypes.cast(fn_ptr, ctypes.c_void_p).value
-            # TODO: properly handle max number threads
-            return (lib, fn_ptr_as_void_p, 0, 0, 128)
+        jit = npu.load_binary(name, kernel)
+        fn = npu.lookup_function(jit, name)
+        return (jit, fn, 0, 0, 128) # TODO: properly handle shared mem / max threads
 
     def get_device_properties(self, *args):
         return {"max_shared_mem": 0}
@@ -355,6 +350,7 @@ class NPULauncher(object):
         self.launch = mod.launch
 
     def __call__(self, gridX, gridY, gridZ, stream, function, *args):
+        #print("Running kernel!", flush=True)
         self.launch(gridX, gridY, gridZ, stream, function, *args)
 
 
@@ -441,7 +437,7 @@ class NPUDriver(DriverBase):
 
     def get_current_target(self):
         capability = "npu"
-        warp_size = 32
+        warp_size = 32 # maybe this should be 0 so we don't hit out of resources? 
         return GPUTarget("npu", capability, warp_size)
 
     def get_active_torch_device(self):
