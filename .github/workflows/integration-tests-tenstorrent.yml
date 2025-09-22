@@ -74,7 +74,7 @@ jobs:
           export CC=$(which clang)
           export CXX=$(which clang++)
           mkdir -p /opt/ttmlir-toolchain/
-          TRITON_VENV_DIR=triton/.venv/ LLVM_BUILD_DIR=$HOME/.triton/llvm/llvm-ubuntu-x86 TTMLIR_PYTHON_VERSION=python3.12 ./scripts/build-tt-mlir.sh
+          TRITON_VENV_DIR=$(pwd)/.venv/ LLVM_BUILD_DIR=$HOME/.triton/llvm/llvm-ubuntu-x86 TTMLIR_PYTHON_VERSION=python3.12 ./scripts/build-tt-mlir.sh
       - name: Cache build dependencies
         uses: actions/cache@v4
         with:
