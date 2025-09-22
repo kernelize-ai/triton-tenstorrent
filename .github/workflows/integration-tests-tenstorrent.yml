@@ -61,8 +61,15 @@ jobs:
           # Process the files if they exist
           echo "triton=$(cat $triton_file | cut -c 1-8)" >> $GITHUB_OUTPUT
         shell: bash
+      - name: Create venv
+        run: |
+          python3 -m venv ~/.venv
+          source ~/.venv/bin/activate
+          python3 -m pip install --upgrade pip
       - name: Setup tt-mlir
         run: |
+          source ~/.venv/bin/activate
+
           git submodule update --init
           export CC=$(which clang)
           export CXX=$(which clang++)
@@ -90,6 +97,8 @@ jobs:
           echo "$HOME/.local/bin" >> $GITHUB_PATH
       - name: Install torch
         run: |
+          source ~/.venv/bin/activate
+
           python -m pip install --upgrade pip
           python -m pip install torch==2.8.0 --index-url https://download.pytorch.org/whl/test/cpu
           pip freeze
@@ -99,6 +108,8 @@ jobs:
           nproc
           echo "PATH is '$PATH'"
           ccache --zero-stats
+          source ~/.venv/bin/activate
+
           TRITON_PLUGIN_DIRS=${GITHUB_WORKSPACE} make dev-install
       - name: CCache Stats
         run: ccache --print-stats
