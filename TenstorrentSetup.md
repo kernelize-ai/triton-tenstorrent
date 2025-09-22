@@ -18,6 +18,7 @@ _TODO_
 
 The tenstorrent MLIR compiler (`tt-mlir`) is the entrypoint for Triton into the Tenstorrent software stack. `tt-mlir` is supplied inside the Triton Tenstorrent plugin source repo as a `third_party` git submodule. The provided `build-tt-mlir.sh` install script sets up the directory structure and components necessary to build and install `tt-mlir` in a location that Triton can access. The `build-tt-mlir.sh` script overrides the default LLVM/MLIR compiler version to use the Triton provided LLVM/MLIR sources.
 
+Create the tt-mlir toolchain dir. By default this should be `/opt/ttmlir-toolchain`.
 
 Run the `build-tt-mlir.sh` script from the Triton NPU plugin root directory with the following parameters (replace e.g. OS architecture as appropriate):
 
