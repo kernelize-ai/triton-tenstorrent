@@ -8,7 +8,7 @@ on:
         type: string
 
 jobs:
-  integration-tests-cpu:
+  integration-tests-tenstorrent:
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 60
     strategy:
