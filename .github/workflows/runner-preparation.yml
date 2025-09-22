@@ -87,6 +87,9 @@ jobs:
            env.n_hours_since_last_run == 'true')
         run: |
           echo "enable_integration=true" >> $GITHUB_ENV
+      - name: just run integration for now
+        run: |
+          echo "enable_integration=true" >> $GITHUB_ENV
       - name: Prepare runner matrix
         id: set-matrix
         if: env.enable_integration == 'true'
