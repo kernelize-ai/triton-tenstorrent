@@ -31,6 +31,7 @@ jobs:
         with:
           # Only fetch two commits to check the latest changed files.
           fetch-depth: 2
+          submodules: true
       - name: Detect if build deps (e.g. LLVM hash) changed
         id: detect-change
         if: github.event_name == 'push'

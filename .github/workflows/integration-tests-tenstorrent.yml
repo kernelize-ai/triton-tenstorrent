@@ -28,6 +28,8 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y ccache
       - name: Checkout NPU Plugin
         uses: actions/checkout@v5
+        with:
+          submodules: true
       - name: Fetch Triton upstream Commit Hash
         shell: bash
         run: |
