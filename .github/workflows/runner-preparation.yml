@@ -7,6 +7,8 @@ on:
         value: ${{ jobs.prepare.outputs.matrix-CPU }}
       matrix-MACOS:
         value: ${{ jobs.prepare.outputs.matrix-MACOS }}
+      matrix-TENSTORRENT:
+        value: ${{ jobs.prepare.outputs.matrix-TENSTORRENT }}
 
 jobs:
   prepare:
@@ -14,6 +16,7 @@ jobs:
     outputs:
       matrix-CPU: ${{ steps.set-matrix.outputs.matrix-CPU }}
       matrix-MACOS: ${{ steps.set-matrix.outputs.matrix-MACOS }}
+      matrix-TENSTORRENT: ${{ steps.set-matrix.outputs.matrix-TENSTORRENT }}
     steps:
       - name: Decide pre-submit integration test enablement
         # Always enable integration tests for pre-submit pull requests.
