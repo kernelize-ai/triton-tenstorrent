@@ -38,9 +38,10 @@ jobs:
         with:
           files: |
             triton.txt
+            third_party/tt-mlir
       - name: Detect if enough time has passed since last post-submit run
         id: detect-time
-        if: github.event_name == 'push' || true
+        if: github.event_name == 'push' && false
         run: |
           GITHUB_TOKEN=${{ secrets.GITHUB_TOKEN }}
           REPO_NAME="${{ github.repository }}"
