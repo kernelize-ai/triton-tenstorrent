@@ -26,6 +26,9 @@ jobs:
     steps:
       - name: Install ccache
         run: sudo apt-get update && sudo apt-get install -y ccache
+      - name: Install tt-mlir system deps
+        run: |
+          sudo apt install -y build-essential git vim python3 python3-venv python3-dev clang-19 libclang-cpp17-dev libgtest-dev python3-sphinx libnuma-dev numactl libhwloc-dev pkg-config
       - name: Checkout NPU Plugin
         uses: actions/checkout@v5
         with:
