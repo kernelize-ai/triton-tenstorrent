@@ -4,7 +4,7 @@ find_program(CLANGXX_BIN clang++ REQUIRED)
 set(TTMLIR_TOOLCHAIN_DIR "/opt/ttmlir-toolchain" CACHE PATH "Toolchain dir - don't change this without updating tt-mlir env script")
 set(TRITON_VENV_DIR      "${CMAKE_SOURCE_DIR}/.venv" CACHE PATH "Triton venv dir")
 set(LLVM_BUILD_DIR       "$ENV{HOME}/.triton/llvm/llvm-ubuntu-x86" CACHE PATH "LLVM build dir")
-set(TTMLIR_PYTHON_VERSION "python3.11" CACHE STRING "Python for tt-mlir")
+set(TTMLIR_PYTHON_VERSION "python3.12" CACHE STRING "Python for tt-mlir")
 
 file(MAKE_DIRECTORY "${TTMLIR_TOOLCHAIN_DIR}")
 
