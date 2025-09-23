@@ -7,7 +7,7 @@ add_subdirectory(third_party)
 
 add_subdirectory(npu)
 if(TRITON_BUILD_PYTHON_MODULE)
-  add_triton_plugin(TritonNPU ${CMAKE_CURRENT_SOURCE_DIR}/triton_npu.cc LINK_LIBS TritonCPUToLLVM)
+  add_triton_plugin(TritonNPU ${CMAKE_CURRENT_SOURCE_DIR}/triton_npu.cc LINK_LIBS TritonCPUToLLVM DEPENDS build_tt_mlir)
   target_link_libraries(TritonNPU PRIVATE Python3::Module pybind11::headers)
 endif()
 if(TRITON_BUILD_UT)
