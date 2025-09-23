@@ -104,7 +104,7 @@ jobs:
           elif [ x"${{ github.repository }}" == x"kernelize-ai/triton-tenstorrent" ]; then
             echo '::set-output name=matrix-CPU::""'
             echo '::set-output name=matrix-MACOS::""'
-            echo '::set-output name=matrix-TENSTORRENT::["ubuntu-latest"]'
+            echo '::set-output name=matrix-TENSTORRENT::["ubuntu-24.04-32c"]'
           else
             echo '::set-output name=matrix-CPU::["ubuntu-latest"]'
             echo '::set-output name=matrix-MACOS::[["macos-latest"]]'
