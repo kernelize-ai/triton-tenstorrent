@@ -87,7 +87,7 @@ jobs:
         with:
           # Note that changes to the tt-mlir build script may require invalidating this cache
           path: |
-            third-party/tt-mlir
+            ${{ github.workspace }}/third-party/tt-mlir
           key: ${{ runner.os }}-${{ runner.arch }}-tt-mlir-${{ steps.cache-key.outputs.ttmlir }}
       - name: Inspect cache directories
         run: |
@@ -97,8 +97,8 @@ jobs:
           mkdir -p ~/.ccache
           du -h -d 1 ~/.ccache
 
-          mkdir -p third_party/tt-mlir
-          du -h -d 1 third_party/tt-mlir
+          mkdir -p ${GITHUB_WORKSPACE}/third_party/tt-mlir
+          du -h -d 1 ${GITHUB_WORKSPACE}/third_party/tt-mlir
       - name: Update PATH
         run: |
           echo "$HOME/.local/bin" >> $GITHUB_PATH
