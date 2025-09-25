@@ -61,6 +61,9 @@ jobs:
             exit 1
           fi
 
+          # get the tt-mlir submodule hash
+          echo "ttmlir=$(git -C third_party/tt-mlir rev-parse HEAD | cut -c 1-8)" >> $GITHUB_OUTPUT
+
           # Process the files if they exist
           echo "triton=$(cat $triton_file | cut -c 1-8)" >> $GITHUB_OUTPUT
         shell: bash
@@ -79,6 +82,13 @@ jobs:
             ~/.triton/nvidia
             ~/.triton/json
           key: ${{ runner.os }}-${{ runner.arch }}-triton-${{ steps.cache-key.outputs.triton }}
+      - name: Cache tt-mlir
+        uses: actions/cache@v4
+        with:
+          # Note that changes to the tt-mlir build script may require invalidating this cache
+          path: |
+            third-party/tt-mlir
+          key: ${{ runner.os }}-${{ runner.arch }}-tt-mlir-${{ steps.cache-key.outputs.ttmlir }}
       - name: Inspect cache directories
         run: |
           mkdir -p ~/.triton
@@ -86,6 +96,9 @@ jobs:
 
           mkdir -p ~/.ccache
           du -h -d 1 ~/.ccache
+
+          mkdir -p third_party/tt-mlir
+          du -h -d 1 third_party/tt-mlir
       - name: Update PATH
         run: |
           echo "$HOME/.local/bin" >> $GITHUB_PATH
