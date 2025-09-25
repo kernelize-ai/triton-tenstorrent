@@ -16,6 +16,7 @@ add_custom_target(build_tt_mlir
           LLVM_BUILD_DIR=${LLVM_LIBRARY_DIR}/../
           TTMLIR_PYTHON_VERSION=${TTMLIR_PYTHON_VERSION}
           TTMLIR_TOOLCHAIN_DIR=${TTMLIR_TOOLCHAIN_DIR}
+          NO_TTMLIR_RUNTIME=ON
           bash ${CMAKE_CURRENT_SOURCE_DIR}/../scripts/build-tt-mlir.sh
   WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/../
   USES_TERMINAL
