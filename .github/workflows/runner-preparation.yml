@@ -7,6 +7,8 @@ on:
         value: ${{ jobs.prepare.outputs.matrix-CPU }}
       matrix-MACOS:
         value: ${{ jobs.prepare.outputs.matrix-MACOS }}
+      matrix-TENSTORRENT:
+        value: ${{ jobs.prepare.outputs.matrix-TENSTORRENT }}
 
 jobs:
   prepare:
@@ -14,6 +16,7 @@ jobs:
     outputs:
       matrix-CPU: ${{ steps.set-matrix.outputs.matrix-CPU }}
       matrix-MACOS: ${{ steps.set-matrix.outputs.matrix-MACOS }}
+      matrix-TENSTORRENT: ${{ steps.set-matrix.outputs.matrix-TENSTORRENT }}
     steps:
       - name: Decide pre-submit integration test enablement
         # Always enable integration tests for pre-submit pull requests.
@@ -31,6 +34,7 @@ jobs:
         with:
           # Only fetch two commits to check the latest changed files.
           fetch-depth: 2
+          submodules: true
       - name: Detect if build deps (e.g. LLVM hash) changed
         id: detect-change
         if: github.event_name == 'push'
@@ -38,9 +42,10 @@ jobs:
         with:
           files: |
             triton.txt
+            third_party/tt-mlir
       - name: Detect if enough time has passed since last post-submit run
         id: detect-time
-        if: github.event_name == 'push'
+        if: github.event_name == 'push' && false
         run: |
           GITHUB_TOKEN=${{ secrets.GITHUB_TOKEN }}
           REPO_NAME="${{ github.repository }}"
@@ -86,14 +91,21 @@ jobs:
            env.n_hours_since_last_run == 'true')
         run: |
           echo "enable_integration=true" >> $GITHUB_ENV
+      - name: just run integration for now
+        run: |
+          echo "enable_integration=true" >> $GITHUB_ENV
       - name: Prepare runner matrix
         id: set-matrix
         if: env.enable_integration == 'true'
         run: |
           if [ x"${{ github.repository }}" == x"kernelize-ai/triton-npu" ]; then
-            echo '::set-output name=matrix-CPU::["ubuntu-24.04-32c"]'
-            echo '::set-output name=matrix-MACOS::[["macos-latest"]]'
+            echo 'matrix-CPU=["ubuntu-24.04-32c"]' >> $GITHUB_OUTPUT
+            echo 'matrix-MACOS=["macos-latest"]' >> $GITHUB_OUTPUT
+          elif [ x"${{ github.repository }}" == x"kernelize-ai/triton-tenstorrent" ]; then
+            echo 'matrix-CPU=' >> $GITHUB_OUTPUT
+            echo 'matrix-MACOS=' >> $GITHUB_OUTPUT
+            echo 'matrix-TENSTORRENT=["ubuntu-24.04-32c"]' >> $GITHUB_OUTPUT
           else
-            echo '::set-output name=matrix-CPU::["ubuntu-latest"]'
-            echo '::set-output name=matrix-MACOS::[["macos-latest"]]'
+            echo 'matrix-CPU=["ubuntu-latest"]' >> $GITHUB_OUTPUT
+            echo 'matrix-MACOS=["macos-latest"]' >> $GITHUB_OUTPUT
           fi
