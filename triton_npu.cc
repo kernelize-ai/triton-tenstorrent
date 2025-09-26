@@ -1,9 +1,14 @@
 #include "npu/include/Dialect/TritonCPU/IR/Dialect.h"
 #include "npu/include/TritonCPUToLLVM/Passes.h"
+#include "npu/include/TritonNPUToTenstorrent/Passes.h"
 
 #include "mlir/Pass/PassManager.h"
 #include "llvm/IR/Module.h"
 #include "llvm/TargetParser/Host.h"
+
+// TODO: conditionally include based on if we're building with tenstorrent
+// support
+#include "ttmlir/Dialect/TTKernel/IR/TTKernel.h"
 
 #include <pybind11/pybind11.h>
 
@@ -36,17 +41,30 @@ void init_triton_npu_passes_ttgpuir(py::module &&m) {
   });
 }
 
+void init_triton_npu_passes_tenstorrent(py::module &&m) {
+  m.def("add_to_kernel_dialect", [](mlir::PassManager &pm) {
+    pm.addPass(mlir::triton::npu::createConvertTritonNPUToTenstorrentPass());
+  });
+}
+
 void init_triton_npu(py::module &&m) {
   auto passes = m.def_submodule("passes");
   init_triton_npu_passes_ttgpuir(passes.def_submodule("ttnpuir"));
+  init_triton_npu_passes_tenstorrent(passes.def_submodule("tenstorrent"));
 
-  m.def("load_dialects", [](mlir::MLIRContext &context) {
-    mlir::DialectRegistry registry;
-    registry.insert<mlir::triton::cpu::TritonCPUDialect>();
+  m.def("load_dialects",
+        [](mlir::MLIRContext &context, const std::string &device) {
+          mlir::DialectRegistry registry;
+          registry.insert<mlir::triton::cpu::TritonCPUDialect>();
 
-    context.appendDialectRegistry(registry);
-    context.loadAllAvailableDialects();
-  });
+          if (device == "Tenstorrent") {
+            // register tenstorrent dialects
+            registry.insert<mlir::tt::ttkernel::TTKernelDialect>();
+          }
+
+          context.appendDialectRegistry(registry);
+          context.loadAllAvailableDialects();
+        });
 
   m.def("get_default_target_triple",
         []() { return getDefaultTargerOrProcessTriple(); });
