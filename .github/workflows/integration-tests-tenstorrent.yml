@@ -122,7 +122,7 @@ jobs:
           ccache --zero-stats
           source ~/.venv/bin/activate
 
-          TRITON_PLUGIN_DIRS=${GITHUB_WORKSPACE} make dev-install
+          TRITON_PLUGIN_DIRS=${GITHUB_WORKSPACE} TENSTORRENT_MLIR=${GITHUB_WORKSPACE}/third_party/tt-mlir make dev-install
       - name: CCache Stats
         run: ccache --print-stats
       - name: Run lit tests
