@@ -30,17 +30,17 @@ include_directories(
 
 add_subdirectory(npu)
 if(TRITON_BUILD_PYTHON_MODULE)
-  add_triton_plugin(TritonNPU ${CMAKE_CURRENT_SOURCE_DIR}/triton_npu.cc 
-    LINK_LIBS 
+  add_triton_plugin(TritonNPU ${CMAKE_CURRENT_SOURCE_DIR}/triton_npu.cc
+    LINK_LIBS
     TritonCPUToLLVM
     TritonNPUToTenstorrent
     ${TTMLIR_LIBS}
-    
-    DEPENDS 
+
+    DEPENDS
     build_tt_mlir)
   target_link_libraries(TritonNPU PRIVATE Python3::Module pybind11::headers)
   #target_link_libraries(TritonNPU PRIVATE MLIRQuantDialect Python3::Module pybind11::headers)
-  
+
   target_include_directories(TritonNPU PRIVATE
       "${TENSTORRENT_MLIR}/include"
       "${TENSTORRENT_MLIR}/build/include"

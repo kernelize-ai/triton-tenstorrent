@@ -8,7 +8,7 @@
 
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 
-#include "../TritonNPUToLLVM/TargetInfo.h"
+#include "../TritonCPUToLLVM/TargetInfo.h"
 #include "PatternTritonNPUOpToTenstorrent.h"
 #include "TypeConverter.h"
 
