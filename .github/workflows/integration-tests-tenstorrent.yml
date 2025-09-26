@@ -88,6 +88,7 @@ jobs:
           # Note that changes to the tt-mlir build script may require invalidating this cache
           path: |
             ${{ github.workspace }}/third_party/tt-mlir/build
+            ${{ github.workspace }}/third_party/tt-mlir/env/build/
             /opt/ttmlir-toolchain
           key: ${{ runner.os }}-${{ runner.arch }}-tt-mlir-${{ steps.cache-key.outputs.ttmlir }}
       - name: Inspect cache directories
