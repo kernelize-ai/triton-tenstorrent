@@ -127,8 +127,8 @@ public:
     RewriterBase::InsertionGuard guard(rewriter);
     rewriter.setInsertionPointToStart(moduleOp.getBody());
 
-    auto func =
-        rewriter.create<LLVM::LLVMFuncOp>(moduleOp.getLoc(), kName, funcTy);
+    auto func = rewriter.create<LLVM::LLVMFuncOp>(
+        moduleOp.getLoc(), kName, funcTy, LLVM::Linkage::Internal);
     auto setBarrierPtrAttrs = [&](unsigned idx) {
       func.setArgAttr(idx, "llvm.align",
                       rewriter.getIntegerAttr(rewriter.getIntegerType(64), 64));
@@ -198,9 +198,6 @@ public:
     // after spin block
     {
       rewriter.setInsertionPointToEnd(afterSpinBlock);
-      auto acquire =
-          LLVM::AtomicOrderingAttr::get(context, LLVM::AtomicOrdering::acquire);
-      rewriter.create<LLVM::FenceOp>(loc, LLVM::AtomicOrdering::acquire);
       rewriter.create<cf::BranchOp>(loc, exitBlock);
     }
 
