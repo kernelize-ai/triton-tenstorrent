@@ -1,4 +1,5 @@
 add_triton_library(TritonNPUToTenstorrent
+    ControlFlowOpToFuncOp.cpp
     FuncOpToMLIRFunc.cpp
     TritonNPUToTenstorrent.cpp
 

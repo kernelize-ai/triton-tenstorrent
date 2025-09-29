@@ -73,16 +73,16 @@ struct ConvertTritonNPUToTenstorrent
     if (failed(
             applyPartialConversion(mod, funcTarget, std::move(funcPatterns))))
       return signalPassFailure();
-#if 0
+
     ModuleAxisInfoAnalysis axisInfoAnalysis(mod);
     RewritePatternSet patterns(context);
 
-    // TODO: rest :)
+    mlir::triton::npu::tt::populateFuncOpConversionPattern(
+        typeConverter, patterns, targetInfo, npu::tt::patternBenefitDefault);
 
     TritonTenstorrentConversionTarget convTarget(*context);
     if (failed(applyPartialConversion(mod, convTarget, std::move(patterns))))
       return signalPassFailure();
-#endif
   }
 };
 
