@@ -25,18 +25,40 @@ struct TritonFuncOpConversion : public OpConversionPattern<triton::FuncOp> {
     Location loc = funcOp.getLoc();
     MLIRContext *ctx = funcOp.getContext();
 
+    Block *entry = &funcOp.front();
+    rewriter.setInsertionPointToStart(entry);
+
+    // ttKernel lowering expects a function with no arguments and no return in
+    // the signature. Arguments will retrieved with get_compile_time_arg_val op.
+    // move function parameters into attributes and change usage of the
+    // arguments to custom ops
+    SmallVector<Value> newArgVals(entry->getNumArguments());
+    for (unsigned i = 0; i < entry->getNumArguments(); ++i) {
+      Type argTy = entry->getArgument(i).getType();
+
+      auto val = rewriter.create<npu::tt::KernelArgOp>(
+          loc, argTy, rewriter.getIndexAttr(i));
+
+      // TODO: val or getResult?
+      newArgVals[i] = val.getResult();
+    }
+
+    // Replace all uses then erase the block args.
+    for (unsigned i = 0, e = entry->getNumArguments(); i < e; ++i)
+      entry->getArgument(i).replaceAllUsesWith(newArgVals[i]);
+    if (entry->getNumArguments() != 0)
+      entry->eraseArguments(0, entry->getNumArguments());
+
+    OpBuilder::InsertionGuard g(rewriter);
+    // ModuleOp mod = funcOp->getParentOfType<ModuleOp>();
+    rewriter.setInsertionPointAfter(funcOp);
     // create a new funcop void -> void and copy over (or re-use) regions/blocks
     mlir::FunctionType tritonTy = funcOp.getFunctionType();
     assert(tritonTy.getResults().empty() &&
            "expected triton kernel to return void");
-    auto inputTypes = tritonTy.getInputs();
-    llvm::errs() << "tritonTy = " << tritonTy << "\n";
 
-    // move function parameters into attributes and change usage of the
-    // arguments to custom ops
-
-    // ttKernel lowering expects a function with no arguments and no return in
-    // the signature. Arguments will retrieved with get_compile_time_arg_val op.
+    // now that the entry block is empty, create the new function and copy over
+    // the body
     mlir::FunctionType newTy = mlir::FunctionType::get(
         ctx, /*inputs=*/TypeRange{}, /*results=*/TypeRange{});
 
@@ -48,35 +70,11 @@ struct TritonFuncOpConversion : public OpConversionPattern<triton::FuncOp> {
       newFunc->setAttr(SymbolTable::getVisibilityAttrName(), vis);
 
     // TODO: set tenstorrent specific function attributes
-
     // Skip copying function attributes from the old function for now.
 
+    // copy the body
     rewriter.inlineRegionBefore(funcOp.getBody(), newFunc.getBody(),
                                 newFunc.end());
-    // zero the block arguments and replace their uses with ttKernel ops
-    Block &entry = newFunc.front();
-
-    OpBuilder::InsertionGuard g(rewriter);
-    rewriter.setInsertionPointToStart(&entry);
-
-    SmallVector<Value> newArgVals(entry.getNumArguments());
-    for (unsigned i = 0, e = entry.getNumArguments(); i < e; ++i) {
-      Type argTy = entry.getArgument(i).getType();
-
-      auto val = rewriter.create<npu::tt::KernelArgOp>(
-          loc, argTy, rewriter.getIndexAttr(i));
-
-      // TODO: val or getResult?
-      newArgVals[i] = val;
-    }
-
-    // Replace all uses of the block args with the newly created ops.
-    for (unsigned i = 0, e = entry.getNumArguments(); i < e; ++i)
-      entry.getArgument(i).replaceAllUsesWith(newArgVals[i]);
-
-    // Now remove the block arguments (backwards to keep indices stable).
-    for (int i = static_cast<int>(entry.getNumArguments()) - 1; i >= 0; --i)
-      entry.eraseArgument(i);
 
     rewriter.eraseOp(funcOp); // old symbol is gone; newFunc replaces it
     return success();
