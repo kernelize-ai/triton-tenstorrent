@@ -33,6 +33,7 @@ public:
       : ConversionTarget(ctx) {
     addLegalDialect<func::FuncDialect>();
     addLegalOp<mlir::UnrealizedConversionCastOp>();
+    addLegalOp<mlir::triton::npu::tt::KernelArgOp>();
   }
 };
 
@@ -41,6 +42,7 @@ public:
   explicit TritonTenstorrentConversionTarget(MLIRContext &ctx)
       : ConversionTarget(ctx) {
     addIllegalDialect<triton::TritonDialect>();
+    addLegalOp<mlir::triton::npu::tt::KernelArgOp>();
   }
 };
 
@@ -71,7 +73,7 @@ struct ConvertTritonNPUToTenstorrent
     if (failed(
             applyPartialConversion(mod, funcTarget, std::move(funcPatterns))))
       return signalPassFailure();
-
+#if 0
     ModuleAxisInfoAnalysis axisInfoAnalysis(mod);
     RewritePatternSet patterns(context);
 
@@ -80,6 +82,7 @@ struct ConvertTritonNPUToTenstorrent
     TritonTenstorrentConversionTarget convTarget(*context);
     if (failed(applyPartialConversion(mod, convTarget, std::move(patterns))))
       return signalPassFailure();
+#endif
   }
 };
 
