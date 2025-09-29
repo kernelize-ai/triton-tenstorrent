@@ -34,6 +34,7 @@ if(TRITON_BUILD_PYTHON_MODULE)
     LINK_LIBS
     TritonCPUToLLVM
     TritonNPUToTenstorrent
+    MLIRQuantDialect
     ${TTMLIR_LIBS}
 
     DEPENDS
