@@ -41,6 +41,8 @@ struct TritonTenstorrentConversionTarget : public ConversionTarget {
 public:
   explicit TritonTenstorrentConversionTarget(MLIRContext &ctx)
       : ConversionTarget(ctx) {
+    addLegalDialect<arith::ArithDialect>();
+    addLegalDialect<func::FuncDialect>();
     addIllegalDialect<triton::TritonDialect>();
     addLegalOp<mlir::triton::npu::tt::KernelArgOp>();
   }
@@ -74,10 +76,14 @@ struct ConvertTritonNPUToTenstorrent
             applyPartialConversion(mod, funcTarget, std::move(funcPatterns))))
       return signalPassFailure();
 
+    llvm::errs() << "Lowering rest of function to tenstorrent...\n";
+
     ModuleAxisInfoAnalysis axisInfoAnalysis(mod);
     RewritePatternSet patterns(context);
 
-    mlir::triton::npu::tt::populateFuncOpConversionPattern(
+    mlir::triton::npu::tt::populateControlFlowOpToFuncOpPatterns(
+        typeConverter, patterns, targetInfo, npu::tt::patternBenefitDefault);
+    mlir::triton::npu::tt::populateSPMDOpToTenstorrentPattern(
         typeConverter, patterns, targetInfo, npu::tt::patternBenefitDefault);
 
     TritonTenstorrentConversionTarget convTarget(*context);

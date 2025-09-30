@@ -19,6 +19,11 @@ void populateControlFlowOpToFuncOpPatterns(TypeConverter &typeConverter,
                                            const TargetInfoBase &targetInfo,
                                            PatternBenefit benefit);
 
+void populateSPMDOpToTenstorrentPattern(TypeConverter &typeConverter,
+                                        RewritePatternSet &patterns,
+                                        const TargetInfoBase &targetInfo,
+                                        PatternBenefit benefit);
+
 } // namespace npu::tt
 } // namespace triton
 } // namespace mlir
