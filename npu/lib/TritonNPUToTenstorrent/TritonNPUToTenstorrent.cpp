@@ -24,6 +24,7 @@ namespace npu {
 } // namespace mlir
 
 using namespace mlir;
+using namespace mlir::triton;
 
 namespace {
 
@@ -82,6 +83,8 @@ struct ConvertTritonNPUToTenstorrent
     RewritePatternSet patterns(context);
 
     mlir::triton::npu::tt::populateControlFlowOpToFuncOpPatterns(
+        typeConverter, patterns, targetInfo, npu::tt::patternBenefitDefault);
+    mlir::triton::npu::tt::populateMakeRangeOpToTenstorrentPattern(
         typeConverter, patterns, targetInfo, npu::tt::patternBenefitDefault);
     mlir::triton::npu::tt::populateSPMDOpToTenstorrentPattern(
         typeConverter, patterns, targetInfo, npu::tt::patternBenefitDefault);

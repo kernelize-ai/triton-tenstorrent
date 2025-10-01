@@ -14,6 +14,11 @@ void populateFuncOpConversionPattern(TypeConverter &typeConverter,
                                      const TargetInfoBase &targetInfo,
                                      PatternBenefit benefit);
 
+void populateMakeRangeOpToTenstorrentPattern(TypeConverter &typeConverter,
+                                             RewritePatternSet &patterns,
+                                             const TargetInfoBase &targetInfo,
+                                             PatternBenefit benefit);
+
 void populateControlFlowOpToFuncOpPatterns(TypeConverter &typeConverter,
                                            RewritePatternSet &patterns,
                                            const TargetInfoBase &targetInfo,
