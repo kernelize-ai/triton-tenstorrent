@@ -5,6 +5,7 @@ add_triton_library(TritonNPUToTenstorrent
     SPMDOpToTenstorrent.cpp
     TritonNPUToTenstorrent.cpp
     TypeConverter.cpp
+    ViewOpToTenstorrent.cpp
 
     DEPENDS
     TritonNPUTenstorrentConversionPassIncGen
