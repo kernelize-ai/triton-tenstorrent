@@ -42,14 +42,17 @@ struct TritonTenstorrentConversionTarget : public ConversionTarget {
 public:
   explicit TritonTenstorrentConversionTarget(MLIRContext &ctx)
       : ConversionTarget(ctx) {
-    addLegalDialect<arith::ArithDialect>();
+    // addLegalDialect<arith::ArithDialect>();
     addLegalDialect<func::FuncDialect>();
-    addLegalDialect<tensor::TensorDialect>();
-    addIllegalDialect<triton::TritonDialect>();
-    addLegalOp<mlir::triton::npu::tt::KernelArgOp>();
+    addLegalOp<arith::ConstantOp>();
+    addLegalDialect<tt::ttkernel::TTKernelDialect>();
+    // addLegalDialect<tensor::TensorDialect>();
+    // addIllegalDialect<triton::TritonDialect>();
+    // addIllegalDialect<triton::gpu::TritonGPUDialect>();
+    // addLegalOp<mlir::triton::npu::tt::KernelArgOp>();
 
     // tmp
-    addLegalOp<triton::AddPtrOp>();
+    // addLegalOp<triton::AddPtrOp>();
   }
 };
 
@@ -89,6 +92,8 @@ struct ConvertTritonNPUToTenstorrent
     mlir::triton::npu::tt::populateControlFlowOpToFuncOpPatterns(
         typeConverter, patterns, targetInfo, npu::tt::patternBenefitDefault);
     mlir::triton::npu::tt::populateElementwiseOpConversionPattern(
+        typeConverter, patterns, targetInfo, npu::tt::patternBenefitDefault);
+    mlir::triton::npu::tt::populateLoadStoreOpConversionPattern(
         typeConverter, patterns, targetInfo, npu::tt::patternBenefitDefault);
     mlir::triton::npu::tt::populateMakeRangeOpToTenstorrentPattern(
         typeConverter, patterns, targetInfo, npu::tt::patternBenefitDefault);

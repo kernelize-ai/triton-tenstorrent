@@ -178,6 +178,7 @@ class NPUBackend(BaseBackend):
         pm.enable_debug()
 
         npu.passes.tenstorrent.add_to_kernel_dialect(pm)
+        passes.common.add_canonicalizer(pm)
         pm.run(mod, "make_tenstorrentir")
         return mod
 

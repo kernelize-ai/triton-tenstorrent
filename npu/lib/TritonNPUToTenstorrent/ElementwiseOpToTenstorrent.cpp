@@ -5,16 +5,26 @@ namespace {
 using namespace mlir;
 using namespace mlir::triton;
 
-struct AddPtrOpConversion : public OpConversionPattern<AddPtrOp> {
-  explicit AddPtrOpConversion(TypeConverter &typeConverter,
-                              MLIRContext *context, PatternBenefit benefit)
+struct AddOpConversion : public OpConversionPattern<arith::AddFOp> {
+  explicit AddOpConversion(TypeConverter &typeConverter, MLIRContext *context,
+                           PatternBenefit benefit)
       : OpConversionPattern(typeConverter, context, benefit) {}
 
   LogicalResult
-  matchAndRewrite(AddPtrOp op, OpAdaptor adaptor,
+  matchAndRewrite(arith::AddFOp op, OpAdaptor adaptor,
                   ConversionPatternRewriter &rewriter) const override {
-    // TODO: ignore for now, maybe we can fold this into the load lowering?
-    return failure();
+    // convert arith addf to ttkernel.add_tiles
+    llvm::errs() << "Lowering AddFOp: " << op << "\n";
+
+    // collect inputs
+    Value lhs = adaptor.getOperands()[0];
+    Value rhs = adaptor.getOperands()[1];
+
+    llvm::errs() << "lhs: " << lhs << "\n";
+    llvm::errs() << "rhs: " << rhs << "\n";
+
+    assert(false);
+    return success();
   }
 };
 
@@ -23,6 +33,5 @@ struct AddPtrOpConversion : public OpConversionPattern<AddPtrOp> {
 void mlir::triton::npu::tt::populateElementwiseOpConversionPattern(
     TypeConverter &typeConverter, RewritePatternSet &patterns,
     const TargetInfoBase &targetInfo, PatternBenefit benefit) {
-  patterns.add<AddPtrOpConversion>(typeConverter, patterns.getContext(),
-                                   benefit);
+  patterns.add<AddOpConversion>(typeConverter, patterns.getContext(), benefit);
 }
