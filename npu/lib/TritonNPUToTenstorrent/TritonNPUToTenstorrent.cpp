@@ -47,6 +47,9 @@ public:
     addLegalDialect<tensor::TensorDialect>();
     addIllegalDialect<triton::TritonDialect>();
     addLegalOp<mlir::triton::npu::tt::KernelArgOp>();
+
+    // tmp
+    addLegalOp<triton::AddPtrOp>();
   }
 };
 
@@ -84,6 +87,8 @@ struct ConvertTritonNPUToTenstorrent
     RewritePatternSet patterns(context);
 
     mlir::triton::npu::tt::populateControlFlowOpToFuncOpPatterns(
+        typeConverter, patterns, targetInfo, npu::tt::patternBenefitDefault);
+    mlir::triton::npu::tt::populateElementwiseOpConversionPattern(
         typeConverter, patterns, targetInfo, npu::tt::patternBenefitDefault);
     mlir::triton::npu::tt::populateMakeRangeOpToTenstorrentPattern(
         typeConverter, patterns, targetInfo, npu::tt::patternBenefitDefault);

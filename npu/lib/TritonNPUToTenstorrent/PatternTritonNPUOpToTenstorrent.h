@@ -9,6 +9,11 @@ namespace npu::tt {
 
 constexpr int patternBenefitDefault = 1;
 
+void populateElementwiseOpConversionPattern(TypeConverter &typeConverter,
+                                            RewritePatternSet &patterns,
+                                            const TargetInfoBase &targetInfo,
+                                            PatternBenefit benefit);
+
 void populateFuncOpConversionPattern(TypeConverter &typeConverter,
                                      RewritePatternSet &patterns,
                                      const TargetInfoBase &targetInfo,
