@@ -1,5 +1,7 @@
 #include "PatternTritonNPUOpToTenstorrent.h"
 
+#include "mlir/Dialect/Tensor/IR/Tensor.h"
+
 namespace {
 
 using namespace mlir;
@@ -13,8 +15,11 @@ struct SplatOpConversion : public OpConversionPattern<SplatOp> {
   LogicalResult
   matchAndRewrite(SplatOp op, OpAdaptor adaptor,
                   ConversionPatternRewriter &rewriter) const override {
-    // convert to tensor splatop?
-    return failure();
+    auto tensorType = cast<RankedTensorType>(op.getResult().getType());
+    rewriter.replaceOpWithNewOp<tensor::SplatOp>(op, adaptor.getSrc(),
+                                                 tensorType.getShape());
+
+    return success();
   }
 };
 

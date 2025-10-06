@@ -44,6 +44,7 @@ public:
       : ConversionTarget(ctx) {
     addLegalDialect<arith::ArithDialect>();
     addLegalDialect<func::FuncDialect>();
+    addLegalDialect<tensor::TensorDialect>();
     addIllegalDialect<triton::TritonDialect>();
     addLegalOp<mlir::triton::npu::tt::KernelArgOp>();
   }
@@ -87,6 +88,8 @@ struct ConvertTritonNPUToTenstorrent
     mlir::triton::npu::tt::populateMakeRangeOpToTenstorrentPattern(
         typeConverter, patterns, targetInfo, npu::tt::patternBenefitDefault);
     mlir::triton::npu::tt::populateSPMDOpToTenstorrentPattern(
+        typeConverter, patterns, targetInfo, npu::tt::patternBenefitDefault);
+    mlir::triton::npu::tt::populateViewOpToTenstorrentPatterns(
         typeConverter, patterns, targetInfo, npu::tt::patternBenefitDefault);
 
     TritonTenstorrentConversionTarget convTarget(*context);
