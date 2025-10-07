@@ -8,9 +8,9 @@
 
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 
-#include "../TritonCPUToLLVM/TargetInfo.h"
 #include "PatternTritonNPUOpToTenstorrent.h"
 #include "TypeConverter.h"
+#include "cpu/lib/TritonCPUToLLVM/TargetInfo.h"
 
 #include "ttmlir/Dialect/TTKernel/IR/TTKernel.h"
 
@@ -58,7 +58,7 @@ struct ConvertTritonNPUToTenstorrent
     ModuleOp mod = getOperation();
 
     // Set up the type converter and patterns
-    mlir::triton::npu::TargetInfo
+    mlir::triton::cpu::TargetInfo
         targetInfo; // TODO: tenstorrent specific target info
     TritonNPUToTenstorrentTypeConverter typeConverter(context);
 

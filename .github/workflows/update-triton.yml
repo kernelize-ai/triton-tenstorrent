@@ -10,11 +10,11 @@ on:
 
 jobs:
   update:
-    if: github.repository == 'kernelize-ai/triton-npu'
+    if: github.repository == 'kernelize-ai/triton-cpu'
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout NPU Plugin
+      - name: Checkout CPU Plugin
         uses: actions/checkout@v5
       - name: Fetch Triton upstream Commit Hash
         shell: bash
