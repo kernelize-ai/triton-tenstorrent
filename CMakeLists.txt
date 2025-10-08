@@ -2,7 +2,11 @@ include_directories(${CMAKE_CURRENT_SOURCE_DIR}/)
 include_directories(${CMAKE_CURRENT_BINARY_DIR}/)
 
 # Tenstorrent includes
-set(TENSTORRENT_MLIR $ENV{TENSTORRENT_MLIR}) # TODO
+if(DEFINED ENV{TENSTORRENT_MLIR})
+  set(TENSTORRENT_MLIR $ENV{TENSTORRENT_MLIR})
+else()
+  set(TENSTORRENT_MLIR "${CMAKE_CURRENT_SOURCE_DIR}/third_party/tt-mlir")
+endif()
 set(TTMLIR_LIB_DIR "${TENSTORRENT_MLIR}/build/lib")
 
 set(TTMLIR_LIB_NAMES
