@@ -28,7 +28,19 @@ set(LLVM_SYM_NAME "${_llvm_dir}" CACHE PATH "LLVM build dir" FORCE)
 
 set(LLVM_BUILD_DIR       "$ENV{HOME}/.triton/llvm/${LLVM_SYM_NAME}" CACHE PATH "LLVM build dir")
 
-set(TTMLIR_PYTHON_VERSION "python3.12" CACHE STRING "Python for tt-mlir")
+execute_process(
+      COMMAND "${Python3_EXECUTABLE}" -c "import sys; print(f'python{sys.version_info.major}.{sys.version_info.minor}')"
+
+      WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+      OUTPUT_VARIABLE _python_vers
+      ERROR_VARIABLE  _python_vers_err
+      RESULT_VARIABLE _python_vers_rc
+      OUTPUT_STRIP_TRAILING_WHITESPACE
+)
+if(NOT _python_vers_rc EQUAL 0 OR _python_vers STREQUAL "")
+      message(FATAL_ERROR "Failed to detect Python version:\n${_python_vers_err}")
+endif()
+set(TTMLIR_PYTHON_VERSION "${_python_vers}" CACHE STRING "Python for tt-mlir")
 
 file(MAKE_DIRECTORY "${TTMLIR_TOOLCHAIN_DIR}")
 
