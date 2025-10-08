@@ -7,7 +7,27 @@ if (DEFINED ENV{TRITON_VENV_DIR} AND NOT "$ENV{TRITON_VENV_DIR}" STREQUAL "")
 else()
   set(TRITON_VENV_DIR      "$ENV{HOME}/.venv")
 endif()
-set(LLVM_BUILD_DIR       "$ENV{HOME}/.triton/llvm/llvm-ubuntu-x86" CACHE PATH "LLVM build dir")
+
+# detect environment specific variables using python
+find_package(Python3 COMPONENTS Interpreter REQUIRED)
+execute_process(
+      COMMAND "${Python3_EXECUTABLE}" -c
+       "import sys; sys.path.insert(0, '${CMAKE_CURRENT_SOURCE_DIR}'); \
+        from get_llvm_path import get_llvm_path; print(get_llvm_path())"
+
+      WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+      OUTPUT_VARIABLE _llvm_dir
+      ERROR_VARIABLE  _llvm_err
+      RESULT_VARIABLE _llvm_rc
+      OUTPUT_STRIP_TRAILING_WHITESPACE
+)
+if(NOT _llvm_rc EQUAL 0 OR _llvm_dir STREQUAL "")
+  message(FATAL_ERROR "Failed to detect LLVM dir via Python:\n${_llvm_err}")
+endif()
+set(LLVM_SYM_NAME "${_llvm_dir}" CACHE PATH "LLVM build dir" FORCE)
+
+set(LLVM_BUILD_DIR       "$ENV{HOME}/.triton/llvm/${LLVM_SYM_NAME}" CACHE PATH "LLVM build dir")
+
 set(TTMLIR_PYTHON_VERSION "python3.12" CACHE STRING "Python for tt-mlir")
 
 file(MAKE_DIRECTORY "${TTMLIR_TOOLCHAIN_DIR}")
