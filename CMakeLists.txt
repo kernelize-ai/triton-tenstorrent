@@ -11,15 +11,21 @@ set(TTMLIR_LIB_NAMES
     MLIRTTMetalDialect
 )
 
-# Build full paths to each dylib
+# Create imported libraries for each TT-MLIR dep
 set(TTMLIR_LIBS)
+set(TTMLIR_LIB_PATHS)
 foreach(lib ${TTMLIR_LIB_NAMES})
-    list(APPEND TTMLIR_LIBS
-        "${TTMLIR_LIB_DIR}/${CMAKE_SHARED_LIBRARY_PREFIX}${lib}.a"
-    )
+  set(LIB_PATH "${TTMLIR_LIB_DIR}/${CMAKE_SHARED_LIBRARY_PREFIX}${lib}.a")
+  list(APPEND TTMLIR_LIB_PATHS ${LIB_PATH})
+  add_library(${lib} SHARED IMPORTED)
+  set_target_properties(${lib} PROPERTIES
+    IMPORTED_LOCATION "${LIB_PATH}"
+  )
+  add_dependencies(${lib} build_tt_mlir)
+  list(APPEND TTMLIR_LIBS
+    ${lib}
+  )
 endforeach()
-
-set(triton_npu_SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR})
 
 add_subdirectory(third_party)
 
@@ -28,6 +34,11 @@ include_directories(
     "${TENSTORRENT_MLIR}/build/include"
 )
 
+
+# Lit test support
+set(triton_npu_SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR})
+
+# Triton plugin
 add_subdirectory(npu)
 if(TRITON_BUILD_PYTHON_MODULE)
   add_triton_plugin(TritonNPU ${CMAKE_CURRENT_SOURCE_DIR}/triton_npu.cc
