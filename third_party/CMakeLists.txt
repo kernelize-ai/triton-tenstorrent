@@ -22,6 +22,7 @@ add_custom_target(build_tt_mlir
           TTMLIR_TOOLCHAIN_DIR=${TTMLIR_TOOLCHAIN_DIR}
           NO_TTMLIR_RUNTIME=ON
           bash ${CMAKE_CURRENT_SOURCE_DIR}/../scripts/build-tt-mlir.sh
+  BYPRODUCTS ${TTMLIR_LIB_PATHS}
   WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/../
   USES_TERMINAL
   COMMENT "Building tt-mlir via scripts/build-tt-mlir.sh"
