@@ -1,7 +1,7 @@
 #ifndef TRITON_CONVERSION_TRITONNPU_TO_TENSTORRENT_PATTERNS_TRITONNPU_OP_TO_TENSTORRENT_H
 #define TRITON_CONVERSION_TRITONNPU_TO_TENSTORRENT_PATTERNS_TRITONNPU_OP_TO_TENSTORRENT_H
 
-#include "../TritonCPUToLLVM/TargetInfo.h" // TODO
+#include "triton/Conversion/TritonGPUToLLVM/TargetInfoBase.h"
 
 namespace mlir {
 namespace triton {

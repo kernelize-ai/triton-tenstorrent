@@ -17,6 +17,7 @@ TRITON_HOME="${TRITON_HOME:-"${REPO_ROOT}/triton"}"
 TRITON_VENV_DIR="${TRITON_VENV_DIR:-"$REPO_ROOT/.venv"}"
 # override TTMLIR venv with triton venv
 export TTMLIR_VENV_DIR="$TRITON_VENV_DIR"
+echo "Using tt-mlir venv dir: $TTMLIR_VENV_DIR"
 
 echo "Changing to tt-mlir directory"
 cd "$REPO_ROOT/third_party/tt-mlir" || exit 1
@@ -64,7 +65,14 @@ else
     # Hack: create the lib64 directory to avoid cmake error about missing dir on MacOS
     mkdir -p "$TTMLIR_TOOLCHAIN_DIR/lib64"
 
-    cmake -G Ninja -B build -DMLIR_DIR="$MLIR_DIR" -DLLVM_DIR="$LLVM_DIR" \
-    -DTTMLIR_ENABLE_BINDINGS_PYTHON=OFF -DTTMLIR_ENABLE_RUNTIME=OFF -DTT_RUNTIME_ENABLE_TTNN=OFF -DTT_RUNTIME_ENABLE_TTMETAL=OFF -DTTMLIR_ENABLE_RUNTIME_TESTS=OFF
+    cmake -G Ninja -B build \
+        -DMLIR_DIR="$MLIR_DIR" \
+        -DLLVM_DIR="$LLVM_DIR" \
+        -DTTMLIR_ENABLE_BINDINGS_PYTHON=OFF \
+        -DTTMLIR_ENABLE_RUNTIME=OFF \
+        -DTT_RUNTIME_ENABLE_TTNN=OFF \
+        -DTT_RUNTIME_ENABLE_TTMETAL=OFF \
+        -DTTMLIR_ENABLE_RUNTIME_TESTS=OFF \
+        -Dnanobind_DIR="$(python -c 'import os, nanobind; print(os.path.join(os.path.dirname(nanobind.__file__), "cmake"))')"
     cmake --build build
 fi

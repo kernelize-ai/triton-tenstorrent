@@ -130,7 +130,7 @@ jobs:
         run: |
           make test-lit
           export BUILD_DIR="$(cd python; python -c 'from build_helpers import get_cmake_dir; print(get_cmake_dir())')"
-          ninja -C ${BUILD_DIR} check-triton-npu-lit-tests
+          ninja -C ${BUILD_DIR} check-triton-cpu-lit-tests
       - name: Run python tests on CPU
         if: false
         working-directory: ./triton

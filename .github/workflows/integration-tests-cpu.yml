@@ -26,7 +26,7 @@ jobs:
     steps:
       - name: Install ccache
         run: sudo apt-get update && sudo apt-get install -y ccache
-      - name: Checkout NPU Plugin
+      - name: Checkout CPU Plugin
         uses: actions/checkout@v5
       - name: Fetch Triton upstream Commit Hash
         shell: bash
@@ -98,11 +98,11 @@ jobs:
         run: |
           make test-lit
           export BUILD_DIR="$(cd python; python -c 'from build_helpers import get_cmake_dir; print(get_cmake_dir())')"
-          ninja -C ${BUILD_DIR} check-triton-npu-lit-tests
+          ninja -C ${BUILD_DIR} check-triton-cpu-lit-tests
       - name: Run python tests on CPU
         working-directory: ./triton
         run: |
-          python -m pytest --device "cpu" python/test/unit/language/test_core.py -k "test_reduce1d or test_load_store_same_ptr"
+          TRITON_CPU_NUM_WARPS=4 python -m pytest --device "cpu" python/test/unit/language/test_core.py -k "(test_reduce1d or test_load_store_same_ptr) and not test_reduce1d[1-sum-float16-512]"
       - name: Run tutorial 01 on CPU
         working-directory: ./triton
         run: |

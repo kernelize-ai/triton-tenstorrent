@@ -55,11 +55,11 @@ def library_dirs():
     return lib_dirs
 
 
-class NpuUtils(object):
+class CpuUtils(object):
 
     def __new__(cls):
         if not hasattr(cls, 'instance'):
-            cls.instance = super(NpuUtils, cls).__new__(cls)
+            cls.instance = super(CpuUtils, cls).__new__(cls)
         return cls.instance
 
     def __init__(self):
@@ -80,8 +80,8 @@ class NpuUtils(object):
 
     def get_device_properties(self, *args):
         return {
-            "max_num_regs": os.cpu_count() * 4, "max_shared_mem": 256, "multiprocessor_count": os.cpu_count(),
-            "warpSize": 1
+            "max_num_regs": os.cpu_count() * 4, "max_shared_mem": 1024 * 1024 * 1024, "multiprocessor_count":
+            os.cpu_count(), "warpSize": 1
         }
 
 
@@ -223,12 +223,13 @@ static void _launch(int num_warps, int shared_memory, int gridX, int gridY, int 
     alignas(64) unsigned char* global_smem = NULL;
     unsigned shared_memory_aligned_per_team = 0;
     if (shared_memory > 0) {{
-        unsigned shared_memory_plus_barrier = shared_memory + 128;
-        shared_memory_aligned_per_team = (shared_memory_plus_barrier + 63) & ~63u;
-        unsigned shared_memory_aligned = shared_memory_aligned_per_team * num_teams;
-        global_smem = aligned_alloc(64, shared_memory_aligned);
+        unsigned shared_memory_aligned = (shared_memory + 63) & ~63u;
+        const unsigned warp_sync_smem_size = num_warps * 64 + 128; // 64 B per warp plus 128 bytes for the barrier
+        shared_memory_aligned_per_team = shared_memory_aligned + warp_sync_smem_size;
+        unsigned shared_memory_aligned_total = shared_memory_aligned_per_team * num_teams;
+        global_smem = aligned_alloc(64, shared_memory_aligned_total);
         assert(global_smem);
-        memset(global_smem, 0, shared_memory_aligned);
+        memset(global_smem, 0, shared_memory_aligned_total);
     }}
 
     unsigned consecutive_blocks = ceil((float)N / (num_teams));
@@ -306,7 +307,7 @@ static PyObject* launch(PyObject* self, PyObject* args) {{
   PyObject *launch_exit_hook = NULL;
   PyObject *kernel_metadata = NULL;
   PyObject *launch_metadata = NULL;
-  PyObject *global_scratch_obj = NULL; // UNUSED in NPU backend
+  PyObject *global_scratch_obj = NULL; // UNUSED in CPU backend
   {newline.join([f"{_extracted_type(ty)} _arg{i};" for i, ty in signature.items()])}
   if(!PyArg_ParseTuple(args, \"{format}\", &gridX, &gridY, &gridZ,
                                            &_stream, &_function,
@@ -382,7 +383,7 @@ PyMODINIT_FUNC PyInit___triton_launcher(void) {{
     return src
 
 
-class NPULauncher(object):
+class CPULauncher(object):
 
     def __init__(self, src, metadata):
         constants = src.constants if hasattr(src, "constants") else dict()
@@ -453,7 +454,7 @@ class CPUDeviceInterface:
         return CPUDeviceInterface.TimerEvent()
 
 
-class NPUDriver(DriverBase):
+class CPUDriver(DriverBase):
 
     @staticmethod
     def is_active():
@@ -463,10 +464,10 @@ class NPUDriver(DriverBase):
             return False
 
     def __init__(self):
-        self.utils = NpuUtils()
+        self.utils = CpuUtils()
         import torch
         self.get_current_stream = lambda idx: torch.cpu.Stream()
-        self.launcher_cls = NPULauncher
+        self.launcher_cls = CPULauncher
 
     def get_device_interface(self):
         return CPUDeviceInterface()
@@ -478,9 +479,9 @@ class NPUDriver(DriverBase):
         return ty_to_cpp(ty)
 
     def get_current_target(self):
-        capability = "npu"
+        capability = "cpu"
         warp_size = 1
-        return GPUTarget("npu", capability, warp_size)
+        return GPUTarget("cpu", capability, warp_size)
 
     def get_active_torch_device(self):
         import torch
