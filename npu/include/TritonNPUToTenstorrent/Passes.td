@@ -17,4 +17,17 @@ def ConvertTritonNPUToTenstorrent : Pass<"convert-triton-npu-to-tenstorrent", "m
                             ];
 }
 
+def ConvertMathToD2M : Pass<"convert-math-to-d2m", "mlir::ModuleOp"> {
+    let summary = "Convert Math to D2M";
+    let description = [{
+        The `convert-math-to-d2m` pass converts mathematical operations
+        into D2M operations, optimizing for Tenstorrent hardware.
+    }];
+
+    let dependentDialects = ["mlir::triton::TritonDialect",
+                             "arith::ArithDialect",
+                             "mlir::tt::d2m::D2MDialect"
+                            ];
+}
+
 #endif

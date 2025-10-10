@@ -49,6 +49,9 @@ void init_triton_npu_passes_tenstorrent(py::module &&m) {
   m.def("add_core_specialize", [](mlir::PassManager &pm) {
     pm.addPass(mlir::triton::cpu::createCoreSpecialize());
   });
+  m.def("add_convert_math_to_d2m", [](mlir::PassManager &pm) {
+    pm.addPass(mlir::triton::npu::createConvertMathToD2M());
+  });
 }
 
 void init_triton_cpu_passes_ttgpuir(py::module &&m) {

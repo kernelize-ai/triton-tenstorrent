@@ -123,7 +123,7 @@ class CPUBackend(BaseBackend):
         passes.common.add_sccp(pm)
         passes.common.add_cse(pm)
         passes.common.add_canonicalizer(pm)
-        cpu.passes.tenstorrent.add_core_specialize(pm)
+        #cpu.passes.tenstorrent.add_core_specialize(pm)
         passes.common.add_symbol_dce(pm)
         passes.common.add_sccp(pm)
         passes.common.add_cse(pm)
@@ -177,8 +177,10 @@ class CPUBackend(BaseBackend):
         pm = ir.pass_manager(mod.context)
         pm.enable_debug()
 
-        cpu.passes.tenstorrent.add_to_kernel_dialect(pm)
-        pm.run(mod, "make_tenstorrentir")
+        #cpu.passes.tenstorrent.add_to_kernel_dialect(pm)
+        cpu.passes.tenstorrent.add_convert_math_to_d2m(pm)
+        passes.common.add_canonicalizer(pm)  # dummy pass to see intermediate results
+        pm.run(mod, "make_tenstorrent_mlir")
         return mod
 
     @staticmethod

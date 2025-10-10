@@ -10,8 +10,14 @@ endif()
 set(TTMLIR_LIB_DIR "${TENSTORRENT_MLIR}/build/lib")
 
 set(TTMLIR_LIB_NAMES
+    MLIRD2MDialect
+    MLIRD2MUtils
     MLIRTTKernelDialect
     MLIRTTCoreDialect
+    MLIRTTNNDialect
+    TTMLIRTTNNUtils
+    MLIRTTNNInterfaces
+    TTNNOpModelLib
     MLIRTTMetalDialect
 )
 
@@ -19,7 +25,12 @@ set(TTMLIR_LIB_NAMES
 set(TTMLIR_LIBS)
 set(TTMLIR_LIB_PATHS)
 foreach(lib ${TTMLIR_LIB_NAMES})
-  set(LIB_PATH "${TTMLIR_LIB_DIR}/${CMAKE_STATIC_LIBRARY_PREFIX}${lib}${CMAKE_STATIC_LIBRARY_SUFFIX}")
+  if (${lib} STREQUAL "TTNNOpModelLib")
+    # TODO: there is probably a better way to do this...
+    set(LIB_PATH "${TTMLIR_LIB_DIR}/OpModel/TTNN/${CMAKE_STATIC_LIBRARY_PREFIX}${lib}${CMAKE_STATIC_LIBRARY_SUFFIX}")
+  else()
+    set(LIB_PATH "${TTMLIR_LIB_DIR}/${CMAKE_STATIC_LIBRARY_PREFIX}${lib}${CMAKE_STATIC_LIBRARY_SUFFIX}")
+  endif()
   list(APPEND TTMLIR_LIB_PATHS ${LIB_PATH})
   add_library(${lib} STATIC IMPORTED)
   set_target_properties(${lib} PROPERTIES
@@ -51,12 +62,12 @@ if(TRITON_BUILD_PYTHON_MODULE)
     TritonCPUToLLVM
     TritonNPUToTenstorrent
     MLIRQuantDialect
+    MLIRMLProgramDialect
     ${TTMLIR_LIBS}
 
     DEPENDS
     build_tt_mlir)
   target_link_libraries(TritonCPU PRIVATE Python3::Module pybind11::headers)
-  #target_link_libraries(TritonCPU PRIVATE MLIRQuantDialect Python3::Module pybind11::headers)
 
   target_include_directories(TritonCPU PRIVATE
       "${TENSTORRENT_MLIR}/include"
