@@ -17,6 +17,20 @@ def ConvertTritonNPUToTenstorrent : Pass<"convert-triton-npu-to-tenstorrent", "m
                             ];
 }
 
+def ConvertTritonFuncToFunc : Pass<"convert-triton-func-to-func", "mlir::ModuleOp"> {
+    let summary = "Convert Triton Func to Func";
+    let description = [{
+        The `convert-triton-func-to-func` pass converts Triton function operations
+        into standard function operations, facilitating interoperability with TT-MLIR dialects.
+
+        Triton specializes the FuncOp for inlining but at the Tenstorrent lowering stage we expect only a single Triton.FuncOp to be present, so we can drop the Triton specific op versions and switch to canonical FuncOp.
+    }];
+
+    let dependentDialects = ["mlir::triton::TritonDialect",
+                             "mlir::func::FuncDialect"
+                            ];
+}
+
 def ConvertMathToD2M : Pass<"convert-math-to-d2m", "mlir::ModuleOp"> {
     let summary = "Convert Math to D2M";
     let description = [{
