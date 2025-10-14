@@ -60,6 +60,7 @@ struct ConvertAddOp : public OpConversionPattern<arith::AddFOp> {
       mlir::Block *block = rewriter.createBlock(&region);
 
       auto getShardShape = [](RankedTensorType type) {
+        llvm::errs() << "get shard shape for " << type << "\n";
         auto layout = cast<tt::ttcore::MetalLayoutAttr>(type.getEncoding());
         return layout.getShardShape(type);
       };
@@ -69,6 +70,10 @@ struct ConvertAddOp : public OpConversionPattern<arith::AddFOp> {
         llvm::for_each(inputs, [&](Value v) {
           auto type = cast<RankedTensorType>(v.getType());
           auto shardShape = getShardShape(type);
+          llvm::errs() << "shard shape: ";
+          for (auto s : shardShape)
+            llvm::errs() << s << " ";
+          llvm::errs() << "\n";
           block->addArgument(
               RankedTensorType::get(shardShape, type.getElementType()), loc);
         });
@@ -105,6 +110,9 @@ struct ConvertAddOp : public OpConversionPattern<arith::AddFOp> {
                 mlir::ValueRange bbArgs) {
               mlir::Value yield;
 
+              llvm::errs() << "Creating tile add op with input types " << bbArgs[0].getType()
+                           << " and " << bbArgs[1].getType() << "\n";
+              llvm::errs() << "and output type " << bbArgs[2].getType() << "\n";
               // For regular elementwise ops, create TileOp directly.
               yield = bbBuilder.create<tt::d2m::TileAddOp>(
                   loc,
@@ -146,7 +154,7 @@ struct ConvertAddOp : public OpConversionPattern<arith::AddFOp> {
     return grid;
   }
 
-  const SmallVector<size_t> targetSquareGridShape = {32, 32};
+  const SmallVector<size_t> targetSquareGridShape = {32};
 };
 
 struct ConvertMathTOD2MPass
@@ -172,14 +180,12 @@ struct ConvertMathTOD2MPass
       SmallVector<int64_t> deviceGridShape = {
           32,
           32}; // TODO: get from module attributes, need to populate device info
-
-      // compute alignments and intervals - TODO is probably only correct for 1D
-      // tensors
+      
       auto i64Ty = IntegerType::get(type.getContext(), 64);
       auto intervalTy = RankedTensorType::get({1, 2}, i64Ty);
       DenseIntElementsAttr collapsedIntervals = DenseIntElementsAttr::get(
           intervalTy, llvm::ArrayRef<int64_t>({0, -1}));
-      llvm::SmallVector<int64_t> dimAlignments{32};
+      llvm::SmallVector<int64_t> dimAlignments{32, 32};
 
       SmallVector<int64_t> shape = llvm::to_vector(type.getShape());
       if (shape.size() == 1) {
