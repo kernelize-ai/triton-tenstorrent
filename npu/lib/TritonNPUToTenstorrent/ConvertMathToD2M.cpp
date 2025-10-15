@@ -51,9 +51,7 @@ struct ConvertAddOp : public OpConversionPattern<arith::AddFOp> {
 
     llvm::errs() << "retType: " << retType << "\n";
 
-    // Tilize the LHS and RHS inputs using d2m.to_layout
-    auto getTiledInput = [&](Value v) -> Value {
-      auto tensorType = cast<RankedTensorType>(v.getType());
+    auto getTiledType = [&](RankedTensorType tensorType) -> RankedTensorType {
       Type elementType = tensorType.getElementType();
 
       constexpr std::array<int64_t, 2> defaultShape =
@@ -97,16 +95,27 @@ struct ConvertAddOp : public OpConversionPattern<arith::AddFOp> {
         llvm::errs() << s << " ";
       llvm::errs() << "\n";
 
-      auto emptyOp = rewriter.create<d2m::EmptyOp>(v.getLoc(), shardedShape,
-                                                   elementType, layout);
+      return RankedTensorType::get(shardedShape, elementType, layout);
+    };
+
+    // Tilize the LHS and RHS inputs using d2m.to_layout
+    auto getTiledInput = [&](Value v) -> Value {
+      auto tensorType = cast<RankedTensorType>(v.getType());
+
+      RankedTensorType tiledTensorTy = getTiledType(tensorType);
+      auto emptyOp = rewriter.create<d2m::EmptyOp>(v.getLoc(), tiledTensorTy);
       return rewriter.create<d2m::ToLayoutOp>(v.getLoc(), v, emptyOp)
           ->getResult(0);
     };
     auto lhsTiled = getTiledInput(adaptor.getLhs());
     auto rhsTiled = getTiledInput(adaptor.getRhs());
 
-    // tilize the output type, allocate using d2m.empty, and tilize using d2m.to_layout 
-    
+    // 2. tilize the output type, allocate using d2m.empty, and tilize(?) using
+    // d2m.to_layout
+    RankedTensorType tiledRetTy = getTiledType(retType);
+    auto retEmpty = rewriter.create<d2m::EmptyOp>(loc, tiledRetTy);
+
+    // 3. introduce d2m.generic which takes the to_layout outputs as inputs
 
     assert(false && "TODO");
 #else
