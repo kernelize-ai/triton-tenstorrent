@@ -112,12 +112,107 @@ struct ConvertAddOp : public OpConversionPattern<arith::AddFOp> {
 
     // 2. tilize the output type, allocate using d2m.empty, and tilize(?) using
     // d2m.to_layout
+
+    // an empty tensor for the output
+    auto retEmpty = rewriter.create<d2m::EmptyOp>(loc, retType);
+
+    // a tiled tensor for the output
     RankedTensorType tiledRetTy = getTiledType(retType);
-    auto retEmpty = rewriter.create<d2m::EmptyOp>(loc, tiledRetTy);
+    auto retTiled = rewriter.create<d2m::EmptyOp>(loc, tiledRetTy);
+    auto output =
+        rewriter.create<d2m::ToLayoutOp>(loc, retEmpty, retTiled)->getResult(0);
+    llvm::errs() << "new output: " << output << "\n";
 
     // 3. introduce d2m.generic which takes the to_layout outputs as inputs
+    const size_t outputGridRank = tiledRetTy.getRank() / 2;
+    auto grid = ttcore::GridAttr::get(
+        rewriter.getContext(), paddedAndSquaredInputGridShape(outputGridRank));
+    const unsigned rank = grid.getShape().size();
+    llvm::errs() << "grid rank = " << rank << "\n";
 
-    assert(false && "TODO");
+    auto [indexingMaps, iteratorTypes] =
+        d2m::GenericOp::buildParallelAffineMapsAndIteratorTypes(
+            rewriter, inputs.size() + 1, rank);
+    llvm::errs() << "# of indexing maps = " << indexingMaps.size() << "\n";
+    llvm::errs() << "# of iterator types = " << iteratorTypes.size() << "\n";
+
+    SmallVector<Value> tiledInputs = {lhsTiled, rhsTiled};
+    auto generic = rewriter.create<d2m::GenericOp>(
+        loc, tiledInputs, Value{output}, indexingMaps, iteratorTypes);
+
+    auto insertPoint = rewriter.saveInsertionPoint();
+    rewriter.startOpModification(generic);
+    {
+      mlir::Region &region = generic->getRegions().front();
+      mlir::Block *block = rewriter.createBlock(&region);
+
+      // populate block
+      {
+        auto getTypeForBlockArg = [&](Type t) -> Type {
+          auto tensorType = cast<RankedTensorType>(t);
+          ttcore::MetalLayoutAttr layout =
+              cast<ttcore::MetalLayoutAttr>(tensorType.getEncoding());
+          auto shardShape = layout.getShardShape(tensorType);
+          return RankedTensorType::get(shardShape, tensorType.getElementType());
+        };
+        block->addArgument(getTypeForBlockArg(lhsTiled.getType()), loc);
+        block->addArgument(getTypeForBlockArg(rhsTiled.getType()), loc);
+        block->addArgument(getTypeForBlockArg(output.getType()), loc);
+        auto blockArgs = block->getArguments();
+        for (auto v : blockArgs)
+          llvm::errs() << "block arg: " << v << " of type " << v.getType()
+                       << "\n";
+
+        const unsigned numInputs = inputs.size();
+        const unsigned numOutputs = 1;
+
+        auto linalgIndexingMaps = SmallVector<mlir::AffineMap>(
+            numInputs + numOutputs, rewriter.getMultiDimIdentityMap(rank));
+        auto linalgIteratorTypes = SmallVector<mlir::utils::IteratorType>(
+            iteratorTypes.size(), mlir::utils::IteratorType::parallel);
+
+        // 4. add d2m.tile_add into the d2m.generic
+        auto linalgGeneric = rewriter.create<mlir::linalg::GenericOp>(
+            loc,
+            /* result tensor types */
+            llvm::to_vector(
+                mlir::ValueRange(blockArgs.take_back(numOutputs)).getTypes()),
+            /* inputs */ blockArgs.take_front(numInputs),
+            /* outputs */ blockArgs.take_back(numOutputs), linalgIndexingMaps,
+            linalgIteratorTypes,
+            [&](mlir::OpBuilder &bbBuilder, mlir::Location bbLoc,
+                mlir::ValueRange bbArgs) {
+              mlir::Value yield;
+
+              llvm::errs() << "Creating tile add op with input types "
+                           << bbArgs[0].getType() << " and "
+                           << bbArgs[1].getType() << "\n";
+              llvm::errs() << "and output type " << bbArgs[2].getType() << "\n";
+          // For regular elementwise ops, create TileOp directly.
+#if 1
+              bbBuilder.create<mlir::linalg::YieldOp>(bbLoc, bbArgs[2]);
+#else
+              yield = bbBuilder.create<tt::d2m::TileAddOp>(
+                  loc,
+                  /* resultTypes */ bbArgs.take_back(numOutputs).getTypes(),
+                  /* operands */ bbArgs.take_front(numInputs));
+
+              bbBuilder.create<mlir::linalg::YieldOp>(bbLoc, yield);
+#endif
+            });
+
+        rewriter.create<tt::d2m::YieldOp>(loc, linalgGeneric->getResults());
+      }
+    }
+    rewriter.finalizeOpModification(generic);
+    rewriter.restoreInsertionPoint(insertPoint);
+
+    auto outputUntiledEmpty =
+        rewriter.create<d2m::EmptyOp>(addOp.getLoc(), retType);
+    auto outputUntiled = rewriter.create<d2m::ToLayoutOp>(
+        addOp.getLoc(), generic->getResult(0), outputUntiledEmpty);
+    rewriter.replaceOp(addOp, outputUntiled);
+
 #else
 
     SmallVector<mlir::AffineMap> indexingMap = {
@@ -292,6 +387,7 @@ struct ConvertMathTOD2MPass
     mlir::ConversionTarget target{*context};
     target.addIllegalOp<arith::AddFOp>();
     target.addLegalDialect<tt::d2m::D2MDialect>();
+    target.addLegalDialect<mlir::linalg::LinalgDialect>();
 
     TypeConverter typeConverter;
     typeConverter.addConversion([](Type type) { return type; });
