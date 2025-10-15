@@ -95,7 +95,7 @@ struct ConvertAddOp : public OpConversionPattern<arith::AddFOp> {
         llvm::errs() << s << " ";
       llvm::errs() << "\n";
 
-      return RankedTensorType::get(shardedShape, elementType, layout);
+      return RankedTensorType::get(shardedShape, tiledElementType, layout);
     };
 
     // Tilize the LHS and RHS inputs using d2m.to_layout
@@ -189,7 +189,7 @@ struct ConvertAddOp : public OpConversionPattern<arith::AddFOp> {
                            << bbArgs[1].getType() << "\n";
               llvm::errs() << "and output type " << bbArgs[2].getType() << "\n";
           // For regular elementwise ops, create TileOp directly.
-#if 1
+#if 0
               bbBuilder.create<mlir::linalg::YieldOp>(bbLoc, bbArgs[2]);
 #else
               yield = bbBuilder.create<tt::d2m::TileAddOp>(
@@ -388,6 +388,7 @@ struct ConvertMathTOD2MPass
     target.addIllegalOp<arith::AddFOp>();
     target.addLegalDialect<tt::d2m::D2MDialect>();
     target.addLegalDialect<mlir::linalg::LinalgDialect>();
+    target.addLegalOp<mlir::UnrealizedConversionCastOp>();
 
     TypeConverter typeConverter;
     typeConverter.addConversion([](Type type) { return type; });
@@ -426,6 +427,39 @@ struct ConvertMathTOD2MPass
       return RankedTensorType::get(shape, type.getElementType(), ttLayout);
 #endif
     });
+    typeConverter.addSourceMaterialization([](OpBuilder &builder,
+                                              RankedTensorType tensorType,
+                                              ValueRange inputs,
+                                              Location loc) -> Value {
+      return builder.create<UnrealizedConversionCastOp>(loc, tensorType, inputs)
+          .getResult(0);
+    });
+#if 1
+    typeConverter.addTargetMaterialization(
+        [](OpBuilder &builder, RankedTensorType toType, ValueRange inputs,
+           Location loc) -> Value {
+          if (inputs.size() != 1)
+            return nullptr;
+
+          auto input = inputs[0];
+          auto inputTensorType = dyn_cast<RankedTensorType>(input.getType());
+          if (!inputTensorType)
+            return nullptr;
+
+          // TODO: we should probably check element types and encodings here
+
+          auto toRank = toType.getRank();
+          auto inputRank = inputTensorType.getRank();
+          if (toRank == inputRank)
+            return nullptr;
+          if (toRank < inputRank) {
+            return builder.create<tensor::CollapseShapeOp>(loc, toType, input);
+          } else {
+            return builder.create<tensor::ExpandShapeOp>(
+                loc, toType, input, ArrayRef<ReassociationIndices>{{0, 1}});
+          }
+        });
+#endif
 
     RewritePatternSet patterns(context);
     patterns.add<ConvertAddOp>(typeConverter, patterns.getContext());
