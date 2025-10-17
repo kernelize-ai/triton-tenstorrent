@@ -22,6 +22,15 @@ using namespace mlir;
 
 namespace {
 
+
+static bool isDepenendetLoad(triton::LoadOp load) {
+  for (auto &use : load->getUses()) {
+    if (isa<triton::LoadOp>(use.getOwner()))
+      return true;
+  }
+  return false;
+}
+
 class Specializer {
   triton::FuncOp func;
   SmallVector<triton::gpu::LocalAllocOp> allocs;
@@ -32,18 +41,19 @@ class Specializer {
 public:
   Specializer(ModuleOp m, triton::FuncOp _func) : func(_func) {
     // collect all tile sizes and create multi-buffers
-    for (auto load : func.getOps<triton::LoadOp>()) {
-      auto alloc =
-          createSharedBuffer(load, cast<RankedTensorType>(load.getType()));
-      allocMap[load] = alloc;
-      loads.push_back(load);
-    }
-    for (auto store : func.getOps<triton::StoreOp>()) {
-      auto alloc = createSharedBuffer(
-          store, cast<RankedTensorType>(store.getValue().getType()));
-      allocMap[store] = alloc;
-      stores.push_back(store);
-    }
+    func.walk([&](Operation *op) {
+      if (auto store = dyn_cast<triton::StoreOp>(op)) {
+        auto alloc = createSharedBuffer(store, store.getValue().getType());
+        allocMap[store] = alloc;
+        stores.push_back(store);
+      } else if (auto load = dyn_cast<triton::LoadOp>(op)) {
+        if (!isDepenendetLoad(load)) {
+          auto alloc = createSharedBuffer(load, load.getType());
+          allocMap[load] = alloc;
+          loads.push_back(load);
+        }
+      }
+    });
 
     // Create Reader Program
     auto readerFunc = makeReader(func);
@@ -65,8 +75,8 @@ public:
     func.erase();
   }
 
-  triton::gpu::LocalAllocOp createSharedBuffer(Operation *op,
-                                               RankedTensorType rtType) {
+  triton::gpu::LocalAllocOp createSharedBuffer(Operation *op, Type type) {
+    auto rtType = cast<RankedTensorType>(type);
     int idx = allocs.size();
     auto ctx = func.getContext();
     OpBuilder b(func.getBody());
