@@ -68,6 +68,7 @@ else
     cmake -G Ninja -B build \
         -DMLIR_DIR="$MLIR_DIR" \
         -DLLVM_DIR="$LLVM_DIR" \
+        -DCMAKE_BUILD_TYPE="RelWithDebInfo" \
         -DTTMLIR_ENABLE_BINDINGS_PYTHON=OFF \
         -DTTMLIR_ENABLE_RUNTIME=OFF \
         -DTT_RUNTIME_ENABLE_TTNN=OFF \
