@@ -123,11 +123,6 @@ class CPUBackend(BaseBackend):
         passes.common.add_sccp(pm)
         passes.common.add_cse(pm)
         passes.common.add_canonicalizer(pm)
-        cpu.passes.tenstorrent.add_core_specialize(pm)
-        passes.common.add_symbol_dce(pm)
-        passes.common.add_sccp(pm)
-        passes.common.add_cse(pm)
-        passes.common.add_canonicalizer(pm)
         pm.run(mod, 'make_ttgir')
 
         return mod
@@ -177,7 +172,11 @@ class CPUBackend(BaseBackend):
         pm = ir.pass_manager(mod.context)
         pm.enable_debug()
 
-        cpu.passes.tenstorrent.add_to_kernel_dialect(pm)
+        cpu.passes.tenstorrent.add_core_specialize(pm)
+        passes.common.add_symbol_dce(pm)
+        passes.common.add_sccp(pm)
+        passes.common.add_cse(pm)
+        passes.common.add_canonicalizer(pm)
         pm.run(mod, "make_tenstorrentir")
         return mod
 
