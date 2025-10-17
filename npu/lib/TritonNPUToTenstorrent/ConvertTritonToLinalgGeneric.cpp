@@ -118,15 +118,17 @@ struct ConvertTritonToLinalgGenericPass
     target.addLegalDialect<tensor::TensorDialect>();
     target.addLegalDialect<arith::ArithDialect>();
     target.addIllegalOp<triton::SplatOp>();
-    target.addIllegalOp<triton::MakeRangeOp>();
+    // target.addIllegalOp<triton::MakeRangeOp>();
 
     TypeConverter typeConverter;
     typeConverter.addConversion([](Type type) { return type; });
 
     RewritePatternSet patterns(context);
     patterns.add<SplatToLinalgFill>(typeConverter, patterns.getContext());
-    patterns.add<MakeRangeToLinalgGeneric>(typeConverter,
-                                           patterns.getContext());
+    // TODO: re-enable after we handle the loads (it's easier to convert
+    // make_range to constant offsets than converting linalg.fill to constant
+    // offsets) patterns.add<MakeRangeToLinalgGeneric>(typeConverter,
+    //    patterns.getContext());
 
     if (applyPartialConversion(mod, target, std::move(patterns)).failed())
       signalPassFailure();

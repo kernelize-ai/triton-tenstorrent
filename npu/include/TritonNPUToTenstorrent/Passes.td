@@ -40,7 +40,23 @@ def ConvertMathToD2M : Pass<"convert-math-to-d2m", "mlir::ModuleOp"> {
 
     let dependentDialects = ["mlir::triton::TritonDialect",
                              "arith::ArithDialect",
+                             "tensor::TensorDialect",
+                             "linalg::LinalgDialect",
+                             "bufferization::BufferizationDialect",
                              "mlir::tt::d2m::D2MDialect"
+                            ];
+}
+
+def ConvertTritonToLinalgGeneric : Pass<"convert-triton-to-linalg-generic", "mlir::ModuleOp"> {
+    let summary = "Convert Triton to Linalg Generic";
+    let description = [{
+        The `convert-triton-to-linalg-generic` pass converts Triton tensor manipulation operations (make_range, splat)
+        into Linalg Generic operations.
+    }];
+
+    let dependentDialects = ["mlir::triton::TritonDialect",
+                             "mlir::linalg::LinalgDialect",
+                             "mlir::tensor::TensorDialect"
                             ];
 }
 

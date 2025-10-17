@@ -57,6 +57,9 @@ void init_triton_npu_passes_tenstorrent(py::module &&m) {
   m.def("add_convert_triton_func_to_func", [](mlir::PassManager &pm) {
     pm.addPass(mlir::triton::npu::createConvertTritonFuncToFunc());
   });
+  m.def("add_convert_triton_to_linalg_generic", [](mlir::PassManager &pm) {
+    pm.addPass(mlir::triton::npu::createConvertTritonToLinalgGeneric());
+  });
 }
 
 void init_triton_cpu_passes_ttgpuir(py::module &&m) {

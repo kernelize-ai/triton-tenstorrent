@@ -1,6 +1,7 @@
 add_triton_library(TritonNPUToTenstorrent
     ConvertMathToD2M.cpp
     ConvertTritonFuncToFunc.cpp
+    ConvertTritonToLinalgGeneric.cpp
 
     FuncOpToMLIRFunc.cpp
     TritonNPUToTenstorrent.cpp
