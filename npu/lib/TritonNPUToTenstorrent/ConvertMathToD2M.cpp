@@ -10,6 +10,8 @@
 #include "ttmlir/Dialect/D2M/IR/D2M.h"
 #include "ttmlir/Dialect/D2M/IR/D2MGenericRegionOps.h"
 
+#include "mlir/Dialect/Bufferization/IR/Bufferization.h"
+
 #include "mlir/Dialect/Linalg/IR/Linalg.h"
 
 namespace mlir {
@@ -20,6 +22,8 @@ namespace npu {
 #include "npu/include/TritonNPUToTenstorrent/Passes.h.inc"
 
 using namespace tt;
+
+namespace {
 
 struct ConvertAddOp : public OpConversionPattern<arith::AddFOp> {
   using OpConversionPattern<arith::AddFOp>::OpConversionPattern;
@@ -254,6 +258,179 @@ struct ConvertAddOp : public OpConversionPattern<arith::AddFOp> {
   const SmallVector<int64_t> targetSquareGridShape = {1, 1};
 };
 
+struct ConvertLoadOp : public OpConversionPattern<triton::LoadOp> {
+  using OpConversionPattern<triton::LoadOp>::OpConversionPattern;
+
+  LogicalResult
+  matchAndRewrite(triton::LoadOp loadOp, OpAdaptor adaptor,
+                  ConversionPatternRewriter &rewriter) const override {
+    Location loc = loadOp.getLoc();
+
+    auto addPtr = loadOp.getPtr().getDefiningOp<triton::AddPtrOp>();
+    if (!addPtr)
+      return failure();
+
+    auto fill = addPtr.getPtr().template getDefiningOp<linalg::FillOp>();
+    if (!fill)
+      return failure();
+
+    auto tensorOfPtrsType =
+        dyn_cast<RankedTensorType>(fill.getResult(0).getType());
+    if (!tensorOfPtrsType || tensorOfPtrsType.getRank() != 1)
+      return failure();
+
+    // Get the base pointer from the fill
+    Value basePtr = fill.getInputs().front();
+    auto tritonPtrType = cast<PointerType>(basePtr.getType());
+    Type elemTy = tritonPtrType.getPointeeType();
+
+    // Prove offsets = start + i
+    Value offsets = addPtr.getOffset();
+    Value blockStart;
+    // TODO: this is very specific to the 1D pattern, need to think about how to
+    // generalize to ND and different offset computations
+    {
+      auto add = offsets.getDefiningOp<arith::AddIOp>();
+      if (!add)
+        return failure();
+
+      // Find the linalg.fill (scalar -> tensor) operand among add’s operands.
+      linalg::FillOp startFill = add.getLhs().getDefiningOp<linalg::FillOp>();
+      if (!startFill)
+        startFill = add.getRhs().getDefiningOp<linalg::FillOp>();
+      if (!startFill)
+        return failure();
+
+      Value startScalar = startFill.getInputs().front();
+      if (!isa<IntegerType>(startScalar.getType()))
+        return failure();
+      blockStart = rewriter.create<arith::IndexCastOp>(
+          loc, rewriter.getIndexType(), startScalar);
+
+      // sanity check
+      auto offTy = dyn_cast<RankedTensorType>(add.getResult().getType());
+      if (!offTy || offTy.getRank() != 1 ||
+          offTy.getDimSize(0) != tensorOfPtrsType.getDimSize(0))
+        return failure();
+    }
+
+    // cast the source ptr to memref - we can propagate this cast later, though
+    // it might make more sense to just rewrite the arguments up front (will
+    // that break? should we introduce a ptr -> memref temporary op?)
+    auto ptrToMemref =
+        rewriter
+            .create<UnrealizedConversionCastOp>(
+                loc, typeConverter->convertType(tritonPtrType), basePtr)
+            ->getResult(0);
+    auto basePtrAsTensor = rewriter.create<bufferization::ToTensorOp>(
+        loc, RankedTensorType::get({ShapedType::kDynamic}, elemTy), ptrToMemref,
+        /*restrictReadonly=*/true);
+    llvm::errs() << "ptrToMemref: " << ptrToMemref << " of type "
+                 << ptrToMemref.getType() << "\n";
+#if 0
+    // TODO: should re-enable some sanity checking here
+    auto ptrToMemrefType = dyn_cast<RankedTensorType>(ptrToMemref.getType());
+    RankedTensorType ptrToMemrefTensorType = RankedTensorType::get({}, elemTy);
+    llvm::errs() << "ptrToMemrefTensorType: " << ptrToMemrefTensorType << "\n";
+    if (!ptrToMemrefType || ptrToMemrefType.getRank() != tensorOfPtrsType.getRank())
+      assert(false && "Unexpected ptr to memref type");
+#endif
+
+    // TODO: this is much easier with make_range, we should leave make_range in
+    // place and then replace any dangling versions after doing the loads
+    unsigned start, end;
+    Value cStart, cEnd;
+    {
+      auto add = offsets.getDefiningOp<arith::AddIOp>();
+      if (!add)
+        return failure();
+
+      // Find the tt.make_range (scalar -> tensor) operand among add’s operands.
+      triton::MakeRangeOp rangeOp =
+          add.getLhs().getDefiningOp<triton::MakeRangeOp>();
+      if (!rangeOp)
+        rangeOp = add.getRhs().getDefiningOp<triton::MakeRangeOp>();
+      if (!rangeOp)
+        return failure();
+
+      start = rangeOp.getStart();
+      end = rangeOp.getEnd();
+
+      cStart = rewriter.create<arith::ConstantOp>(
+          loc, rewriter.getIndexType(),
+          rewriter.getIndexAttr(rangeOp.getStart()));
+      cEnd = rewriter.create<arith::ConstantOp>(
+          loc, rewriter.getIndexType(),
+          rewriter.getIndexAttr(rangeOp.getEnd()));
+    }
+
+    llvm::errs() << "Loading slice [" << start << ", " << end << ")\n";
+    auto slicedTy = RankedTensorType::get({end - start}, elemTy);
+    Value c1 = rewriter.create<arith::ConstantOp>(loc, rewriter.getIndexType(),
+                                                  rewriter.getIndexAttr(1));
+    Value cSize = rewriter.create<arith::ConstantOp>(
+        loc, rewriter.getIndexType(), rewriter.getIndexAttr(end - start));
+
+    SmallVector<OpFoldResult> offs{blockStart};
+    SmallVector<OpFoldResult> szs{rewriter.getIndexAttr(end - start)};
+    SmallVector<OpFoldResult> str{rewriter.getIndexAttr(1)};
+    auto inferredSliceTy = tensor::ExtractSliceOp::inferResultType(
+        RankedTensorType::get({ShapedType::kDynamic}, elemTy),
+        /*offsets=*/offs,
+        /*sizes=*/szs,
+        /*strides=*/str);
+    llvm::errs() << "inferredSliceTy: " << inferredSliceTy << "\n";
+#if 1
+    Value slice = rewriter.create<tensor::ExtractSliceOp>(
+        loc, inferredSliceTy, basePtrAsTensor, /*offsets=*/offs, /*sizes=*/szs,
+        /*strides=*/str);
+#else
+    Value slice = rewriter.create<tensor::ExtractSliceOp>(
+        loc, RankedTensorType::get({end - start}, elemTy), basePtrAsTensor,
+        /*offsets=*/ValueRange{blockStart}, /*sizes=*/ValueRange{cSize},
+        /*strides=*/ValueRange{c1});
+#endif
+
+#if 1
+    RankedTensorType loadOpTensorType =
+        cast<RankedTensorType>(loadOp.getResult().getType());
+    Value init = rewriter.create<tensor::EmptyOp>(
+        loc, szs, elemTy, loadOpTensorType.getEncoding());
+#else
+    Value init = rewriter.create<tensor::EmptyOp>(loc, szs, elemTy);
+#endif
+    SmallVector<AffineMap> maps{
+        AffineMap::get(/*dims=*/1, /*syms=*/0,
+                       rewriter.getAffineDimExpr(0)), // in: (i)->(i)
+        AffineMap::get(/*dims=*/1, /*syms=*/0,
+                       rewriter.getAffineDimExpr(0)) // out:(i)->(i)
+    };
+    SmallVector<mlir::utils::IteratorType> iters{
+        mlir::utils::IteratorType::parallel};
+
+    llvm::errs() << "slice ty : " << slice.getType() << "\n";
+    llvm::errs() << "init ty : " << init.getType() << "\n";
+    llvm::errs() << "desired ty : " << loadOp.getResult().getType() << "\n";
+    auto gen = rewriter.create<linalg::GenericOp>(
+        loc,
+        /*resultTensorTypes=*/TypeRange{loadOp.getResult().getType()},
+        /*inputs=*/ValueRange{slice},
+        /*outputs=*/ValueRange{init},
+        /*indexing_maps=*/maps,
+        /*iterator_types=*/iters,
+        [&](OpBuilder &b, Location l, ValueRange args) {
+          // args = [%inElem, %outElem]; yield %inElem
+          b.create<linalg::YieldOp>(l, args.front());
+        });
+
+    // 6) Replace the original tt.load result with the new produced tensor.
+    rewriter.replaceOp(loadOp, gen.getResult(0));
+    return success();
+  }
+};
+
+} // namespace
+
 struct ConvertMathTOD2MPass
     : public impl::ConvertMathToD2MBase<ConvertMathTOD2MPass> {
   using impl::ConvertMathToD2MBase<ConvertMathTOD2MPass>::ConvertMathToD2MBase;
@@ -264,10 +441,18 @@ struct ConvertMathTOD2MPass
     ModuleOp mod = getOperation();
 
     mlir::ConversionTarget target{*context};
-    target.addIllegalOp<arith::AddFOp>();
     target.addLegalDialect<tt::d2m::D2MDialect>();
     target.addLegalDialect<mlir::linalg::LinalgDialect>();
+    target.addLegalDialect<arith::ArithDialect>();
+    target.addLegalDialect<tensor::TensorDialect>();
+    target.addLegalOp<mlir::bufferization::ToTensorOp>();
     target.addLegalOp<mlir::UnrealizedConversionCastOp>();
+
+    target
+        .addIllegalOp<arith::AddFOp>(); // should make this dynamically illegal
+                                        // and just for the tensor version(s)
+    target.addIllegalOp<triton::LoadOp>();
+    // addPtr too?
 
     TypeConverter typeConverter;
     typeConverter.addConversion([](Type type) { return type; });
@@ -318,6 +503,7 @@ struct ConvertMathTOD2MPass
 
     RewritePatternSet patterns(context);
     patterns.add<ConvertAddOp>(typeConverter, patterns.getContext());
+    patterns.add<ConvertLoadOp>(typeConverter, patterns.getContext());
 
     if (applyPartialConversion(mod, target, std::move(patterns)).failed())
       signalPassFailure();
