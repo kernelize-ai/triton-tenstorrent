@@ -17,30 +17,39 @@ using namespace triton;
 
 namespace {
 
-struct MakeRangeToLinalgGeneric : public OpConversionPattern<triton::MakeRangeOp> {
-    using OpConversionPattern<triton::MakeRangeOp>::OpConversionPattern;
+struct MakeRangeToLinalgGeneric
+    : public OpConversionPattern<triton::MakeRangeOp> {
+  using OpConversionPattern<triton::MakeRangeOp>::OpConversionPattern;
 
-    LogicalResult matchAndRewrite(triton::MakeRangeOp makeRangeOp, OpAdaptor adaptor, ConversionPatternRewriter &rewriter) const override {
-        auto loc = makeRangeOp.getLoc();
-        auto resTy = dyn_cast<RankedTensorType>(makeRangeOp.getResult().getType());
-        if (!resTy || resTy.getRank() != 1) return failure();
+  LogicalResult
+  matchAndRewrite(triton::MakeRangeOp makeRangeOp, OpAdaptor adaptor,
+                  ConversionPatternRewriter &rewriter) const override {
+    auto loc = makeRangeOp.getLoc();
+    auto resTy = dyn_cast<RankedTensorType>(makeRangeOp.getResult().getType());
+    if (!resTy || resTy.getRank() != 1)
+      return failure();
 
-        Type elemTy = resTy.getElementType();
-        if (!elemTy.isSignlessInteger(32)) {
-            return rewriter.notifyMatchFailure(makeRangeOp, "expect i32 element type in skeleton");
-        }
+    Type elemTy = resTy.getElementType();
+    if (!elemTy.isSignlessInteger(32)) {
+      return rewriter.notifyMatchFailure(makeRangeOp,
+                                         "expect i32 element type in skeleton");
+    }
 
-        // Build empty destination
-        SmallVector<OpFoldResult> sizes = { rewriter.getIndexAttr(resTy.getDimSize(0)) };
-        Value init = rewriter.create<tensor::EmptyOp>(loc, sizes, elemTy, resTy.getEncoding());
+    // Build empty destination
+    SmallVector<OpFoldResult> sizes = {
+        rewriter.getIndexAttr(resTy.getDimSize(0))};
+    Value init = rewriter.create<tensor::EmptyOp>(loc, sizes, elemTy,
+                                                  resTy.getEncoding());
 
-        // linalg.generic: outs-only, 1 parallel loop, map (i)->(i)
-    SmallVector<AffineMap> maps = { AffineMap::get(/*dimCount=*/1, /*symCount=*/0,
-                              rewriter.getAffineDimExpr(0)) };
-    SmallVector<mlir::utils::IteratorType> iters = { mlir::utils::IteratorType::parallel };
+    // linalg.generic: outs-only, 1 parallel loop, map (i)->(i)
+    SmallVector<AffineMap> maps = {AffineMap::get(
+        /*dimCount=*/1, /*symCount=*/0, rewriter.getAffineDimExpr(0))};
+    SmallVector<mlir::utils::IteratorType> iters = {
+        mlir::utils::IteratorType::parallel};
 
     auto generic = rewriter.create<linalg::GenericOp>(
-        loc, TypeRange{resTy}, /*inputs=*/ValueRange{}, /*outputs=*/ValueRange{init},
+        loc, TypeRange{resTy}, /*inputs=*/ValueRange{},
+        /*outputs=*/ValueRange{init},
         /*indexing_maps=*/maps,
         /*iterator_types=*/iters,
         [&](OpBuilder &b, Location loc, ValueRange args) {
@@ -56,21 +65,19 @@ struct MakeRangeToLinalgGeneric : public OpConversionPattern<triton::MakeRangeOp
 
     rewriter.replaceOp(makeRangeOp, generic.getResult(0));
     return success();
-
-    }
-
+  }
 };
 
 struct SplatToLinalgFill : public OpConversionPattern<triton::SplatOp> {
   using OpConversionPattern<triton::SplatOp>::OpConversionPattern;
 
   LogicalResult
-  matchAndRewrite(triton::SplatOp splatOp,
-                    OpAdaptor adaptor,
+  matchAndRewrite(triton::SplatOp splatOp, OpAdaptor adaptor,
                   ConversionPatternRewriter &rewriter) const override {
     auto loc = splatOp.getLoc();
     auto resTy = dyn_cast<RankedTensorType>(splatOp.getResult().getType());
-    if (!resTy) return failure();
+    if (!resTy)
+      return failure();
 
     // Create an empty tensor with the same shape/elt type.
     SmallVector<OpFoldResult> sizes;
@@ -78,23 +85,29 @@ struct SplatToLinalgFill : public OpConversionPattern<triton::SplatOp> {
     for (auto s : resTy.getShape())
       sizes.push_back(rewriter.getIndexAttr(s));
 
-    Value init = rewriter.create<tensor::EmptyOp>(loc, sizes, resTy.getElementType(), resTy.getEncoding());
+    Value init = rewriter.create<tensor::EmptyOp>(
+        loc, sizes, resTy.getElementType(), resTy.getEncoding());
 
     Value val = splatOp.getSrc();
     if (val.getType() != resTy.getElementType()) {
-        return rewriter.notifyMatchFailure(splatOp, "element type mismatch between splat value and tensor result");
+      return rewriter.notifyMatchFailure(
+          splatOp,
+          "element type mismatch between splat value and tensor result");
     }
 
-    auto fill = rewriter.create<linalg::FillOp>(loc, ValueRange{val}, ValueRange{init});
+    auto fill =
+        rewriter.create<linalg::FillOp>(loc, ValueRange{val}, ValueRange{init});
     rewriter.replaceOp(splatOp, fill.getResult(0));
 
     return success();
   }
 };
 
-}
+} // namespace
 
-struct ConvertTritonToLinalgGenericPass : public impl::ConvertTritonToLinalgGenericBase<ConvertTritonToLinalgGenericPass> {
+struct ConvertTritonToLinalgGenericPass
+    : public impl::ConvertTritonToLinalgGenericBase<
+          ConvertTritonToLinalgGenericPass> {
 
   void runOnOperation() override {
     MLIRContext *context = &getContext();
@@ -112,13 +125,14 @@ struct ConvertTritonToLinalgGenericPass : public impl::ConvertTritonToLinalgGene
 
     RewritePatternSet patterns(context);
     patterns.add<SplatToLinalgFill>(typeConverter, patterns.getContext());
-    patterns.add<MakeRangeToLinalgGeneric>(typeConverter, patterns.getContext());
+    patterns.add<MakeRangeToLinalgGeneric>(typeConverter,
+                                           patterns.getContext());
 
     if (applyPartialConversion(mod, target, std::move(patterns)).failed())
       signalPassFailure();
   }
 };
 
-}
-}
-}
+} // namespace npu
+} // namespace triton
+} // namespace mlir
