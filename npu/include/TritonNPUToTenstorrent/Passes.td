@@ -26,6 +26,7 @@ def ConvertTritonFuncToFunc : Pass<"convert-triton-func-to-func", "mlir::ModuleO
 
     let dependentDialects = ["mlir::triton::TritonDialect",
                              "func::FuncDialect"
+                            ];
 }
 
 def ConvertTritonNPUToTTKernel : Pass<"convert-triton-npu-to-ttkernel", "mlir::ModuleOp"> {
@@ -36,7 +37,9 @@ def ConvertTritonNPUToTTKernel : Pass<"convert-triton-npu-to-ttkernel", "mlir::M
     }];
 
     let dependentDialects = ["mlir::triton::TritonDialect",
-                             "mlir::tt::ttkernel::TTKernelDialect"
+                            "mlir::triton::gpu::TritonGPUDialect",
+                             "mlir::tt::ttkernel::TTKernelDialect",
+                             "mlir::arith::ArithDialect"
                             ];
 }
 
