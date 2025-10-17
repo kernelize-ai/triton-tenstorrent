@@ -180,7 +180,7 @@ class CPUBackend(BaseBackend):
         #cpu.passes.tenstorrent.add_to_kernel_dialect(pm)
         cpu.passes.tenstorrent.add_convert_triton_func_to_func(pm)
         cpu.passes.tenstorrent.add_convert_triton_to_linalg_generic(pm)
-        #cpu.passes.tenstorrent.add_convert_math_to_d2m(pm)
+        cpu.passes.tenstorrent.add_convert_math_to_d2m(pm)
         passes.common.add_canonicalizer(pm)  # dummy pass to see intermediate results
         pm.run(mod, "make_tenstorrent_mlir")
         return mod

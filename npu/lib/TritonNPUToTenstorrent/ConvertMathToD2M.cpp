@@ -97,11 +97,21 @@ struct ConvertAddOp : public OpConversionPattern<arith::AddFOp> {
     // Tilize the LHS and RHS inputs using d2m.to_layout
     auto getTiledInput = [&](Value v) -> Value {
       auto tensorType = cast<RankedTensorType>(v.getType());
-
+#if 1
+      llvm::errs() << "Casting input: " << v << " of type " << tensorType
+                   << "\n";
+      RankedTensorType tiledTensorTy = getTiledType(tensorType);
+      llvm::errs() << "tiledTensorTy: " << tiledTensorTy << "\n";
+      return rewriter
+          .create<d2m::ViewLayoutOp>(v.getLoc(), tiledTensorTy, v,
+                                     /*reinterpretLayout=*/true)
+          ->getResult(0);
+#else
       RankedTensorType tiledTensorTy = getTiledType(tensorType);
       auto emptyOp = rewriter.create<d2m::EmptyOp>(v.getLoc(), tiledTensorTy);
       return rewriter.create<d2m::ToLayoutOp>(v.getLoc(), v, emptyOp)
           ->getResult(0);
+#endif
     };
     auto lhsTiled = getTiledInput(adaptor.getLhs());
     auto rhsTiled = getTiledInput(adaptor.getRhs());
@@ -429,6 +439,160 @@ struct ConvertLoadOp : public OpConversionPattern<triton::LoadOp> {
   }
 };
 
+class TritonToTenstorrentTypeConverter : public TypeConverter {
+public:
+  TritonToTenstorrentTypeConverter() {
+    addConversion([](Type type) { return type; });
+    addConversion([this](RankedTensorType tensorType) {
+#if 1
+
+      // Assume all tensors are already tiled. Rank 1 tensors get promoted to
+      // rank 2
+      auto elementType = tensorType.getElementType();
+      // llvm::errs() << "element type = " << elementType << "\n";
+      if (isa<PointerType>(elementType)) {
+        return tensorType;
+      }
+
+      // promote rank-1 to rank-2
+      SmallVector<int64_t> shape = llvm::to_vector(tensorType.getShape());
+      if (shape.size() == 1) {
+        shape.push_back(1);
+        tensorType = RankedTensorType::get(shape, elementType,
+                                           tensorType.getEncoding());
+      }
+
+      constexpr std::array<int64_t, 2> defaultShape =
+          tt::ttcore::TileType::getDefaultShape();
+      SmallVector<int64_t> tileShape{defaultShape[0], defaultShape[1]};
+      Type tiledElementType = tt::ttcore::TileType::get(elementType, tileShape);
+
+      SmallVector<int64_t> logicalShape =
+          llvm::to_vector(tensorType.getShape());
+      tt::ttcore::MemorySpace memSpace = tt::ttcore::MemorySpace::DeviceL1;
+
+      // create metal layout
+      tt::ttcore::MetalLayoutAttr layout = ttcore::MetalLayoutAttr::get(
+          tensorType.getContext(), logicalShape, targetSquareGridShape,
+          ttcore::OOBVal::Undef, memSpace, ttcore::TensorMemoryLayout::Sharded);
+
+      // Get raw, unsharded physical shape.
+      SmallVector<int64_t> unshardedShape = layout.getPhysicalShape(tileShape);
+      llvm::errs() << "unshardedShape = ";
+      for (auto s : unshardedShape)
+        llvm::errs() << s << " ";
+      llvm::errs() << "\n";
+
+      // Calculate optimal grid for given physical shape.
+      llvm::SmallVector<int64_t> optimalGrid =
+          computeOptimalGrid(unshardedShape);
+      llvm::errs() << "optimalGrid = ";
+      for (auto g : optimalGrid)
+        llvm::errs() << g << " ";
+      llvm::errs() << "\n";
+
+      // Get optimal sharded, on-device shape.
+      llvm::SmallVector<int64_t> shardedShape =
+          layout.getDeviceShape(optimalGrid, tileShape);
+      llvm::errs() << "shardedShape = ";
+      for (auto s : shardedShape)
+        llvm::errs() << s << " ";
+      llvm::errs() << "\n";
+
+      return RankedTensorType::get(shardedShape, tiledElementType, layout);
+#else
+      SmallVector<int64_t> shape = llvm::to_vector(type.getShape());
+      if (shape.size() == 1) {
+        shape.push_back(1);
+      }
+      return RankedTensorType::get(shape, type.getElementType(),
+                                   type.getEncoding());
+#endif
+    });
+    addConversion([](PointerType type) {
+      auto elemTy = type.getPointeeType();
+      return MemRefType::get({ShapedType::kDynamic}, elemTy);
+    });
+    addSourceMaterialization([](OpBuilder &builder, RankedTensorType tensorType,
+                                ValueRange inputs, Location loc) -> Value {
+      return builder.create<UnrealizedConversionCastOp>(loc, tensorType, inputs)
+          .getResult(0);
+    });
+    addTargetMaterialization([](OpBuilder &builder, RankedTensorType toType,
+                                ValueRange inputs, Location loc) -> Value {
+      if (inputs.size() != 1)
+        return nullptr;
+
+      auto input = inputs[0];
+      auto inputTensorType = dyn_cast<RankedTensorType>(input.getType());
+      if (!inputTensorType)
+        return nullptr;
+
+      // TODO: we should probably check element types and encodings here
+
+      auto toRank = toType.getRank();
+      auto inputRank = inputTensorType.getRank();
+      if (toRank == inputRank)
+        return nullptr;
+      if (toRank < inputRank) {
+        return builder.create<tensor::CollapseShapeOp>(loc, toType, input);
+      } else {
+        return builder.create<tensor::ExpandShapeOp>(
+            loc, toType, input, ArrayRef<ReassociationIndices>{{0, 1}});
+      }
+    });
+  }
+
+  // Helper to access a canonicalized form of input grid.  This will ensure two
+  // things:
+  // 1. We square-ify grids, so that transpose etc. will work. e.g. 13x10 ->
+  // 10x10.
+  // 2. If we wish to have uncollapsed tensors of rank greater than 2, we will
+  // 1-pad the leading grid dims.  E.g. a 3d grid will be 1xXxY.
+  const llvm::SmallVector<int64_t>
+  paddedAndSquaredInputGridShape(size_t rank) const {
+    assert(rank >= targetSquareGridShape.size());
+    llvm::SmallVector<int64_t> grid(rank, 1);
+    const size_t diff = rank - targetSquareGridShape.size();
+    for (size_t i = 0; i < targetSquareGridShape.size(); ++i) {
+      grid[i + diff] = targetSquareGridShape[i];
+    }
+    return grid;
+  }
+
+  // Compute optimal grid shape that works for all provided layout infos.
+  llvm::SmallVector<int64_t>
+  computeOptimalGrid(ArrayRef<int64_t> physicalShape) const {
+    llvm::SmallVector<int64_t> grid;
+    grid.reserve(physicalShape.size());
+
+    assert(physicalShape.size() >= targetSquareGridShape.size());
+
+    const size_t gridRankDiff =
+        physicalShape.size() - targetSquareGridShape.size();
+    grid.assign(gridRankDiff, 1);
+
+    for (size_t i = gridRankDiff; i < physicalShape.size(); ++i) {
+      const int64_t dim = physicalShape[i];
+      assert(dim > 0);
+      // Find largest grid dimension that divides evenly.
+      for (int64_t g = targetSquareGridShape[i - gridRankDiff]; g > 0; g--) {
+        if (dim % g == 0) {
+          grid.push_back(g);
+          break;
+        }
+      }
+    }
+
+    assert(grid.size() == physicalShape.size());
+
+    return grid;
+  }
+
+  // TODO: retrieve from device info?
+  const SmallVector<int64_t> targetSquareGridShape = {1, 1};
+};
+
 } // namespace
 
 struct ConvertMathTOD2MPass
@@ -448,61 +612,16 @@ struct ConvertMathTOD2MPass
     target.addLegalOp<mlir::bufferization::ToTensorOp>();
     target.addLegalOp<mlir::UnrealizedConversionCastOp>();
 
-    target
-        .addIllegalOp<arith::AddFOp>(); // should make this dynamically illegal
+     // should make this dynamically illegal
                                         // and just for the tensor version(s)
+    // target.addIllegalOp<arith::AddFOp>();
+
     target.addIllegalOp<triton::LoadOp>();
     // addPtr too?
 
-    TypeConverter typeConverter;
-    typeConverter.addConversion([](Type type) { return type; });
-    typeConverter.addConversion([](RankedTensorType type) {
-      // make all tensors 2D
-      SmallVector<int64_t> shape = llvm::to_vector(type.getShape());
-      if (shape.size() == 1) {
-        shape.push_back(1);
-      }
-      return RankedTensorType::get(shape, type.getElementType(),
-                                   type.getEncoding());
-    });
-    typeConverter.addConversion([](PointerType type) {
-      auto elemTy = type.getPointeeType();
-      return MemRefType::get({ShapedType::kDynamic}, elemTy);
-    });
-    typeConverter.addSourceMaterialization([](OpBuilder &builder,
-                                              RankedTensorType tensorType,
-                                              ValueRange inputs,
-                                              Location loc) -> Value {
-      return builder.create<UnrealizedConversionCastOp>(loc, tensorType, inputs)
-          .getResult(0);
-    });
-    typeConverter.addTargetMaterialization(
-        [](OpBuilder &builder, RankedTensorType toType, ValueRange inputs,
-           Location loc) -> Value {
-          if (inputs.size() != 1)
-            return nullptr;
-
-          auto input = inputs[0];
-          auto inputTensorType = dyn_cast<RankedTensorType>(input.getType());
-          if (!inputTensorType)
-            return nullptr;
-
-          // TODO: we should probably check element types and encodings here
-
-          auto toRank = toType.getRank();
-          auto inputRank = inputTensorType.getRank();
-          if (toRank == inputRank)
-            return nullptr;
-          if (toRank < inputRank) {
-            return builder.create<tensor::CollapseShapeOp>(loc, toType, input);
-          } else {
-            return builder.create<tensor::ExpandShapeOp>(
-                loc, toType, input, ArrayRef<ReassociationIndices>{{0, 1}});
-          }
-        });
-
+    TritonToTenstorrentTypeConverter typeConverter;
     RewritePatternSet patterns(context);
-    patterns.add<ConvertAddOp>(typeConverter, patterns.getContext());
+    // patterns.add<ConvertAddOp>(typeConverter, patterns.getContext());
     patterns.add<ConvertLoadOp>(typeConverter, patterns.getContext());
 
     if (applyPartialConversion(mod, target, std::move(patterns)).failed())
