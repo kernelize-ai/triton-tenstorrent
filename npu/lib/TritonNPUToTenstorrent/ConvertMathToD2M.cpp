@@ -280,6 +280,10 @@ struct ConvertMathTOD2MPass
       return RankedTensorType::get(shape, type.getElementType(),
                                    type.getEncoding());
     });
+    typeConverter.addConversion([](PointerType type) {
+      auto elemTy = type.getPointeeType();
+      return MemRefType::get({ShapedType::kDynamic}, elemTy);
+    });
     typeConverter.addSourceMaterialization([](OpBuilder &builder,
                                               RankedTensorType tensorType,
                                               ValueRange inputs,
