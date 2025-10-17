@@ -191,6 +191,7 @@ class CPUBackend(BaseBackend):
 
         # Force output
         passes.common.add_canonicalizer(pm)
+
         pm.run(mod, "make_tenstorrentir")
         return mod
 
