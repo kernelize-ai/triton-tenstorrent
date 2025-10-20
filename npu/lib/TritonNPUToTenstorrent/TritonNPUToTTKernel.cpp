@@ -30,9 +30,24 @@ struct ConvertAddOp : public OpConversionPattern<arith::AddFOp> {
 
     auto lhs = adaptor.getLhs();
     auto rhs = adaptor.getRhs();
+    llvm::errs() << "lhs type = " << lhs.getType() << "\n";
+    llvm::errs() << "rhs type = " << rhs.getType() << "\n";
+#if 0
+    auto getCBFromLoadOp = [](Operation* op) {
+      llvm::errs() << "operation = " << *op << "\n";
+      auto localLoadOp = cast<gpu::LocalLoadOp>(op);
+      llvm::errs() << "localLoadOp = " << localLoadOp << "\n";
+      return localLoadOp.getSrc();
+    };
+    auto lhsCB = getCBFromLoadOp(lhs.getDefiningOp());
+    auto rhsCB = getCBFromLoadOp(rhs.getDefiningOp());
 
     // create init op
+    rewriter.create<ttkernel::AddTilesInitOp>(loc, lhsCB, rhsCB);
+#else
+    // create init op
     rewriter.create<ttkernel::AddTilesInitOp>(loc, lhs, rhs);
+#endif
 
     Value lhsIndex = rewriter.create<arith::ConstantOp>(
         loc, rewriter.getIndexType(),
@@ -110,7 +125,6 @@ struct ConvertLocalLoadOp : public OpConversionPattern<gpu::LocalLoadOp> {
     MemRefType cbTileMemref = cbType.getMemref();
     llvm::errs() << "cbTileMemref = " << cbTileMemref << "\n";
     // 1.5 reinterpret the cb from 2D to 1D tile shape
-#if 1
     MemRefType oneDTileType = MemRefType::get(
         {1}, cbTileMemref.getElementType(), MemRefLayoutAttrInterface{},
         cbTileMemref.getMemorySpace());
@@ -121,7 +135,6 @@ struct ConvertLocalLoadOp : public OpConversionPattern<gpu::LocalLoadOp> {
                 loc, ttkernel::CBType::get(rewriter.getContext(), oneDTileType),
                 adaptor.getSrc())
             .getResult();
-#endif
 
     // 2. copy tile
     rewriter.create<ttkernel::CopyTileInitOp>(loc, oneDTile);
@@ -133,9 +146,16 @@ struct ConvertLocalLoadOp : public OpConversionPattern<gpu::LocalLoadOp> {
     // this somewhere in the layout
     rewriter.create<ttkernel::CopyTileOp>(loc, oneDTile, c0, c0);
 
+#if 1
+    // replace uses of the load with the alloc
+    auto cb = adaptor.getSrc();
+    op.replaceAllUsesWith(cb);
+    op.erase();
+#else
     // erase the load if it is unused - otherwise let consumers erase it
     if (op->use_empty())
       op.erase();
+#endif
     return success();
   }
 };
@@ -181,6 +201,7 @@ struct ConvertTritonNPUToTTKernelPass
     mlir::ConversionTarget target{*context};
     target.addLegalDialect<tt::ttkernel::TTKernelDialect>();
     target.addLegalDialect<arith::ArithDialect>();
+    target.addLegalDialect<func::FuncDialect>();
 
 #if 1
     target.addDynamicallyLegalOp<arith::AddFOp>(
