@@ -177,6 +177,11 @@ class CPUBackend(BaseBackend):
         passes.common.add_sccp(pm)
         passes.common.add_cse(pm)
         passes.common.add_canonicalizer(pm)
+
+        cpu.passes.tenstorrent.convert_triton_func_to_func(pm)
+
+        # Force output
+        passes.common.add_canonicalizer(pm)
         pm.run(mod, "make_tenstorrentir")
         return mod
 
