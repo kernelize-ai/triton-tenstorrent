@@ -103,9 +103,11 @@ struct ConvertLocalLoadOp : public OpConversionPattern<gpu::LocalLoadOp> {
         rewriter.create<ttkernel::CBWaitFrontOp>(loc, adaptor.getSrc(), c1);
 
     llvm::errs() << "adaptor src type: " << adaptor.getSrc().getType();
-    assert(isa<MemRefType>(adaptor.getSrc().getType()) &&
+    assert(isa<ttkernel::CBType>(adaptor.getSrc().getType()) &&
            "expected memref type for type converted load src");
-    auto cbTileMemref = cast<MemRefType>(adaptor.getSrc().getType());
+    auto cbType = cast<ttkernel::CBType>(adaptor.getSrc().getType());
+    llvm::errs() << "cbType: " << cbType << "\n";
+    MemRefType cbTileMemref = cbType.getMemref();
     llvm::errs() << "cbTileMemref = " << cbTileMemref << "\n";
     // 1.5 reinterpret the cb from 2D to 1D tile shape
 #if 1
@@ -113,10 +115,12 @@ struct ConvertLocalLoadOp : public OpConversionPattern<gpu::LocalLoadOp> {
         {1}, cbTileMemref.getElementType(), MemRefLayoutAttrInterface{},
         cbTileMemref.getMemorySpace());
     llvm::errs() << "oneDTileType = " << oneDTileType << "\n";
-    auto oneDTile = rewriter
-                        .create<ttkernel::CBReinterpretShapeOp>(
-                            loc, oneDTileType, adaptor.getSrc())
-                        .getResult();
+    auto oneDTile =
+        rewriter
+            .create<ttkernel::CBReinterpretShapeOp>(
+                loc, ttkernel::CBType::get(rewriter.getContext(), oneDTileType),
+                adaptor.getSrc())
+            .getResult();
 #endif
 
     // 2. copy tile
@@ -153,12 +157,12 @@ struct ConvertLocalAllocOp : public OpConversionPattern<gpu::LocalAllocOp> {
 
     auto typeConverter = getTypeConverter();
     llvm::errs() << "local alloc op type = " << op.getType() << "\n";
-    auto cbMemRefType =
-        cast<MemRefType>(typeConverter->convertType(op.getResult().getType()));
+    auto cbMemRefType = cast<ttkernel::CBType>(
+        typeConverter->convertType(op.getResult().getType()));
     llvm::errs() << "converted cbMemRefType = " << cbMemRefType << "\n";
-    Type cbType = ttkernel::CBType::get(rewriter.getContext(), cbMemRefType);
+    // Type cbType = ttkernel::CBType::get(rewriter.getContext(), cbMemRefType);
 
-    rewriter.replaceOpWithNewOp<ttkernel::GetCompileArgValOp>(op, cbType,
+    rewriter.replaceOpWithNewOp<ttkernel::GetCompileArgValOp>(op, cbMemRefType,
                                                               allocIdxValue);
 
     return success();
@@ -216,10 +220,11 @@ struct ConvertTritonNPUToTTKernelPass
           memdesc.getContext(), ttcore::TileType::getDefaultShape(),
           ttcore::elementTypeToDataType(memdesc.getElementType()));
 
-      return MemRefType::get(
+      MemRefType cbMemRefType = MemRefType::get(
           shape, ttcoreTileType, MemRefLayoutAttrInterface{},
           ttcore::MemorySpaceAttr::get(memdesc.getContext(),
                                        ttcore::MemorySpace::DeviceL1));
+      return ttkernel::CBType::get(memdesc.getContext(), cbMemRefType);
     });
 
     mlir::RewritePatternSet patterns(context);
