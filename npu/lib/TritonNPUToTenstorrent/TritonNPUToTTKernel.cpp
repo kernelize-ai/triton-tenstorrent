@@ -188,22 +188,22 @@ struct ConvertTritonNPUToTTKernelPass
 #endif
 
     target.addDynamicallyLegalOp<gpu::LocalStoreOp>([](gpu::LocalStoreOp op) {
-      auto funcOp = op->getParentOfType<triton::FuncOp>();
-      assert(funcOp && "expected triton::funcOp parent");
+      auto funcOp = op->getParentOfType<func::FuncOp>();
+      assert(funcOp && "expected func::funcOp parent");
       StringRef funcName = funcOp.getSymName();
       return !funcName.ends_with("__compute");
     });
 #if 1
     target.addDynamicallyLegalOp<gpu::LocalLoadOp>([](gpu::LocalLoadOp op) {
-      auto funcOp = op->getParentOfType<triton::FuncOp>();
-      assert(funcOp && "expected triton::funcOp parent");
+      auto funcOp = op->getParentOfType<func::FuncOp>();
+      assert(funcOp && "expected func::funcOp parent");
       StringRef funcName = funcOp.getSymName();
       return !funcName.ends_with("__compute");
     });
 #endif
     target.addDynamicallyLegalOp<gpu::LocalAllocOp>([](gpu::LocalAllocOp op) {
-      auto funcOp = op->getParentOfType<triton::FuncOp>();
-      assert(funcOp && "expected triton::funcOp parent");
+      auto funcOp = op->getParentOfType<func::FuncOp>();
+      assert(funcOp && "expected func::funcOp parent");
       StringRef funcName = funcOp.getSymName();
       return !funcName.ends_with("__compute");
     });
