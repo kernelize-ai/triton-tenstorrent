@@ -22,6 +22,10 @@ jobs:
     steps:
       - name: Checkout CPU Plugin
         uses: actions/checkout@v5
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
       - name: Fetch Triton upstream Commit Hash
         shell: bash
         run: |
@@ -38,7 +42,7 @@ jobs:
       - name: Install brew dependencies
         run: |
           brew update
-          brew install ccache llvm@20 lld coreutils libomp
+          brew install ccache llvm@20 lld coreutils libomp boost
       - name: Compute cache keys
         id: cache-key
         run: |
@@ -83,7 +87,7 @@ jobs:
         run: |
           source ~/.venv/bin/activate
           python -m pip install --upgrade pip
-          python -m pip install torch==2.8.0 --index-url https://download.pytorch.org/whl/test/cpu
+          python -m pip install torch==2.9.0 --index-url https://download.pytorch.org/whl/test/cpu
           pip freeze
       - name: Install Triton
         env:
@@ -125,6 +129,7 @@ jobs:
         run: |
           source ~/.venv/bin/activate
           TRITON_CPU_NUM_WARPS=4 python -m pytest --device "cpu" python/test/unit/language/test_core.py -k "(test_reduce1d or test_load_store_same_ptr) and not test_reduce1d[1-sum-float16-512]"
+          python -m pytest --device "cpu" python/test/unit/runtime/test_launch.py -k "not test_launch_with_options"
       - name: Run tutorial 01 on CPU
         working-directory: ./triton
         run: |

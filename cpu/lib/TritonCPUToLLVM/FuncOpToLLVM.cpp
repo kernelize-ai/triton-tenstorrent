@@ -5,6 +5,7 @@
 #include "triton/Conversion/TritonGPUToLLVM/Utility.h"
 
 #include "TargetInfo.h"
+#include "Utility.h"
 
 namespace {
 
@@ -40,12 +41,16 @@ struct FuncOpSPMDParamConversion
 
   triton::FuncOp amendFuncOp(triton::FuncOp funcOp,
                              ConversionPatternRewriter &rewriter) const {
-    // Push back SPMD program args - (x,y,z) grid index and (gridX, gridY,
-    // gridZ) grid sizes.
+    // Push back SPMD program args
+    //  - launch size: &{ grid_x, grid_y, grid_z, block_x, block_y, block_z }
+    //  - launch id: &{ grid_x, grid_y, grid_z, block_x, block_y, block_z }
+    //  - shared memory ptr
+    //  - cpu barrier
     auto loc = funcOp.getLoc();
     auto ctx = funcOp->getContext();
     auto sharedPtrTy =
         LLVM::LLVMPointerType::get(ctx, targetInfo.getSharedAddressSpace());
+    auto voidPtrTy = LLVM::LLVMPointerType::get(ctx);
 
     // 1. Modify the function type to add the new arguments.
     auto funcTy = funcOp.getFunctionType();
@@ -54,14 +59,10 @@ struct FuncOpSPMDParamConversion
     if (!isKernel)
       return funcOp; // TODO: pass shared memory to child functions
 
-    amendedInputTy.push_back(i32_ty);      // thread_id
-    amendedInputTy.push_back(i32_ty);      // x
-    amendedInputTy.push_back(i32_ty);      // y
-    amendedInputTy.push_back(i32_ty);      // z
-    amendedInputTy.push_back(i32_ty);      // gridX
-    amendedInputTy.push_back(i32_ty);      // gridY
-    amendedInputTy.push_back(i32_ty);      // gridZ
+    amendedInputTy.push_back(voidPtrTy);   // launch sz
+    amendedInputTy.push_back(voidPtrTy);   // launch id
     amendedInputTy.push_back(sharedPtrTy); // shared memory ptr
+    amendedInputTy.push_back(voidPtrTy);   // cpu barrier
 
     auto amendedFuncTy =
         FunctionType::get(ctx, amendedInputTy, funcTy.getResults());
@@ -69,11 +70,23 @@ struct FuncOpSPMDParamConversion
     // 2. Modify the argument attributes to add the new argument.
     SmallVector<NamedAttribute> amendedAttrs;
     filterFuncAttributes(funcOp, /*filterArgAttrs=*/true, amendedAttrs);
+    int sharedMemoryOffset = amendedInputTy.size() + cpu::kSharedMemoryOffset;
     if (auto argAttrs = funcOp.getAllArgAttrs()) {
       llvm::SmallVector<mlir::Attribute> amendedArgAttrs(argAttrs.begin(),
                                                          argAttrs.end());
       while (amendedArgAttrs.size() < amendedInputTy.size()) {
-        amendedArgAttrs.emplace_back(DictionaryAttr::get(ctx));
+        SmallVector<NamedAttribute> attrs{
+            rewriter.getNamedAttr("llvm.nonnull", rewriter.getUnitAttr())};
+        // add alignment attribute for the shared memory pointer
+        if (amendedArgAttrs.size() == sharedMemoryOffset) {
+          attrs.push_back(rewriter.getNamedAttr(
+              "llvm.align",
+              rewriter.getIntegerAttr(rewriter.getIntegerType(64), 64)));
+        } else {
+          attrs.push_back(
+              rewriter.getNamedAttr("llvm.noalias", rewriter.getUnitAttr()));
+        }
+        amendedArgAttrs.emplace_back(DictionaryAttr::get(ctx, attrs));
       }
       amendedAttrs.push_back(
           rewriter.getNamedAttr(funcOp.getArgAttrsAttrName(),
@@ -85,14 +98,14 @@ struct FuncOpSPMDParamConversion
         funcOp.getLoc(), funcOp.getName(), amendedFuncTy, amendedAttrs);
     auto &region = funcOp.getBody();
 
-    region.addArgument(i32_ty, loc);      // thread_id
-    region.addArgument(i32_ty, loc);      // x
-    region.addArgument(i32_ty, loc);      // y
-    region.addArgument(i32_ty, loc);      // z
-    region.addArgument(i32_ty, loc);      // gridX
-    region.addArgument(i32_ty, loc);      // gridY
-    region.addArgument(i32_ty, loc);      // gridZ
-    region.addArgument(sharedPtrTy, loc); // shared memory ptr
+    auto nameLoc = [&](const char *name) {
+      return NameLoc::get(rewriter.getStringAttr(name));
+    };
+
+    region.addArgument(voidPtrTy, nameLoc("launch_sz"));
+    region.addArgument(voidPtrTy, nameLoc("launch_id"));
+    region.addArgument(sharedPtrTy, nameLoc("shared_mem_ptr"));
+    region.addArgument(voidPtrTy, nameLoc("cpu_barrier"));
 
     rewriter.inlineRegionBefore(region, amendedFuncOp.getBody(),
                                 amendedFuncOp.end());
@@ -135,7 +148,7 @@ struct FuncOpSPMDParamConversion
 
     // set the alignment on the shared memory pointer argument
     if (triton::isKernel(funcOp)) {
-      const int sharedMemoryPtrArgIndex = newFuncOp.getNumArguments() - 1;
+      const int sharedMemoryPtrArgIndex = newFuncOp.getNumArguments() - 2;
       assert(sharedMemoryPtrArgIndex >= 0 &&
              "expected at least one function argument");
       auto sharedMemoryPtrArg = newFuncOp.getArgument(sharedMemoryPtrArgIndex);
