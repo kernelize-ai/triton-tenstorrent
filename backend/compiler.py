@@ -4,6 +4,7 @@ import functools
 import hashlib
 import re
 import os
+from typing import Tuple
 from pathlib import Path
 
 from triton.backends.compiler import BaseBackend, GPUTarget, Language
@@ -21,6 +22,7 @@ from types import ModuleType
 class CPUOptions:
     num_warps: int = int(os.environ.get('TRITON_CPU_NUM_WARPS', 1))
     num_ctas: int = 1
+    num_stages: int = 1
     cluster_dims: tuple = (1, 1, 1)
     debug: bool = False
     arch: str = None
@@ -28,7 +30,10 @@ class CPUOptions:
     backend_name: str = 'cpu'
     sanitize_overflow: bool = True
     instrumentation_mode: str = ""
+    allowed_dot_input_precisions: Tuple[str] = ("ieee", )
+    matrix_instr_nonkdim: int = 16
     warp_size: int = 1
+    min_dot_size: int = 1
 
     def hash(self):
         hash_dict = dict(self.__dict__)
@@ -201,10 +206,14 @@ class CPUBackend(BaseBackend):
             asm_path = os.path.join(tmpdir, "kernel.s")
             Path(asm_path).write_text(src)
             lib_dirs = cpu_driver.library_dirs()
-            libs = ["sleef"]  # TODO: conditionally include?
+            libs = ["sleef", "cpu_utils"]  # TODO: conditionally include?
             include_dirs = []
-            so = _build("kernel", asm_path, tmpdir, lib_dirs, include_dirs, libs,
-                        ["-undefined", "dynamic_lookup"] if cpu_driver.is_macos() else [])
+            ccflags = []
+            for lib_dir in lib_dirs:
+                ccflags.extend(["-Xlinker", "-rpath", "-Xlinker", lib_dir])
+            if cpu_driver.is_macos():
+                ccflags.extend(["-undefined", "dynamic_lookup"])
+            so = _build("kernel", asm_path, tmpdir, lib_dirs, include_dirs, libs, ccflags)
             with open(so, "rb") as f:
                 return f.read()
 
