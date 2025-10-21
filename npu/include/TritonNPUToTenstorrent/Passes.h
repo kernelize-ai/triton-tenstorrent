@@ -1,6 +1,8 @@
 #ifndef TRITONNPU_CONVERSION_TRITONNPUTOTENSTORRENT_PASSES_H
 #define TRITONNPU_CONVERSION_TRITONNPUTOTENSTORRENT_PASSES_H
 
+#include "mlir/Pass/Pass.h"
+
 namespace mlir {
 
 class ModuleOp;
