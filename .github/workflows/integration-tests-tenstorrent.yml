@@ -26,6 +26,8 @@ jobs:
     steps:
       - name: Install ccache
         run: sudo apt-get update && sudo apt-get install -y ccache
+      - name: Install boost
+        run: sudo apt-get update && sudo apt-get install -y libboost-fiber-dev
       - name: Install tt-mlir system deps
         run: |
           sudo apt install -y build-essential git vim python3 python3-venv python3-dev clang-19 libclang-cpp17-dev libgtest-dev python3-sphinx libnuma-dev numactl libhwloc-dev pkg-config doxygen
@@ -138,6 +140,7 @@ jobs:
         working-directory: ./triton
         run: |
           python -m pytest --device "cpu" python/test/unit/language/test_core.py -k "test_reduce1d or test_load_store_same_ptr"
+          python -m pytest --device "cpu" python/test/unit/runtime/test_launch.py -k "not test_launch_with_options"
       - name: Run tutorial 01 on CPU
         if: false
         working-directory: ./triton
