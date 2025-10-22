@@ -4,6 +4,7 @@ add_triton_library(TritonTenstorrentIR
 
   DEPENDS
   TritonTenstorrentTableGen
+  TritonTenstorrentAttrDefsIncGen
 
   LINK_LIBS PUBLIC
   TritonIR
