@@ -15,4 +15,4 @@ def TritonTenstorrentPropagateRegisterIndices : Pass<"tritontenstorrent-propagat
                             ];
 }
 
-#endif 
+#endif

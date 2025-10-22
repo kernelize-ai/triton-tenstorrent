@@ -11,12 +11,12 @@ namespace npu {
 #define GEN_PASS_DECL
 #include "npu/include/Dialect/TritonTenstorrent/Transforms/Passes.h.inc"
 
-/// Generate the code for registering passes. 
+/// Generate the code for registering passes.
 #define GEN_PASS_REGISTRATION
 #include "npu/include/Dialect/TritonTenstorrent/Transforms/Passes.h.inc"
 
-}
-}
-}
+} // namespace npu
+} // namespace triton
+} // namespace mlir
 
-#endif 
+#endif

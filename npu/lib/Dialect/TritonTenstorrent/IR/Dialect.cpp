@@ -3,9 +3,9 @@
 
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
 #include "mlir/IR/DialectImplementation.h"
-#include "npu/include/Dialect/TritonTenstorrent/IR/Dialect.h"
-#include "npu/include/Dialect/TritonTenstorrent/IR/Attributes.h"
 #include "mlir/Support/TypeID.h"
+#include "npu/include/Dialect/TritonTenstorrent/IR/Attributes.h"
+#include "npu/include/Dialect/TritonTenstorrent/IR/Dialect.h"
 #include "llvm/ADT/TypeSwitch.h"
 
 #include "npu/include/Dialect/TritonTenstorrent/IR/Dialect.cpp.inc"
@@ -34,7 +34,7 @@ void TritonTenstorrentDialect::printAttribute(
 #endif
 
 Attribute TileEncodingAttr::parse(AsmParser &parser, Type type) {
-  if (parser.parseLess().failed()) 
+  if (parser.parseLess().failed())
     return {};
   NamedAttrList attrs;
   if (parser.parseOptionalAttrDict(attrs).failed())
@@ -43,13 +43,13 @@ Attribute TileEncodingAttr::parse(AsmParser &parser, Type type) {
     return {};
   unsigned index = cast<IntegerAttr>(attrs.get("index")).getInt();
   auto parent = dyn_cast<gpu::DistributedEncodingTrait>(attrs.get("parent"));
-   if (!parent) {
+  if (!parent) {
     parser.emitError(parser.getNameLoc(),
                      "expected a distributed encoding trait");
     return {};
   }
-  return parser.getChecked<TileEncodingAttr>(parser.getContext(), index, parent);
-  
+  return parser.getChecked<TileEncodingAttr>(parser.getContext(), index,
+                                             parent);
 }
 
 void TileEncodingAttr::print(AsmPrinter &printer) const {

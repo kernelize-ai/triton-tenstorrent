@@ -3,6 +3,8 @@
 
 #include "mlir/IR/Attributes.h"
 
+#include "triton/Dialect/TritonGPU/IR/Dialect.h"
+
 #define GET_ATTRDEF_CLASSES
 #include "npu/include/Dialect/TritonTenstorrent/IR/AttrDefs.h.inc"
 

@@ -2,8 +2,13 @@
 
 #include "mlir/Pass/Pass.h"
 #include "mlir/Transforms/Passes.h"
+#include "llvm/Support/Debug.h"
 
+#include "npu/include/Dialect/TritonTenstorrent/IR/Attributes.h"
 #include "npu/include/Dialect/TritonTenstorrent/IR/Dialect.h"
+
+using namespace mlir;
+using namespace mlir::triton;
 
 namespace mlir {
 namespace triton {
@@ -16,6 +21,74 @@ namespace npu {
 #define DBGS() (llvm::dbgs() << "[" DEBUG_TYPE "]: ")
 #define LDBG(X) LLVM_DEBUG(DBGS() << X << "\n")
 
+namespace {
+
+class RegisterIndexPropagation {
+public:
+  RegisterIndexPropagation(FuncOp funcOp) : funcOp(funcOp) {}
+
+  // Find the compute ops and associate their register indices to operand values
+  void initComputeRegisterIndices();
+
+  // Propagate register indices to local loads
+  void propagateToLocalLoads();
+
+private:
+  // map from value to its index in the tile register buffer
+  llvm::MapVector<Value, unsigned> layouts;
+  FuncOp funcOp;
+};
+
+void RegisterIndexPropagation::initComputeRegisterIndices() {
+  auto storeRegisterIndex = [&](Value operand, unsigned index) {
+    LDBG("Mapping " << operand << " to register index " << index);
+    layouts.insert({operand, index});
+  };
+
+  funcOp.walk([&](Operation *op) {
+    if (isa<arith::AddFOp>(op)) {
+      storeRegisterIndex(op->getOperand(0), 0);
+      storeRegisterIndex(op->getOperand(1), 1);
+    }
+  });
+}
+
+void RegisterIndexPropagation::propagateToLocalLoads() {
+  for (auto &[value, index] : layouts) {
+    auto loadOp = dyn_cast<LoadOp>(value.getDefiningOp());
+    if (!loadOp) {
+      LDBG("Value " << value << " is not defined by a LoadOp, skipping");
+      continue;
+    }
+    auto loadTensorType = dyn_cast<RankedTensorType>(loadOp.getType());
+    if (!loadTensorType) {
+      LDBG("LoadOp " << loadOp << " does not have RankedTensorType, skipping");
+      continue;
+    }
+    auto loadEncoding = loadTensorType.getEncoding();
+    auto newLoadEncoding = npu::tt::TileEncodingAttr::get(
+        loadOp.getContext(), index,
+        cast<gpu::DistributedEncodingTrait>(loadEncoding));
+    LDBG("Propagating new encoding " << newLoadEncoding << " to LoadOp "
+                                     << loadOp);
+    auto newLoadType = loadTensorType.cloneWithEncoding(newLoadEncoding);
+
+    OpBuilder rewriter(value.getContext());
+    rewriter.setInsertionPointAfter(loadOp);
+
+    IRMapping mapping;
+    Operation *newLoadOp = rewriter.clone(*loadOp, mapping);
+    newLoadOp->getResult(0).setType(newLoadType);
+    llvm::errs() << "new load op: " << *newLoadOp << "\n";
+
+    auto cvt = rewriter.create<gpu::ConvertLayoutOp>(
+        loadOp.getLoc(), loadTensorType, newLoadOp->getResult(0));
+    loadOp.replaceAllUsesWith(cvt.getResult());
+  }
+}
+
+} // namespace
+
 class TritonTenstorrentPropagateRegisterIndicesPass
     : public triton::npu::impl::TritonTenstorrentPropagateRegisterIndicesBase<
           TritonTenstorrentPropagateRegisterIndicesPass> {
@@ -24,12 +97,18 @@ public:
     MLIRContext *context = &getContext();
     ModuleOp m = getOperation();
 
-    // TODO
+    m.walk([](FuncOp funcOp) {
+      StringRef funcName = funcOp.getSymName();
+      if (false && !funcName.ends_with("__compute"))
+        return;
 
+      RegisterIndexPropagation propagation(funcOp);
+      propagation.initComputeRegisterIndices();
+      propagation.propagateToLocalLoads();
+    });
   }
 };
 
-
-}
-}
-}
+} // namespace npu
+} // namespace triton
+} // namespace mlir

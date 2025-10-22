@@ -1,9 +1,9 @@
 add_triton_library(TritonTenstorrentTransforms
     PropagateRegisterIndices.cpp
-    
-    DEPENDS 
+
+    DEPENDS
     TritonTenstorrentTransformsIncGen
-    
+
     LINK_LIBS PUBLIC
     MLIRTransforms
     TritonTenstorrentIR

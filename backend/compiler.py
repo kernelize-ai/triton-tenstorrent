@@ -183,6 +183,8 @@ class CPUBackend(BaseBackend):
         passes.common.add_cse(pm)
         passes.common.add_canonicalizer(pm)
 
+        cpu.passes.tenstorrent.add_propagate_register_indices(pm)
+
         cpu.passes.tenstorrent.convert_triton_func_to_func(pm)
 
         # Force output
