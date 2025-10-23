@@ -182,15 +182,18 @@ class CPUBackend(BaseBackend):
         passes.ttgpuir.add_remove_layout_conversions(pm)
 
         cpu.passes.tenstorrent.add_core_specialize(pm)
+
         passes.common.add_symbol_dce(pm)
         passes.common.add_sccp(pm)
         passes.common.add_cse(pm)
         passes.common.add_canonicalizer(pm)
 
         cpu.passes.tenstorrent.convert_triton_func_to_func(pm)
+        cpu.passes.tenstorrent.add_to_ttkernel_dialect(pm)
 
         # Force output
         passes.common.add_canonicalizer(pm)
+
         pm.run(mod, "make_tenstorrentir")
         return mod
 

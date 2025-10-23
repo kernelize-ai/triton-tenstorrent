@@ -29,4 +29,18 @@ def ConvertTritonFuncToFunc : Pass<"convert-triton-func-to-func", "mlir::ModuleO
                             ];
 }
 
+def ConvertTritonNPUToTTKernel : Pass<"convert-triton-npu-to-ttkernel", "mlir::ModuleOp"> {
+    let summary = "Convert TritonNPU to TTKernel";
+    let description = [{
+        The `convert-triton-npu-to-ttkernel` pass transforms Triton NPU operations
+        into TTKernel operations, preparing the IR for Tenstorrent kernel generation.
+    }];
+
+    let dependentDialects = ["mlir::triton::TritonDialect",
+                            "mlir::triton::gpu::TritonGPUDialect",
+                             "mlir::tt::ttkernel::TTKernelDialect",
+                             "mlir::arith::ArithDialect"
+                            ];
+}
+
 #endif
