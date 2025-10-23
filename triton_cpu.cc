@@ -1,6 +1,7 @@
 #include "cpu/include/Dialect/TritonCPU/IR/Dialect.h"
 #include "cpu/include/Dialect/TritonCPU/Transforms/Passes.h"
 #include "cpu/include/TritonCPUToLLVM/Passes.h"
+#include "npu/include/Dialect/TritonTenstorrent/Transforms/Passes.h"
 #include "npu/include/TritonNPUToTenstorrent/Passes.h"
 
 #include "mlir/Pass/PassManager.h"
@@ -51,6 +52,13 @@ void init_triton_npu_passes_tenstorrent(py::module &&m) {
   });
   m.def("convert_triton_func_to_func", [](mlir::PassManager &pm) {
     pm.addPass(mlir::triton::npu::createConvertTritonFuncToFunc());
+  });
+  m.def("add_propagate_register_indices", [](mlir::PassManager &pm) {
+    pm.addPass(
+        mlir::triton::npu::createTritonTenstorrentPropagateRegisterIndices());
+  });
+  m.def("add_convert_compute_ops", [](mlir::PassManager &pm) {
+    pm.addPass(mlir::triton::npu::createTritonTenstorrentConvertComputeOps());
   });
 }
 

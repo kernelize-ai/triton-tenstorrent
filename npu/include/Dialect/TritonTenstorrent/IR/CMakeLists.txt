@@ -10,3 +10,8 @@ mlir_tablegen(Ops.cpp.inc -gen-op-defs)
 add_mlir_doc(TritonTenstorrentDialect TritonTenstorrentDialect dialects/ -gen-dialect-doc)
 add_mlir_doc(TritonTenstorrentOps TritonTenstorrentOps dialects/ -gen-op-doc)
 add_public_tablegen_target(TritonTenstorrentTableGen)
+
+set(LLVM_TARGET_DEFINITIONS TritonTenstorrentAttrDefs.td)
+mlir_tablegen(AttrDefs.h.inc -gen-attrdef-decls -attrdefs-dialect=triton_tenstorrent)
+mlir_tablegen(AttrDefs.cpp.inc -gen-attrdef-defs -attrdefs-dialect=triton_tenstorrent)
+add_public_tablegen_target(TritonTenstorrentAttrDefsIncGen)
