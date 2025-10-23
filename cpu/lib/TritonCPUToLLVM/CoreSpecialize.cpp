@@ -22,7 +22,6 @@ using namespace mlir;
 
 namespace {
 
-
 static bool isDepenendetLoad(triton::LoadOp load) {
   for (auto &use : load->getUses()) {
     if (isa<triton::LoadOp>(use.getOwner()))
