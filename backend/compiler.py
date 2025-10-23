@@ -177,13 +177,14 @@ class CPUBackend(BaseBackend):
         pm = ir.pass_manager(mod.context)
         pm.enable_debug()
 
+        cpu.passes.tenstorrent.add_propagate_register_indices(pm)
+        passes.ttgpuir.add_remove_layout_conversions(pm)
+
         cpu.passes.tenstorrent.add_core_specialize(pm)
         passes.common.add_symbol_dce(pm)
         passes.common.add_sccp(pm)
         passes.common.add_cse(pm)
         passes.common.add_canonicalizer(pm)
-
-        cpu.passes.tenstorrent.add_propagate_register_indices(pm)
 
         cpu.passes.tenstorrent.convert_triton_func_to_func(pm)
 

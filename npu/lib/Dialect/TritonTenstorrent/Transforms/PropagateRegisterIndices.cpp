@@ -55,11 +55,17 @@ void RegisterIndexPropagation::initComputeRegisterIndices() {
 
 void RegisterIndexPropagation::propagateToLocalLoads() {
   for (auto &[value, index] : layouts) {
-    auto loadOp = dyn_cast<LoadOp>(value.getDefiningOp());
+    LoadOp loadOp = dyn_cast<LoadOp>(value.getDefiningOp());
     if (!loadOp) {
       LDBG("Value " << value << " is not defined by a LoadOp, skipping");
       continue;
     }
+
+#if 0
+    loadOp->setAttr("ttts.register_index",
+                   IntegerAttr::get(IntegerType::get(loadOp.getContext(), 32),
+                                    index));
+#else
     auto loadTensorType = dyn_cast<RankedTensorType>(loadOp.getType());
     if (!loadTensorType) {
       LDBG("LoadOp " << loadOp << " does not have RankedTensorType, skipping");
@@ -74,9 +80,21 @@ void RegisterIndexPropagation::propagateToLocalLoads() {
     auto newLoadType = loadTensorType.cloneWithEncoding(newLoadEncoding);
 
     OpBuilder rewriter(value.getContext());
-    rewriter.setInsertionPointAfter(loadOp);
+    rewriter.setInsertionPoint(loadOp);
 
     IRMapping mapping;
+    for (auto operand : loadOp->getOperands()) {
+      RankedTensorType operandTensorType =
+          dyn_cast<RankedTensorType>(operand.getType());
+      if (!operandTensorType)
+        continue;
+      auto cvt = rewriter.create<gpu::ConvertLayoutOp>(
+          loadOp.getLoc(), operandTensorType.cloneWithEncoding(newLoadEncoding),
+          operand);
+      mapping.map(operand, cvt);
+    }
+
+    rewriter.setInsertionPointAfter(loadOp);
     Operation *newLoadOp = rewriter.clone(*loadOp, mapping);
     newLoadOp->getResult(0).setType(newLoadType);
     llvm::errs() << "new load op: " << *newLoadOp << "\n";
@@ -84,6 +102,7 @@ void RegisterIndexPropagation::propagateToLocalLoads() {
     auto cvt = rewriter.create<gpu::ConvertLayoutOp>(
         loadOp.getLoc(), loadTensorType, newLoadOp->getResult(0));
     loadOp.replaceAllUsesWith(cvt.getResult());
+#endif
   }
 }
 
