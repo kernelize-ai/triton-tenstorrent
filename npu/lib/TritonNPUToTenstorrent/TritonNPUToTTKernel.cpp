@@ -1,14 +1,15 @@
 #include "npu/include/TritonNPUToTenstorrent/Passes.h"
 
 #include "mlir/Transforms/DialectConversion.h"
+#include "llvm/Support/Debug.h"
 
 #include "triton/Dialect/Triton/IR/Dialect.h"
 #include "triton/Dialect/TritonGPU/IR/Dialect.h"
 
-#include "npu/include/Dialect/TritonTenstorrent/IR/Dialect.h"
 #include "npu/include/Dialect/TritonTenstorrent/IR/Attributes.h"
+#include "npu/include/Dialect/TritonTenstorrent/IR/Dialect.h"
 
-// Tenstorrent TTKernel includes 
+// Tenstorrent TTKernel includes
 #include "ttmlir/Dialect/TTKernel/IR/TTKernel.h"
 #include "ttmlir/Dialect/TTKernel/IR/TTKernelOps.h"
 
@@ -22,9 +23,14 @@ namespace npu {
 #define GEN_PASS_DEF_CONVERTTRITONNPUTOTTKERNEL
 #include "npu/include/TritonNPUToTenstorrent/Passes.h.inc"
 
+#define DEBUG_TYPE "convert-triton-npu-to-ttkernel"
+#define DBGS() (llvm::dbgs() << "[" DEBUG_TYPE "]: ")
+#define LDBG(X) LLVM_DEBUG(DBGS() << X << "\n")
+
 namespace {
 
-struct ConvertBinaryComputeOp : public OpConversionPattern<npu::tt::BinaryComputeOp> {
+struct ConvertBinaryComputeOp
+    : public OpConversionPattern<npu::tt::BinaryComputeOp> {
   using OpConversionPattern<npu::tt::BinaryComputeOp>::OpConversionPattern;
 
   LogicalResult
@@ -37,8 +43,6 @@ struct ConvertBinaryComputeOp : public OpConversionPattern<npu::tt::BinaryComput
 
     auto lhs = adaptor.getLhs();
     auto rhs = adaptor.getRhs();
-    llvm::errs() << "lhs type = " << lhs.getType() << "\n";
-    llvm::errs() << "rhs type = " << rhs.getType() << "\n";
 
     // create init op
     rewriter.create<ttkernel::AddTilesInitOp>(loc, lhs, rhs);
@@ -70,7 +74,6 @@ struct ConvertLocalStoreOp : public OpConversionPattern<gpu::LocalStoreOp> {
     Location loc = op.getLoc();
 
     auto dst = adaptor.getDst();
-    llvm::errs() << "converted dst = " << dst << "\n";
 
     Value destRegisterIndex = rewriter.create<arith::ConstantOp>(
         loc, rewriter.getIndexType(),
@@ -101,9 +104,6 @@ struct ConvertLocalLoadOp : public OpConversionPattern<gpu::LocalLoadOp> {
                   ConversionPatternRewriter &rewriter) const override {
     Location loc = op.getLoc();
 
-    llvm::errs() << "load src: " << op.getSrc() << "\n";
-    llvm::errs() << "converted load src: " << adaptor.getSrc() << "\n";
-
     // 1. wait_front on the cb to know data is ready to load from SRAM
     Value c1 = rewriter.create<arith::ConstantOp>(
         loc, rewriter.getI32Type(),
@@ -111,18 +111,16 @@ struct ConvertLocalLoadOp : public OpConversionPattern<gpu::LocalLoadOp> {
     auto waitFrontOp =
         rewriter.create<ttkernel::CBWaitFrontOp>(loc, adaptor.getSrc(), c1);
 
-    llvm::errs() << "adaptor src type: " << adaptor.getSrc().getType();
+    LDBG("Converted load src type = " << adaptor.getSrc().getType() << "\n");
     assert(isa<ttkernel::CBType>(adaptor.getSrc().getType()) &&
            "expected memref type for type converted load src");
     auto cbType = cast<ttkernel::CBType>(adaptor.getSrc().getType());
-    llvm::errs() << "cbType: " << cbType << "\n";
     MemRefType cbTileMemref = cbType.getMemref();
-    llvm::errs() << "cbTileMemref = " << cbTileMemref << "\n";
+
     // 1.5 reinterpret the cb from 2D to 1D tile shape
     MemRefType oneDTileType = MemRefType::get(
         {1}, cbTileMemref.getElementType(), MemRefLayoutAttrInterface{},
         cbTileMemref.getMemorySpace());
-    llvm::errs() << "oneDTileType = " << oneDTileType << "\n";
     auto oneDTile =
         rewriter
             .create<ttkernel::CBReinterpretShapeOp>(
@@ -136,24 +134,18 @@ struct ConvertLocalLoadOp : public OpConversionPattern<gpu::LocalLoadOp> {
         loc, rewriter.getIndexType(),
         rewriter.getIntegerAttr(rewriter.getIndexType(), 0));
     RankedTensorType loadType = cast<RankedTensorType>(op.getType());
-    npu::tt::TileEncodingAttr loadEncoding = cast<npu::tt::TileEncodingAttr>(
-        loadType.getEncoding());
+    npu::tt::TileEncodingAttr loadEncoding =
+        cast<npu::tt::TileEncodingAttr>(loadType.getEncoding());
     Value destRegisterIndex = rewriter.create<arith::ConstantOp>(
         loc, rewriter.getIndexType(),
         rewriter.getIntegerAttr(rewriter.getIndexType(),
                                 loadEncoding.getIndex()));
     rewriter.create<ttkernel::CopyTileOp>(loc, oneDTile, c0, destRegisterIndex);
 
-#if 1
     // replace uses of the load with the alloc
     auto cb = adaptor.getSrc();
     op.replaceAllUsesWith(cb);
     op.erase();
-#else
-    // erase the load if it is unused - otherwise let consumers erase it
-    if (op->use_empty())
-      op.erase();
-#endif
     return success();
   }
 };
@@ -174,11 +166,11 @@ struct ConvertLocalAllocOp : public OpConversionPattern<gpu::LocalAllocOp> {
     int64_t allocIdxValue = allocIdx.getInt();
 
     auto typeConverter = getTypeConverter();
-    llvm::errs() << "local alloc op type = " << op.getType() << "\n";
-    auto cbMemRefType = cast<ttkernel::CBType>(
-        typeConverter->convertType(op.getResult().getType()));
-    llvm::errs() << "converted cbMemRefType = " << cbMemRefType << "\n";
-    // Type cbType = ttkernel::CBType::get(rewriter.getContext(), cbMemRefType);
+
+    LDBG("Local alloc op result type: " << op.getResult().getType() << "\n");
+    Type convertedType = typeConverter->convertType(op.getResult().getType());
+    LDBG("is converted to memref type: " << convertedType << "\n");
+    auto cbMemRefType = cast<ttkernel::CBType>(convertedType);
 
     rewriter.replaceOpWithNewOp<ttkernel::GetCompileArgValOp>(op, cbMemRefType,
                                                               allocIdxValue);
@@ -201,27 +193,19 @@ struct ConvertTritonNPUToTTKernelPass
     target.addLegalDialect<arith::ArithDialect>();
     target.addLegalDialect<func::FuncDialect>();
 
-#if 1
     target.addIllegalOp<npu::tt::BinaryComputeOp>();
-#else
-    target.addDynamicallyLegalOp<arith::AddFOp>(
-        [](arith::AddFOp op) { return !isa<RankedTensorType>(op.getType()); });
-#endif
-
     target.addDynamicallyLegalOp<gpu::LocalStoreOp>([](gpu::LocalStoreOp op) {
       auto funcOp = op->getParentOfType<func::FuncOp>();
       assert(funcOp && "expected func::funcOp parent");
       StringRef funcName = funcOp.getSymName();
       return !funcName.ends_with("__compute");
     });
-#if 1
     target.addDynamicallyLegalOp<gpu::LocalLoadOp>([](gpu::LocalLoadOp op) {
       auto funcOp = op->getParentOfType<func::FuncOp>();
       assert(funcOp && "expected func::funcOp parent");
       StringRef funcName = funcOp.getSymName();
       return !funcName.ends_with("__compute");
     });
-#endif
     target.addDynamicallyLegalOp<gpu::LocalAllocOp>([](gpu::LocalAllocOp op) {
       auto funcOp = op->getParentOfType<func::FuncOp>();
       assert(funcOp && "expected func::funcOp parent");
@@ -249,7 +233,6 @@ struct ConvertTritonNPUToTTKernelPass
     });
 
     mlir::RewritePatternSet patterns(context);
-    // Going to have to lower local load and store first...
     patterns.add<ConvertLocalStoreOp>(typeConverter, patterns.getContext());
     patterns.add<ConvertLocalLoadOp>(typeConverter, patterns.getContext());
     patterns.add<ConvertLocalAllocOp>(typeConverter, patterns.getContext());
