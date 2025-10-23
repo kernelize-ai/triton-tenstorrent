@@ -5,6 +5,10 @@
 #include "triton/Dialect/Triton/IR/Dialect.h"
 #include "triton/Dialect/TritonGPU/IR/Dialect.h"
 
+#include "npu/include/Dialect/TritonTenstorrent/IR/Dialect.h"
+#include "npu/include/Dialect/TritonTenstorrent/IR/Attributes.h"
+
+// Tenstorrent TTKernel includes 
 #include "ttmlir/Dialect/TTKernel/IR/TTKernel.h"
 #include "ttmlir/Dialect/TTKernel/IR/TTKernelOps.h"
 
@@ -20,34 +24,24 @@ namespace npu {
 
 namespace {
 
-struct ConvertAddOp : public OpConversionPattern<arith::AddFOp> {
-  using OpConversionPattern<arith::AddFOp>::OpConversionPattern;
+struct ConvertBinaryComputeOp : public OpConversionPattern<npu::tt::BinaryComputeOp> {
+  using OpConversionPattern<npu::tt::BinaryComputeOp>::OpConversionPattern;
 
   LogicalResult
-  matchAndRewrite(arith::AddFOp op, OpAdaptor adaptor,
+  matchAndRewrite(npu::tt::BinaryComputeOp op, OpAdaptor adaptor,
                   ConversionPatternRewriter &rewriter) const override {
     Location loc = op.getLoc();
+
+    if (op.getOpcode().str() != "arith.addf")
+      return failure();
 
     auto lhs = adaptor.getLhs();
     auto rhs = adaptor.getRhs();
     llvm::errs() << "lhs type = " << lhs.getType() << "\n";
     llvm::errs() << "rhs type = " << rhs.getType() << "\n";
-#if 0
-    auto getCBFromLoadOp = [](Operation* op) {
-      llvm::errs() << "operation = " << *op << "\n";
-      auto localLoadOp = cast<gpu::LocalLoadOp>(op);
-      llvm::errs() << "localLoadOp = " << localLoadOp << "\n";
-      return localLoadOp.getSrc();
-    };
-    auto lhsCB = getCBFromLoadOp(lhs.getDefiningOp());
-    auto rhsCB = getCBFromLoadOp(rhs.getDefiningOp());
 
     // create init op
-    rewriter.create<ttkernel::AddTilesInitOp>(loc, lhsCB, rhsCB);
-#else
-    // create init op
     rewriter.create<ttkernel::AddTilesInitOp>(loc, lhs, rhs);
-#endif
 
     Value lhsIndex = rewriter.create<arith::ConstantOp>(
         loc, rewriter.getIndexType(),
@@ -141,10 +135,14 @@ struct ConvertLocalLoadOp : public OpConversionPattern<gpu::LocalLoadOp> {
     Value c0 = rewriter.create<arith::ConstantOp>(
         loc, rewriter.getIndexType(),
         rewriter.getIntegerAttr(rewriter.getIndexType(), 0));
-    // TODO: second c0 is wrong, needs to correspond with the set of registers
-    // tile index which would be "0" for "a" and "1" for "b" - we need to encode
-    // this somewhere in the layout
-    rewriter.create<ttkernel::CopyTileOp>(loc, oneDTile, c0, c0);
+    RankedTensorType loadType = cast<RankedTensorType>(op.getType());
+    npu::tt::TileEncodingAttr loadEncoding = cast<npu::tt::TileEncodingAttr>(
+        loadType.getEncoding());
+    Value destRegisterIndex = rewriter.create<arith::ConstantOp>(
+        loc, rewriter.getIndexType(),
+        rewriter.getIntegerAttr(rewriter.getIndexType(),
+                                loadEncoding.getIndex()));
+    rewriter.create<ttkernel::CopyTileOp>(loc, oneDTile, c0, destRegisterIndex);
 
 #if 1
     // replace uses of the load with the alloc
@@ -199,11 +197,13 @@ struct ConvertTritonNPUToTTKernelPass
     ModuleOp mod = getOperation();
 
     mlir::ConversionTarget target{*context};
-    target.addLegalDialect<tt::ttkernel::TTKernelDialect>();
+    target.addLegalDialect<ttkernel::TTKernelDialect>();
     target.addLegalDialect<arith::ArithDialect>();
     target.addLegalDialect<func::FuncDialect>();
 
 #if 1
+    target.addIllegalOp<npu::tt::BinaryComputeOp>();
+#else
     target.addDynamicallyLegalOp<arith::AddFOp>(
         [](arith::AddFOp op) { return !isa<RankedTensorType>(op.getType()); });
 #endif
@@ -237,7 +237,7 @@ struct ConvertTritonNPUToTTKernelPass
       // ttcore::TileSize, but we should encode that info into the layout and
       // use the Triton memdesc provided shape instead.
       auto shape = SmallVector<int64_t>(2, 1);
-      auto ttcoreTileType = tt::ttcore::TileType::get(
+      auto ttcoreTileType = ttcore::TileType::get(
           memdesc.getContext(), ttcore::TileType::getDefaultShape(),
           ttcore::elementTypeToDataType(memdesc.getElementType()));
 
@@ -253,7 +253,7 @@ struct ConvertTritonNPUToTTKernelPass
     patterns.add<ConvertLocalStoreOp>(typeConverter, patterns.getContext());
     patterns.add<ConvertLocalLoadOp>(typeConverter, patterns.getContext());
     patterns.add<ConvertLocalAllocOp>(typeConverter, patterns.getContext());
-    patterns.add<ConvertAddOp>(typeConverter, patterns.getContext());
+    patterns.add<ConvertBinaryComputeOp>(typeConverter, patterns.getContext());
 
     if (applyPartialConversion(mod, target, std::move(patterns)).failed())
       signalPassFailure();
