@@ -103,7 +103,6 @@ void RegisterIndexPropagation::propagateToLocalLoads() {
         loadOp.getLoc(), loadTensorType, newLoadOp->getResult(0));
     loadOp.replaceAllUsesWith(cvt.getResult());
     loadOp.erase();
-#endif
   }
 }
 

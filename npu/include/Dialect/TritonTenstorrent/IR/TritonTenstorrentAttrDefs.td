@@ -34,10 +34,6 @@ def TileEncodingAttr : AttrDef<TritonTenstorrent_Dialect, "TileEncoding", [Distr
         return getParent().toLinearLayout(shape);
     }
   }];
-
-  let extraClassDefinition = [{
-
-  }];
 }
 
 #endif // TRITONTENSTORRENT_ATTRDEFS
