@@ -63,7 +63,6 @@ class TritonTenstorrentConvertComputeOpsPass
     : public npu::impl::TritonTenstorrentConvertComputeOpsBase<
           TritonTenstorrentConvertComputeOpsPass> {
 public:
-#if 1
   void runOnOperation() override {
     MLIRContext *context = &getContext();
     RewritePatternSet patterns(context);
@@ -73,34 +72,6 @@ public:
     if (failed(applyPatternsGreedily(getOperation(), std::move(patterns))))
       signalPassFailure();
   }
-#else
-  void runOnOperation() override {
-    MLIRContext *context = &getContext();
-    ModuleOp m = getOperation();
-
-    DenseSet<Operation *> computeOps;
-    m.walk([](FuncOp funcOp) {
-      funcOp.walk([&](Operation *op) {
-        if (op->getNumOperands() == 2) {
-          if (llvm::all_of(op->getOperands(), [](Value val) {
-                // TODO: is isa<LoadOp> a strong enough condition by itself?
-                // probably not if we have convert layout ops
-                return isa<RankedTensorType>(val.getType()) &&
-                       isa<LoadOp>(val.getDefiningOp());
-              })) {
-            computeOps.insert(op);
-          }
-        }
-      });
-    });
-
-    for (op : computeOps) {
-      OpBuilder rewriter(op.getContext());
-      rewriter.replaceOpWithNewOp(
-          op, ) // TODO: replace this with the chatgpt version :)
-    }
-  }
-#endif
 };
 
 } // namespace npu

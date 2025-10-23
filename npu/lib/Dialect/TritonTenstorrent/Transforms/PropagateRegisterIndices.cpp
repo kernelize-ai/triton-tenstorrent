@@ -66,11 +66,6 @@ void RegisterIndexPropagation::propagateToLocalLoads() {
       continue;
     }
 
-#if 0
-    loadOp->setAttr("ttts.register_index",
-                   IntegerAttr::get(IntegerType::get(loadOp.getContext(), 32),
-                                    index));
-#else
     auto loadTensorType = dyn_cast<RankedTensorType>(loadOp.getType());
     if (!loadTensorType) {
       LDBG("LoadOp " << loadOp << " does not have RankedTensorType, skipping");
@@ -102,7 +97,7 @@ void RegisterIndexPropagation::propagateToLocalLoads() {
     rewriter.setInsertionPointAfter(loadOp);
     Operation *newLoadOp = rewriter.clone(*loadOp, mapping);
     newLoadOp->getResult(0).setType(newLoadType);
-    llvm::errs() << "new load op: " << *newLoadOp << "\n";
+    LDBG("Created new LoadOp: " << *newLoadOp);
 
     auto cvt = rewriter.create<gpu::ConvertLayoutOp>(
         loadOp.getLoc(), loadTensorType, newLoadOp->getResult(0));
@@ -119,7 +114,6 @@ void RegisterIndexPropagation::updateComputeOpInputs() {
 
     IRMapping mapping;
     for (auto operand : op->getOperands()) {
-#if 1
       gpu::ConvertLayoutOp cvt =
           dyn_cast<gpu::ConvertLayoutOp>(operand.getDefiningOp());
       if (!cvt)
@@ -130,26 +124,6 @@ void RegisterIndexPropagation::updateComputeOpInputs() {
         continue;
 
       mapping.map(operand, cvt.getSrc());
-#else
-      auto it = layouts.find(operand);
-      if (it == layouts.end())
-        continue;
-      unsigned index = it->second;
-
-      RankedTensorType operandTensorType =
-          dyn_cast<RankedTensorType>(operand.getType());
-      if (!operandTensorType)
-        continue;
-      auto operandEncoding = operandTensorType.getEncoding();
-      auto newOperandEncoding = npu::tt::TileEncodingAttr::get(
-          op->getContext(), index,
-          cast<gpu::DistributedEncodingTrait>(operandEncoding));
-
-      auto cvt = rewriter.create<gpu::ConvertLayoutOp>(
-          op->getLoc(), operandTensorType.cloneWithEncoding(newOperandEncoding),
-          operand);
-      mapping.map(operand, cvt);
-#endif
     }
 
     Operation *newOp = rewriter.clone(*op, mapping);

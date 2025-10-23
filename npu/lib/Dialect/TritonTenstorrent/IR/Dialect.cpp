@@ -18,20 +18,6 @@ using namespace mlir::triton::npu;
 #include "npu/include/Dialect/TritonTenstorrent/IR/AttrDefs.cpp.inc"
 
 namespace mlir::triton::npu::tt {
-#if 0
-/// Parse an attribute registered to this dialect.
-::mlir::Attribute
-TritonTenstorrentDialect::parseAttribute(::mlir::DialectAsmParser &parser,
-                                         ::mlir::Type type) const {
-  llvm_unreachable("parse stub called");
-}
-
-/// Print an attribute registered to this dialect.
-void TritonTenstorrentDialect::printAttribute(
-    ::mlir::Attribute attr, ::mlir::DialectAsmPrinter &os) const {
-  llvm_unreachable("print stub called");
-}
-#endif
 
 Attribute TileEncodingAttr::parse(AsmParser &parser, Type type) {
   if (parser.parseLess().failed())
