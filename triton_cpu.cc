@@ -57,6 +57,9 @@ void init_triton_npu_passes_tenstorrent(py::module &&m) {
     pm.addPass(
         mlir::triton::npu::createTritonTenstorrentPropagateRegisterIndices());
   });
+  m.def("add_convert_compute_ops", [](mlir::PassManager &pm) {
+    pm.addPass(mlir::triton::npu::createTritonTenstorrentConvertComputeOps());
+  });
 }
 
 void init_triton_cpu_passes_ttgpuir(py::module &&m) {

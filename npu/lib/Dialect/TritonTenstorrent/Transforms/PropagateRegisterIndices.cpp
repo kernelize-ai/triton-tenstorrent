@@ -33,9 +33,13 @@ public:
   // Propagate register indices to local loads
   void propagateToLocalLoads();
 
+  // override the inputs of the compute op with the new layouts
+  void updateComputeOpInputs();
+
 private:
   // map from value to its index in the tile register buffer
   llvm::MapVector<Value, unsigned> layouts;
+  DenseSet<Operation *> computeOps;
   FuncOp funcOp;
 };
 
@@ -46,7 +50,8 @@ void RegisterIndexPropagation::initComputeRegisterIndices() {
   };
 
   funcOp.walk([&](Operation *op) {
-    if (isa<arith::AddFOp>(op)) {
+    if (isa<npu::tt::BinaryComputeOp>(op)) {
+      computeOps.insert(op);
       storeRegisterIndex(op->getOperand(0), 0);
       storeRegisterIndex(op->getOperand(1), 1);
     }
@@ -102,7 +107,54 @@ void RegisterIndexPropagation::propagateToLocalLoads() {
     auto cvt = rewriter.create<gpu::ConvertLayoutOp>(
         loadOp.getLoc(), loadTensorType, newLoadOp->getResult(0));
     loadOp.replaceAllUsesWith(cvt.getResult());
+    loadOp.erase();
 #endif
+  }
+}
+
+void RegisterIndexPropagation::updateComputeOpInputs() {
+  for (auto *op : computeOps) {
+    OpBuilder rewriter(op->getContext());
+    rewriter.setInsertionPoint(op);
+
+    IRMapping mapping;
+    for (auto operand : op->getOperands()) {
+#if 1
+      gpu::ConvertLayoutOp cvt =
+          dyn_cast<gpu::ConvertLayoutOp>(operand.getDefiningOp());
+      if (!cvt)
+        continue;
+
+      // TODO: relax this condition
+      if (!isa<LoadOp>(cvt.getSrc().getDefiningOp()))
+        continue;
+
+      mapping.map(operand, cvt.getSrc());
+#else
+      auto it = layouts.find(operand);
+      if (it == layouts.end())
+        continue;
+      unsigned index = it->second;
+
+      RankedTensorType operandTensorType =
+          dyn_cast<RankedTensorType>(operand.getType());
+      if (!operandTensorType)
+        continue;
+      auto operandEncoding = operandTensorType.getEncoding();
+      auto newOperandEncoding = npu::tt::TileEncodingAttr::get(
+          op->getContext(), index,
+          cast<gpu::DistributedEncodingTrait>(operandEncoding));
+
+      auto cvt = rewriter.create<gpu::ConvertLayoutOp>(
+          op->getLoc(), operandTensorType.cloneWithEncoding(newOperandEncoding),
+          operand);
+      mapping.map(operand, cvt);
+#endif
+    }
+
+    Operation *newOp = rewriter.clone(*op, mapping);
+    op->replaceAllUsesWith(newOp->getResults());
+    op->erase();
   }
 }
 
@@ -124,6 +176,7 @@ public:
       RegisterIndexPropagation propagation(funcOp);
       propagation.initComputeRegisterIndices();
       propagation.propagateToLocalLoads();
+      propagation.updateComputeOpInputs();
     });
   }
 };

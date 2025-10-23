@@ -7,7 +7,7 @@ include "npu/include/Dialect/TritonTenstorrent/IR/TritonTenstorrentDialect.td"
 include "triton/Dialect/Triton/IR/TritonInterfaces.td" // might not need this?
 include "triton/Dialect/TritonGPU/IR/TritonGPUAttrDefs.td" // might not need this?
 
-def TileEncodingAttr : AttrDef<TritonTenstorrent_Dialect, "TileEncoding"> {
+def TileEncodingAttr : AttrDef<TritonTenstorrent_Dialect, "TileEncoding", [DistributedEncodingTrait, LayoutEncodingTrait]> {
   let mnemonic = "tile_encoding";
 
   let description = [{
@@ -20,6 +20,24 @@ def TileEncodingAttr : AttrDef<TritonTenstorrent_Dialect, "TileEncoding"> {
     "gpu::DistributedEncodingTrait":$parent
   );
   let hasCustomAssemblyFormat = 1;
+
+  let extraClassDeclaration = [{
+    gpu::CTALayoutAttr getCTALayout() const {
+        return gpu::getCTALayout(getParent());
+    }
+
+    SmallVector<unsigned> getRepOrder() const {
+        return getParent().getRepOrder();
+    }
+
+    LinearLayout toLinearLayout(ArrayRef<int64_t> shape) const {
+        return getParent().toLinearLayout(shape);
+    }
+  }];
+
+  let extraClassDefinition = [{
+
+  }];
 }
 
 #endif // TRITONTENSTORRENT_ATTRDEFS

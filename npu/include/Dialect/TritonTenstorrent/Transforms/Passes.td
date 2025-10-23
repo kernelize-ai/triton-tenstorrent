@@ -15,4 +15,17 @@ def TritonTenstorrentPropagateRegisterIndices : Pass<"tritontenstorrent-propagat
                             ];
 }
 
+def TritonTenstorrentConvertComputeOps : Pass<"tritontenstorrent-convert-compute-ops", "mlir::ModuleOp"> {
+    let summary = "Convert Triton compute ops to Tenstorrent compute ops";
+
+    let description = [{
+        coming soon
+    }];
+
+    let dependentDialects = ["mlir::triton::npu::tt::TritonTenstorrentDialect",
+                             "mlir::triton::TritonDialect",
+                             "arith::ArithDialect"
+                            ];
+}
+
 #endif

@@ -177,6 +177,7 @@ class CPUBackend(BaseBackend):
         pm = ir.pass_manager(mod.context)
         pm.enable_debug()
 
+        cpu.passes.tenstorrent.add_convert_compute_ops(pm)
         cpu.passes.tenstorrent.add_propagate_register_indices(pm)
         passes.ttgpuir.add_remove_layout_conversions(pm)
 
