@@ -118,6 +118,7 @@ struct ConvertLocalLoadOp : public OpConversionPattern<gpu::LocalLoadOp> {
     MemRefType cbTileMemref = cbType.getMemref();
 
     // 1.5 reinterpret the cb from 2D to 1D tile shape
+    // TODO: materialize this as a reshape op?
     MemRefType oneDTileType = MemRefType::get(
         {1}, cbTileMemref.getElementType(), MemRefLayoutAttrInterface{},
         cbTileMemref.getMemorySpace());
@@ -142,9 +143,9 @@ struct ConvertLocalLoadOp : public OpConversionPattern<gpu::LocalLoadOp> {
                                 loadEncoding.getIndex()));
     rewriter.create<ttkernel::CopyTileOp>(loc, oneDTile, c0, destRegisterIndex);
 
-    // replace uses of the load with the alloc
-    auto cb = adaptor.getSrc();
-    op.replaceAllUsesWith(cb);
+    // replace uses of the load with the CB output (possibly reshaped but we
+    // should handle that elsewhere)
+    op.replaceAllUsesWith(oneDTile);
     op.erase();
     return success();
   }
