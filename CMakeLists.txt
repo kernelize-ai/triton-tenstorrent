@@ -11,8 +11,8 @@ set(TTMLIR_LIB_DIR "${TENSTORRENT_MLIR}/build/lib")
 
 set(TTMLIR_LIB_NAMES
     MLIRTTKernelDialect
-    MLIRTTCoreDialect
     MLIRTTMetalDialect
+    MLIRTTCoreDialect
 )
 
 # Create imported libraries for each TT-MLIR dep
