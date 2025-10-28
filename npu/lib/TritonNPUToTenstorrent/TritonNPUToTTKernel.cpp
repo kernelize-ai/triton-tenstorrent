@@ -1,5 +1,6 @@
 #include "npu/include/TritonNPUToTenstorrent/Passes.h"
 
+#include "mlir/Analysis/SliceAnalysis.h"
 #include "mlir/Transforms/DialectConversion.h"
 #include "llvm/Support/Debug.h"
 
@@ -182,6 +183,113 @@ struct ConvertLocalAllocOp : public OpConversionPattern<gpu::LocalAllocOp> {
   }
 };
 
+static bool isCBOp(Operation *op) {
+  if (auto compileTimeArg = dyn_cast<ttkernel::GetCompileArgValOp>(op)) {
+    return isa<ttkernel::CBType>(compileTimeArg.getType());
+  }
+  return isa<ttkernel::CBReinterpretShapeOp>(op);
+}
+
+class InitializationHelper {
+public:
+  struct ComputeOpInfo {
+    ComputeOpInfo() {}
+    ComputeOpInfo(Operation *op) : op(op) {}
+    Value input;
+    Value output;
+    Operation *op;
+  };
+
+  InitializationHelper(func::FuncOp F) : funcOp(F) {}
+
+  void insertTileRegsAcquireOps() {
+    llvm::SetVector<Block *> visited;
+    // TODO: this should generically visit all compute ops
+    funcOp.walk([&](ttkernel::AddTilesOp addTilesOp) {
+      Block *b = addTilesOp->getBlock();
+      if (visited.insert(b))
+        insertTileRegsAcquireInBlock(b, ComputeOpInfo(addTilesOp));
+    });
+  }
+
+  void collectInputs() {
+    for (auto &[_, computeOpInfo] : acquireRegistersToComputeOps) {
+
+      // find the first SFPU compute op input by working backward from the
+      // compute op
+      SetVector<Operation *> backwardSlice;
+      BackwardSliceOptions opt;
+      (void)getBackwardSlice(computeOpInfo.op, &backwardSlice, opt);
+
+      Value input;
+      for (auto op : llvm::reverse(backwardSlice)) {
+        if (isCBOp(op)) {
+          assert(op->getNumResults() == 1 &&
+                 "expected single result for cb op");
+          computeOpInfo.input = op->getResult(0);
+          break;
+        }
+      }
+      assert(computeOpInfo.input && "expected to find input value");
+    }
+  }
+
+  void collectOutputs() {
+    funcOp.walk([&](ttkernel::PackTileOp packTileOp) {
+      // Note: this is completely disassociated from the compute op, which seems
+      // wrong
+      assert(acquireRegistersToComputeOps.size() == 1 &&
+             "expecting single compute op");
+      ComputeOpInfo &computeOpInfo =
+          acquireRegistersToComputeOps.begin()->second;
+
+      SetVector<Operation *> backwardSlice;
+      BackwardSliceOptions opt;
+      (void)getBackwardSlice(packTileOp, &backwardSlice, opt);
+
+      for (auto op : llvm::reverse(backwardSlice)) {
+        if (isCBOp(op)) {
+          assert(op->getNumResults() == 1 &&
+                 "expected single result for cb op");
+          computeOpInfo.output = op->getResult(0);
+          break;
+        }
+      }
+
+      assert(computeOpInfo.output && "expected to find output value");
+    });
+  }
+
+  void insertSFPUInitOps() {
+    for (auto [acquireOp, computeOpInfo] : acquireRegistersToComputeOps) {
+      OpBuilder builder(acquireOp);
+      builder.setInsertionPoint(acquireOp);
+
+      // insert SFPU init op
+      builder.create<ttkernel::InitSFPUOp>(
+          acquireOp->getLoc(), computeOpInfo.input, computeOpInfo.output);
+    }
+  }
+
+private:
+  void insertTileRegsAcquireInBlock(Block *block, ComputeOpInfo computeOpInfo) {
+    for (Operation &op : *block) {
+      // acquire tile registers before the first copy tile
+      if (isa<ttkernel::CopyTileInitOp>(op)) {
+        OpBuilder builder(&op);
+        builder.setInsertionPoint(&op);
+        Operation *regsAcquireOp =
+            builder.create<ttkernel::TileRegsAcquireOp>(op.getLoc());
+        acquireRegistersToComputeOps[regsAcquireOp] = computeOpInfo;
+        return;
+      }
+    }
+  }
+
+  DenseMap<Operation *, ComputeOpInfo> acquireRegistersToComputeOps;
+  func::FuncOp funcOp;
+};
+
 } // namespace
 
 struct ConvertTritonNPUToTTKernelPass
@@ -258,6 +366,18 @@ struct ConvertTritonNPUToTTKernelPass
 
     if (applyPartialConversion(mod, target, std::move(patterns)).failed())
       signalPassFailure();
+
+    // insert tile regs acquire before copy tile ops
+    mod.walk([&](func::FuncOp funcOp) {
+      if (!funcOp.getSymName().ends_with("__compute"))
+        return;
+
+      InitializationHelper initHelper(funcOp);
+      initHelper.insertTileRegsAcquireOps();
+      initHelper.collectInputs();
+      initHelper.collectOutputs();
+      initHelper.insertSFPUInitOps();
+    });
   }
 };
 
