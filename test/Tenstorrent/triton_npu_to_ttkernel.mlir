@@ -14,15 +14,18 @@ module attributes {"ttg.num-ctas" = 1 : i32, "ttg.num-warps" = 1 : i32, ttg.targ
     %y = ttg.local_alloc {alloc_idx = 1 : i32} : () -> !ttg.memdesc<1024xf32, #shared, #smem, mutable>
     %x = ttg.local_alloc {alloc_idx = 0 : i32} : () -> !ttg.memdesc<1024xf32, #shared, #smem, mutable>
     %x_0 = ttg.local_load %x : !ttg.memdesc<1024xf32, #shared, #smem, mutable> -> tensor<1024xf32, #triton_tenstorrent.tile_encoding<{index = 0, parent = #blocked}>>
+    %y_1 = ttg.local_load %y : !ttg.memdesc<1024xf32, #shared, #smem, mutable> -> tensor<1024xf32, #triton_tenstorrent.tile_encoding<{index = 1, parent = #blocked}>>
     // CHECK: ttkernel.cb_wait_front(%[[X]], {{.*}})
     // CHECK: %[[X1D:.*]] = ttkernel.cb_reinterpret_shape(%[[X]])
+
+    // CHECK: ttkernel.cb_wait_front(%[[Y]], {{.*}})
+    // CHECK: %[[Y1D:.*]] = ttkernel.cb_reinterpret_shape(%[[Y]])
+
     // CHECK: ttkernel.copy_tile_init(%[[X1D]])
     // CHECK-DAG: %[[C0_0:.*]] = arith.constant 0 : index
     // CHECK-DAG: %[[C0_1:.*]] = arith.constant 0 : index
     // CHECK: ttkernel.copy_tile(%[[X1D]], %[[C0_0]], %[[C0_1]])
-    %y_1 = ttg.local_load %y : !ttg.memdesc<1024xf32, #shared, #smem, mutable> -> tensor<1024xf32, #triton_tenstorrent.tile_encoding<{index = 1, parent = #blocked}>>
-    // CHECK: ttkernel.cb_wait_front(%[[Y]], {{.*}})
-    // CHECK: %[[Y1D:.*]] = ttkernel.cb_reinterpret_shape(%[[Y]])
+
     // CHECK: ttkernel.copy_tile_init(%[[Y1D]])
     // CHECK-DAG: %[[C0_2:.*]] = arith.constant 0 : index
     // CHECK-DAG: %[[C1_0:.*]] = arith.constant 1 : index

@@ -44,7 +44,28 @@ struct ConvertBinaryComputeOp
     auto lhs = adaptor.getLhs();
     auto rhs = adaptor.getRhs();
 
-    llvm::errs() << "lhs = " << lhs << ", rhs = " << rhs << "\n";
+    // copy from cb into compute registers
+    auto copyAndInitializeRegister = [&](Value operand,
+                                         Value convertedOperand) {
+      rewriter.create<ttkernel::CopyTileInitOp>(loc, convertedOperand);
+      Value c0 = rewriter.create<arith::ConstantOp>(
+          loc, rewriter.getIndexType(),
+          rewriter.getIntegerAttr(rewriter.getIndexType(), 0));
+
+      RankedTensorType loadType = cast<RankedTensorType>(operand.getType());
+      // amusingly we could now deduce the load encoding from the operand index
+      npu::tt::TileEncodingAttr loadEncoding =
+          cast<npu::tt::TileEncodingAttr>(loadType.getEncoding());
+      Value destRegisterIndex = rewriter.create<arith::ConstantOp>(
+          loc, rewriter.getIndexType(),
+          rewriter.getIntegerAttr(rewriter.getIndexType(),
+                                  loadEncoding.getIndex()));
+      rewriter.create<ttkernel::CopyTileOp>(loc, convertedOperand, c0,
+                                            destRegisterIndex);
+    };
+
+    copyAndInitializeRegister(op.getLhs(), lhs);
+    copyAndInitializeRegister(op.getRhs(), rhs);
 
     // create init op
     rewriter.create<ttkernel::AddTilesInitOp>(loc, lhs, rhs);
@@ -124,29 +145,10 @@ struct ConvertLocalLoadOp : public OpConversionPattern<gpu::LocalLoadOp> {
     MemRefType oneDTileType = MemRefType::get(
         {1}, cbTileMemref.getElementType(), MemRefLayoutAttrInterface{},
         cbTileMemref.getMemorySpace());
-    auto oneDTile =
-        rewriter
-            .create<ttkernel::CBReinterpretShapeOp>(
-                loc, ttkernel::CBType::get(rewriter.getContext(), oneDTileType),
-                adaptor.getSrc())
-            .getResult();
+    auto oneDTile = rewriter.create<ttkernel::CBReinterpretShapeOp>(
+        loc, ttkernel::CBType::get(rewriter.getContext(), oneDTileType),
+        adaptor.getSrc());
 
-    // 2. copy tile
-    rewriter.create<ttkernel::CopyTileInitOp>(loc, oneDTile);
-    Value c0 = rewriter.create<arith::ConstantOp>(
-        loc, rewriter.getIndexType(),
-        rewriter.getIntegerAttr(rewriter.getIndexType(), 0));
-    RankedTensorType loadType = cast<RankedTensorType>(op.getType());
-    npu::tt::TileEncodingAttr loadEncoding =
-        cast<npu::tt::TileEncodingAttr>(loadType.getEncoding());
-    Value destRegisterIndex = rewriter.create<arith::ConstantOp>(
-        loc, rewriter.getIndexType(),
-        rewriter.getIntegerAttr(rewriter.getIndexType(),
-                                loadEncoding.getIndex()));
-    rewriter.create<ttkernel::CopyTileOp>(loc, oneDTile, c0, destRegisterIndex);
-
-    // replace uses of the load with the CB output (possibly reshaped but we
-    // should handle that elsewhere)
     rewriter.replaceOp(op, oneDTile);
     return success();
   }
