@@ -20,10 +20,12 @@ module attributes {"ttg.num-ctas" = 1 : i32, "ttg.num-warps" = 1 : i32, ttg.targ
     // CHECK: %[[Y:.*]] = tt.load %[[Y_CVT]] : tensor<1024x!tt.ptr<f32>, #triton_tenstorrent.tile_encoding<{index = 1, parent = #blocked}>>
     %6 = tt.load %4 : tensor<1024x!tt.ptr<f32>, #blocked>
     // COM: Make sure the binary_compute op uses the new load ops and not an intermediate cvt
-    // CHECK: triton_tenstorrent.binary_compute["arith.addf"] %[[X]], %[[Y]]
+    // CHECK: %[[OUTPUT:.*]] = triton_tenstorrent.binary_compute["arith.addf"] %[[X]], %[[Y]] : {{.*}} -> tensor<1024xf32, #triton_tenstorrent.tile_encoding<{index = 2, parent = #blocked}>>
     %7 = triton_tenstorrent.binary_compute["arith.addf"] %5, %6 : (tensor<1024xf32, #blocked>, tensor<1024xf32, #blocked>) -> tensor<1024xf32, #blocked>
     %8 = tt.splat %arg2 : !tt.ptr<f32> -> tensor<1024x!tt.ptr<f32>, #blocked>
     %9 = tt.addptr %8, %0 : tensor<1024x!tt.ptr<f32>, #blocked>, tensor<1024xi32, #blocked>
+    // COM: Make sure the store type is propagate to the binary compute op without a cvt by checking for direct use of %OUTPUT
+    // CHECK: tt.store {{.*}} %[[OUTPUT]]
     tt.store %9, %7 : tensor<1024x!tt.ptr<f32>, #blocked>
     tt.return
   }
