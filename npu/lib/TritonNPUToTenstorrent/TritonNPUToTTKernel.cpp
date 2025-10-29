@@ -44,6 +44,8 @@ struct ConvertBinaryComputeOp
     auto lhs = adaptor.getLhs();
     auto rhs = adaptor.getRhs();
 
+    llvm::errs() << "lhs = " << lhs << ", rhs = " << rhs << "\n";
+
     // create init op
     rewriter.create<ttkernel::AddTilesInitOp>(loc, lhs, rhs);
 
@@ -145,8 +147,7 @@ struct ConvertLocalLoadOp : public OpConversionPattern<gpu::LocalLoadOp> {
 
     // replace uses of the load with the CB output (possibly reshaped but we
     // should handle that elsewhere)
-    op.replaceAllUsesWith(oneDTile);
-    op.erase();
+    rewriter.replaceOp(op, oneDTile);
     return success();
   }
 };
@@ -231,6 +232,21 @@ struct ConvertTritonNPUToTTKernelPass
           ttcore::MemorySpaceAttr::get(memdesc.getContext(),
                                        ttcore::MemorySpace::DeviceL1));
       return ttkernel::CBType::get(memdesc.getContext(), cbMemRefType);
+    });
+    typeConverter.addConversion([](RankedTensorType type) -> Type {
+      if (isa<npu::tt::TileEncodingAttr>(type.getEncoding())) {
+        // TODO: same caveats as above re:ttts layout
+        auto shape = SmallVector<int64_t>(1, 1);
+        auto ttcoreTileType = ttcore::TileType::get(
+            type.getContext(), ttcore::TileType::getDefaultShape(),
+            ttcore::elementTypeToDataType(type.getElementType()));
+        MemRefType cbMemRefType = MemRefType::get(
+            shape, ttcoreTileType, MemRefLayoutAttrInterface{},
+            ttcore::MemorySpaceAttr::get(type.getContext(),
+                                         ttcore::MemorySpace::DeviceL1));
+        return ttkernel::CBType::get(type.getContext(), cbMemRefType);
+      }
+      return type;
     });
 
     mlir::RewritePatternSet patterns(context);
