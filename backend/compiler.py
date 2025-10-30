@@ -181,8 +181,8 @@ class CPUBackend(BaseBackend):
         cpu.passes.tenstorrent.add_propagate_register_indices(pm)
         passes.ttgpuir.add_remove_layout_conversions(pm)
 
+        cpu.passes.tenstorrent.add_ptr_rotate(pm)
         cpu.passes.tenstorrent.add_core_specialize(pm)
-
         passes.common.add_symbol_dce(pm)
         passes.common.add_sccp(pm)
         passes.common.add_cse(pm)
