@@ -22,6 +22,9 @@ module attributes {"ttg.num-ctas" = 1 : i32, "ttg.num-warps" = 1 : i32, ttg.targ
     // CHECK: ttkernel.cb_wait_front(%[[Y]], {{.*}})
     // CHECK: %[[Y1D:.*]] = ttkernel.cb_reinterpret_shape(%[[Y]])
 
+    // CHECK: ttkernel.init_sfpu(%[[X1D]], %[[OUTPUT1D]])
+    // CHECK: ttkernel.tile_regs_acquire
+
     // CHECK: ttkernel.copy_tile_init(%[[X1D]])
     // CHECK-DAG: %[[C0_0:.*]] = arith.constant 0 : index
     // CHECK-DAG: %[[C0_1:.*]] = arith.constant 0 : index

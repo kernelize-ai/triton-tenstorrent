@@ -228,21 +228,16 @@ public:
   void collectInputs() {
     for (auto &[_, computeOpInfo] : acquireRegistersToComputeOps) {
 
-      // find the first SFPU compute op input by working backward from the
-      // compute op
-      SetVector<Operation *> backwardSlice;
-      BackwardSliceOptions opt;
-      (void)getBackwardSlice(computeOpInfo.op, &backwardSlice, opt);
-
-      Value input;
-      for (auto op : llvm::reverse(backwardSlice)) {
-        if (isCBOp(op)) {
-          assert(op->getNumResults() == 1 &&
-                 "expected single result for cb op");
-          computeOpInfo.input = op->getResult(0);
-          break;
-        }
+      auto firstComputeOperand = computeOpInfo.op->getOperand(0);
+      Operation *op = firstComputeOperand.getDefiningOp();
+      // TODO: I think should always have the cb feeding the compute op, but
+      // leaving this somewhat generic until we confirm
+      if (isCBOp(op)) {
+        assert(op->getNumResults() == 1 && "expected single result for cb op");
+        computeOpInfo.input = op->getResult(0);
+        continue;
       }
+
       assert(computeOpInfo.input && "expected to find input value");
     }
   }
