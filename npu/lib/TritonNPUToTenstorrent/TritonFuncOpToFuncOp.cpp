@@ -5,6 +5,9 @@
 #include "triton/Dialect/Triton/IR/Dialect.h"
 #include "triton/Dialect/Triton/IR/Utility.h"
 
+#include "ttmlir/Dialect/TTKernel/IR/TTKernel.h"
+#include "ttmlir/Dialect/TTKernel/IR/TTKernelOps.h"
+
 namespace mlir {
 namespace triton {
 namespace npu {
@@ -16,6 +19,17 @@ namespace {
 
 using namespace mlir;
 using namespace mlir::triton;
+using namespace tt;
+
+inline tt::ttkernel::ThreadType
+getThreadTypeFromFunctionName(StringRef funcName) {
+  if (funcName.ends_with("__compute"))
+    return tt::ttkernel::ThreadType::Compute;
+  else if (funcName.ends_with("__reader") || funcName.ends_with("__writer"))
+    return tt::ttkernel::ThreadType::Noc;
+
+  assert(false && "unexpected function name suffix");
+}
 
 struct ConvertTritonFunc : public OpConversionPattern<triton::FuncOp> {
   using OpConversionPattern<triton::FuncOp>::OpConversionPattern;
@@ -42,12 +56,30 @@ struct ConvertTritonFunc : public OpConversionPattern<triton::FuncOp> {
     mlir::FunctionType newTy = mlir::FunctionType::get(
         context, /*inputs=*/tritonTy.getInputs(), /*results=*/TypeRange{});
     // skip triton attributes
-    // TODO: add tenstorrent attributes?
+
     auto newFunc =
         rewriter.create<mlir::func::FuncOp>(loc, funcOp.getName(), newTy);
     if (auto vis = funcOp.getOperation()->getAttr(
             SymbolTable::getVisibilityAttrName()))
       newFunc->setAttr(SymbolTable::getVisibilityAttrName(), vis);
+
+    newFunc->setAttr(tt::ttkernel::ThreadTypeAttr::name,
+                     rewriter.getAttr<tt::ttkernel::ThreadTypeAttr>(
+                         getThreadTypeFromFunctionName(funcOp.getName())));
+
+    // build the arg spec using the function ops - tt.ptr ops become cb ports,
+    // others are ignored
+    SmallVector<ttkernel::ArgAttr> ctArgs;
+    for (auto argType : tritonTy.getInputs()) {
+      if (isa<PointerType>(argType)) {
+        ctArgs.push_back(rewriter.getAttr<ttkernel::ArgAttr>(
+            ttkernel::ArgType::CBPort, ctArgs.size()));
+      }
+    }
+    SmallVector<ttkernel::ArgAttr> rtArgs;
+
+    ttkernel::ArgSpecAttr::setArgSpec(
+        newFunc, rewriter.getAttr<ttkernel::ArgSpecAttr>(rtArgs, ctArgs));
 
     // copy the body
     rewriter.inlineRegionBefore(funcOp.getBody(), newFunc.getBody(),
