@@ -17,6 +17,7 @@
 #include "ttmlir/Conversion/TTKernelToEmitC/TTKernelToEmitC.h"
 #include "ttmlir/Dialect/TTKernel/IR/TTKernel.h"
 #include "ttmlir/Dialect/TTKernel/Transforms/Passes.h"
+#include "ttmlir/Target/TTKernel/TTKernelToCpp.h"
 
 #include "mlir/Dialect/Arith/Transforms/Passes.h"
 
@@ -109,41 +110,6 @@ void init_triton_cpu_passes_ttgpuir(py::module &&m) {
   });
 }
 
-static llvm::FailureOr<mlir::ModuleOp>
-cloneEntryIntoStandaloneModule(mlir::func::FuncOp origEntry,
-                               mlir::tt::ttkernel::ThreadType threadType) {
-#if 1
-  return llvm::failure();
-#else
-  auto *ctx = origEntry.getContext();
-  Region *region = &origEntry.getBody();
-  auto loc = origEntry.getLoc();
-
-  OpBuilder builder(ctx);
-
-  // We will wrap everything in a standalone module op so that we can run the
-  // translation.
-  auto moduleWrapper = builder.create<mlir::ModuleOp>(loc, "module_wrapper");
-  builder.setInsertionPointToStart(moduleWrapper.getBody());
-
-  Region *kernelMainRegion;
-  {
-    ScopedModuleHelper threadConfigHelper(&builder, loc, region, threadType,
-                                          origEntry.getName());
-
-    // Clone 'region' into a new func op nested inside 'moduleWrapper':
-    auto kernelMain = builder.create<func::FuncOp>(
-        loc, "kernel_main",
-        builder.getType<FunctionType>(region->getArgumentTypes(), TypeRange()));
-    kernelMainRegion = &kernelMain.getBody();
-  }
-
-  IRMapping irMapper;
-  region->cloneInto(kernelMainRegion, irMapper);
-  return moduleWrapper;
-#endif
-}
-
 void init_triton_cpu(py::module &&m) {
   auto passes = m.def_submodule("passes");
   // Triton to TritonGPU passes specific to the Triton CPU plugin
@@ -163,24 +129,11 @@ void init_triton_cpu(py::module &&m) {
         assert(entry->hasAttr(mlir::tt::ttkernel::ThreadTypeAttr::name) &&
                "expected thread type attr on kernel func");
 
-        mlir::tt::ttkernel::ThreadType threadType =
-            entry
-                ->getAttrOfType<mlir::tt::ttkernel::ThreadTypeAttr>(
-                    mlir::tt::ttkernel::ThreadTypeAttr::name)
-                .getValue();
-
-        mlir::FailureOr<mlir::ModuleOp> kernelModule =
-            cloneEntryIntoStandaloneModule(entry, threadType);
-        assert(llvm::succeeded(kernelModule) &&
-               "failed to clone kernel func into standalone module");
-        auto moduleCleanup =
-            llvm::make_scope_exit([&]() { kernelModule->erase(); });
-
         std::string cppCode;
         llvm::raw_string_ostream os(cppCode);
-        auto result = mlir::emitc::translateToCpp(*kernelModule, os);
-        assert(llvm::succeeded(result) &&
-               "failed to translate kernel module to C++");
+        assert(mlir::succeeded(
+                   mlir::tt::ttkernel::translateKernelFuncToCpp(entry, os)) &&
+               "failed to translate kernel func to C++");
         return py::str(cppCode);
       });
 

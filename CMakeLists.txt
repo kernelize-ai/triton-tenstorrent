@@ -12,6 +12,7 @@ set(TTMLIR_LIB_DIR "${TENSTORRENT_MLIR}/build/lib")
 set(TTMLIR_LIB_NAMES
     MLIRTTKernelDialect
     MLIRTTKernelTransforms
+    TTKernelTargetCpp
     TTMLIRTTKernelToEmitC
     MLIRTTMetalDialect
     MLIRTTCoreDialect

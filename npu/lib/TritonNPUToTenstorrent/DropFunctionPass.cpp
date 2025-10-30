@@ -1,7 +1,7 @@
 #include "npu/include/TritonNPUToTenstorrent/Passes.h"
 
 #include "mlir/Dialect/Func/IR/FuncOps.h"
-#include "mlir/IR/BuiltinOps.h" 
+#include "mlir/IR/BuiltinOps.h"
 
 using namespace mlir;
 using namespace mlir::triton;
@@ -15,9 +15,9 @@ namespace npu {
 
 struct DropFunctionPass : public npu::impl::DropFunctionBase<DropFunctionPass> {
 
-    DropFunctionPass() = default;
-  explicit DropFunctionPass(DropFunctionOptions options) : funcName(options.functionName) {
-}
+  DropFunctionPass() = default;
+  explicit DropFunctionPass(DropFunctionOptions options)
+      : funcName(options.functionName) {}
 
   void runOnOperation() override {
     ModuleOp module = getOperation();
@@ -34,6 +34,6 @@ struct DropFunctionPass : public npu::impl::DropFunctionBase<DropFunctionPass> {
   std::string funcName;
 };
 
-}
-}
-}
+} // namespace npu
+} // namespace triton
+} // namespace mlir
