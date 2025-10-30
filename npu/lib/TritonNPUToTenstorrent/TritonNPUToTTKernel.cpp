@@ -99,13 +99,26 @@ struct ConvertLocalStoreOp : public OpConversionPattern<gpu::LocalStoreOp> {
 
     auto dst = adaptor.getDst();
 
+    auto cbType = cast<ttkernel::CBType>(dst.getType());
+    MemRefType cbTileMemref = cbType.getMemref();
+
+    // add the one-D reinterpret cast at the compile time arg site for now
+    rewriter.setInsertionPointAfter(dst.getDefiningOp());
+    MemRefType oneDTileType = MemRefType::get(
+        {1}, cbTileMemref.getElementType(), MemRefLayoutAttrInterface{},
+        cbTileMemref.getMemorySpace());
+    auto oneDTile = rewriter.create<ttkernel::CBReinterpretShapeOp>(
+        loc, ttkernel::CBType::get(rewriter.getContext(), oneDTileType), dst);
+
+    rewriter.setInsertionPoint(op);
     Value destRegisterIndex = rewriter.create<arith::ConstantOp>(
         loc, rewriter.getIndexType(),
         rewriter.getIntegerAttr(rewriter.getIndexType(), 2));
     Value outIndex = rewriter.create<arith::ConstantOp>(
         loc, rewriter.getIndexType(),
         rewriter.getIntegerAttr(rewriter.getIndexType(), 0));
-    rewriter.create<ttkernel::PackTileOp>(loc, destRegisterIndex, dst, outIndex,
+    rewriter.create<ttkernel::PackTileOp>(loc, destRegisterIndex, oneDTile,
+                                          outIndex,
                                           /*outOfOrder=*/true);
 
     auto srcOp = op.getSrc().getDefiningOp();
