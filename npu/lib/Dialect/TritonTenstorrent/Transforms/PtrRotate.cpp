@@ -1,4 +1,3 @@
-#include "npu/include/Dialect/TritonTenstorrent/IR/Dialect.h"
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/ControlFlow/IR/ControlFlowOps.h"
 #include "mlir/Dialect/Func/Transforms/FuncConversions.h"
@@ -16,6 +15,7 @@
 #include "mlir/IR/Value.h"
 #include "mlir/Pass/Pass.h"
 #include "mlir/Transforms/DialectConversion.h"
+#include "npu/include/Dialect/TritonTenstorrent/IR/Dialect.h"
 #include "triton/Analysis/Utility.h"
 #include "triton/Dialect/Triton/IR/Dialect.h"
 #include "triton/Dialect/Triton/IR/DiscardableAttributes.h"
@@ -43,10 +43,9 @@ using namespace mlir;
 namespace mlir {
 namespace triton {
 namespace npu {
-    
+
 #define GEN_PASS_DEF_TRITONTENSTORRENTPTRROTATE
 #include "npu/include/Dialect/TritonTenstorrent/Transforms/Passes.h.inc"
-
 
 /// The pass structure/action is roughly:
 ///
@@ -60,8 +59,7 @@ namespace npu {
 /// category of such remaining casts but can be extended to handle all; see
 /// bullet 1 in TODOs).
 class TritonTenstorrentPtrRotate
-    : public impl::TritonTenstorrentPtrRotateBase<
-          TritonTenstorrentPtrRotate> {
+    : public impl::TritonTenstorrentPtrRotateBase<TritonTenstorrentPtrRotate> {
   using Base::Base;
 
 public:
@@ -72,7 +70,8 @@ private:
 };
 
 // rotate the scalar offset to basePtr
-Value TritonTenstorrentPtrRotate::rotateArith(Value basePtr, OpOperand &offset) {
+Value TritonTenstorrentPtrRotate::rotateArith(Value basePtr,
+                                              OpOperand &offset) {
   auto defOp = offset.get().getDefiningOp();
   if (defOp) {
     OpBuilder builder(defOp);
@@ -87,7 +86,8 @@ Value TritonTenstorrentPtrRotate::rotateArith(Value basePtr, OpOperand &offset) 
         for (auto [idx, operand] : llvm::enumerate(addOp->getOpOperands())) {
           Value newOperand = rotateArith(basePtr, operand);
           if (newOperand != basePtr) {
-            basePtr = builder.create<triton::AddPtrOp>(basePtr.getLoc(), basePtr.getType(), basePtr, newOperand);
+            basePtr = builder.create<triton::AddPtrOp>(
+                basePtr.getLoc(), basePtr.getType(), basePtr, newOperand);
             // replace offset with the other operand
             offset.set(addOp->getOperand(idx ^ 1));
             return basePtr;
