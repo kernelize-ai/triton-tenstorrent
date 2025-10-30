@@ -83,7 +83,7 @@ struct ConvertBinaryComputeOp
                                           destIndex);
 
     if (op->use_empty())
-      op.erase();
+      rewriter.eraseOp(op);
     return success();
   }
 };
@@ -110,11 +110,8 @@ struct ConvertLocalStoreOp : public OpConversionPattern<gpu::LocalStoreOp> {
     auto srcOp = op.getSrc().getDefiningOp();
     op.erase();
 
-    // erase any unused defining ops (tile commit relationship is implicit
-    // through cb refs)
-    if (srcOp && srcOp->use_empty())
-      srcOp->erase();
-
+    if (srcOp)
+      rewriter.eraseOp(srcOp);
     return success();
   }
 };
@@ -149,7 +146,9 @@ struct ConvertLocalLoadOp : public OpConversionPattern<gpu::LocalLoadOp> {
         loc, ttkernel::CBType::get(rewriter.getContext(), oneDTileType),
         adaptor.getSrc());
 
-    rewriter.replaceOp(op, oneDTile);
+    rewriter.replaceOp(
+        op, oneDTile); // TODO: this should come from the cb root eventually,
+                       // replaceOp is probably not appropriate here
     return success();
   }
 };
