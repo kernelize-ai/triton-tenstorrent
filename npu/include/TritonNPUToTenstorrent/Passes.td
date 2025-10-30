@@ -25,7 +25,8 @@ def ConvertTritonFuncToFunc : Pass<"convert-triton-func-to-func", "mlir::ModuleO
     }];
 
     let dependentDialects = ["mlir::triton::TritonDialect",
-                             "func::FuncDialect"
+                             "func::FuncDialect",
+                             "mlir::tt::ttkernel::TTKernelDialect"
                             ];
 }
 
