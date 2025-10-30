@@ -278,7 +278,6 @@ public:
       OpBuilder builder(acquireOp);
       builder.setInsertionPoint(acquireOp);
 
-      // insert SFPU init op
       builder.create<ttkernel::InitSFPUOp>(
           acquireOp->getLoc(), computeOpInfo.input, computeOpInfo.output);
     }
