@@ -110,6 +110,12 @@ struct ConvertLocalStoreOp : public OpConversionPattern<gpu::LocalStoreOp> {
     auto oneDTile = rewriter.create<ttkernel::CBReinterpretShapeOp>(
         loc, ttkernel::CBType::get(rewriter.getContext(), oneDTileType), dst);
 
+    // reserve back the cb for the store
+    Value numPages = rewriter.create<arith::ConstantOp>(
+        loc, rewriter.getI32Type(),
+        rewriter.getIntegerAttr(rewriter.getI32Type(), 1));
+    rewriter.create<ttkernel::CBReserveBackOp>(loc, dst, numPages);
+
     rewriter.setInsertionPoint(op);
     Value destRegisterIndex = rewriter.create<arith::ConstantOp>(
         loc, rewriter.getIndexType(),

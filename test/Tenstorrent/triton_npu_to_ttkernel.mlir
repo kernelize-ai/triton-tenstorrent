@@ -11,6 +11,8 @@ module attributes {"ttg.num-ctas" = 1 : i32, "ttg.num-warps" = 1 : i32, ttg.targ
     // CHECK-DAG: %[[Y:.*]] = ttkernel.get_compile_time_arg_val(1)
     // CHECK-DAG: %[[OUTPUT:.*]] = ttkernel.get_compile_time_arg_val(2)
     // CHECK-DAG: %[[OUTPUT1D:.*]] = ttkernel.cb_reinterpret_shape(%[[OUTPUT]])
+    // CHECK-DAG: %[[C1_0:.*]] = arith.constant 1 : i32
+    // CHECK-DAG: ttkernel.cb_reserve_back(%[[OUTPUT]], %[[C1_0]])
     %0 = ttg.local_alloc {alloc_idx = 2 : i32} : () -> !ttg.memdesc<1024xf32, #shared, #smem, mutable>
     %y = ttg.local_alloc {alloc_idx = 1 : i32} : () -> !ttg.memdesc<1024xf32, #shared, #smem, mutable>
     %x = ttg.local_alloc {alloc_idx = 0 : i32} : () -> !ttg.memdesc<1024xf32, #shared, #smem, mutable>
@@ -32,8 +34,8 @@ module attributes {"ttg.num-ctas" = 1 : i32, "ttg.num-warps" = 1 : i32, ttg.targ
 
     // CHECK: ttkernel.copy_tile_init(%[[Y1D]])
     // CHECK-DAG: %[[C0_2:.*]] = arith.constant 0 : index
-    // CHECK-DAG: %[[C1_0:.*]] = arith.constant 1 : index
-    // CHECK: ttkernel.copy_tile(%[[Y1D]], %[[C0_2]], %[[C1_0]])
+    // CHECK-DAG: %[[C1_1:.*]] = arith.constant 1 : index
+    // CHECK: ttkernel.copy_tile(%[[Y1D]], %[[C0_2]], %[[C1_1]])
 
     // CHECK: ttkernel.add_tiles_init(%[[X1D]], %[[Y1D]])
     // CHECK-DAG: %[[C0_3:.*]] = arith.constant 0 : index
