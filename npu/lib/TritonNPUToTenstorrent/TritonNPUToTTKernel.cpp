@@ -130,6 +130,24 @@ struct ConvertLocalStoreOp : public OpConversionPattern<gpu::LocalStoreOp> {
   }
 };
 
+struct DropFunctionArguments : public OpConversionPattern<func::FuncOp> {
+  using OpConversionPattern<func::FuncOp>::OpConversionPattern;
+
+  LogicalResult
+  matchAndRewrite(func::FuncOp funcOp, OpAdaptor adaptor,
+                  ConversionPatternRewriter &rewriter) const override {
+    assert(funcOp.getName().ends_with("__compute") &&
+           "expected compute function");
+
+    for (int i = funcOp.getNumArguments() - 1; i >= 0; --i) {
+      assert(funcOp.getArgument(i).use_empty() && "expected unused argument");
+      (void)funcOp.eraseArgument(i);
+    }
+
+    return success();
+  }
+};
+
 struct ConvertLocalLoadOp : public OpConversionPattern<gpu::LocalLoadOp> {
   using OpConversionPattern<gpu::LocalLoadOp>::OpConversionPattern;
 
@@ -330,6 +348,13 @@ struct ConvertTritonNPUToTTKernelPass
       StringRef funcName = funcOp.getSymName();
       return !funcName.ends_with("__compute");
     });
+    target.addDynamicallyLegalOp<func::FuncOp>([](func::FuncOp funcOp) {
+      StringRef funcName = funcOp.getSymName();
+      if (!funcName.ends_with("__compute"))
+        return true;
+
+      return funcOp.getNumArguments() == 0;
+    });
 
     TypeConverter typeConverter;
     typeConverter.addConversion([](Type type) { return type; });
@@ -370,6 +395,7 @@ struct ConvertTritonNPUToTTKernelPass
     patterns.add<ConvertLocalLoadOp>(typeConverter, patterns.getContext());
     patterns.add<ConvertLocalAllocOp>(typeConverter, patterns.getContext());
     patterns.add<ConvertBinaryComputeOp>(typeConverter, patterns.getContext());
+    patterns.add<DropFunctionArguments>(typeConverter, patterns.getContext());
 
     if (applyPartialConversion(mod, target, std::move(patterns)).failed())
       signalPassFailure();
