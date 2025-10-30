@@ -44,4 +44,19 @@ def ConvertTritonNPUToTTKernel : Pass<"convert-triton-npu-to-ttkernel", "mlir::M
                             ];
 }
 
+def DropFunction : Pass<"drop-function", "mlir::ModuleOp"> {
+    let summary = "Drop named functions from the module";
+
+    let description = [{
+        Drops named function definitions from the module. Useful for debugging.
+    }];
+
+    let options = [
+        Option<"functionName", "function-name", "std::string", /*default=*/"",
+               "Name of the function to drop">
+    ];
+
+    let dependentDialects = ["mlir::func::FuncDialect"];
+}
+
 #endif

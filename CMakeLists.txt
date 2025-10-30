@@ -11,6 +11,8 @@ set(TTMLIR_LIB_DIR "${TENSTORRENT_MLIR}/build/lib")
 
 set(TTMLIR_LIB_NAMES
     MLIRTTKernelDialect
+    MLIRTTKernelTransforms
+    TTMLIRTTKernelToEmitC
     MLIRTTMetalDialect
     MLIRTTCoreDialect
 )
@@ -53,12 +55,16 @@ if(TRITON_BUILD_PYTHON_MODULE)
     TritonCPUToLLVM
     TritonNPUToTenstorrent
     MLIRQuantDialect
+    MLIREmitCDialect
+    MLIRArithToEmitC
+    MLIRMemRefToEmitC
+    MLIRSCFToEmitC
+    MLIRTargetCpp
     ${TTMLIR_LIBS}
 
     DEPENDS
     build_tt_mlir)
   target_link_libraries(TritonCPU PRIVATE Python3::Module pybind11::headers)
-  #target_link_libraries(TritonCPU PRIVATE MLIRQuantDialect Python3::Module pybind11::headers)
 
   target_include_directories(TritonCPU PRIVATE
       "${TENSTORRENT_MLIR}/include"

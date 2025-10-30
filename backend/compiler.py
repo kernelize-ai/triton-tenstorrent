@@ -190,12 +190,37 @@ class CPUBackend(BaseBackend):
 
         cpu.passes.tenstorrent.convert_triton_func_to_func(pm)
         cpu.passes.tenstorrent.add_to_ttkernel_dialect(pm)
-
-        # Force output
         passes.common.add_canonicalizer(pm)
+
+        # tt-mlir pipeline
+        cpu.passes.tenstorrent.add_ttkernel_control_dst_selection(pm)
 
         pm.run(mod, "make_tenstorrentir")
         return mod
+
+    @staticmethod
+    def make_ttmlir_cpp_file(mod, metadata, options):
+        pm = ir.pass_manager(mod.context)
+        pm.enable_debug()
+
+        cpu.passes.tenstorrent.add_drop_function(pm, "add_kernel__reader")
+        cpu.passes.tenstorrent.add_drop_function(pm, "add_kernel__writer")
+
+        # tt-mlir continued
+        cpu.passes.tenstorrent.add_ttkernel_device_zone_scopes(pm)
+        passes.common.add_canonicalizer(pm)
+        passes.common.add_licm(pm)
+        passes.common.add_sccp(pm)
+        passes.common.add_cse(pm)
+
+        cpu.passes.common.add_arith_int_range_opts(pm)
+        cpu.passes.tenstorrent.add_ttkernel_to_emitc(pm)
+        passes.common.add_canonicalizer(pm)
+        cpu.passes.tenstorrent.add_form_expressions_pass(pm)
+
+        pm.run(mod, "make_ttmlir_cpp")
+
+        return cpu.translate_to_cpp(mod, "add_kernel__compute")
 
     @staticmethod
     def make_asm(src, metadata, options):
@@ -242,6 +267,7 @@ class CPUBackend(BaseBackend):
             stages["so"] = lambda src, metadata: self.make_library(src, metadata, options)
         elif self.device == 'Tenstorrent':
             stages["ttmlir"] = lambda src, metadata: self.make_tenstorrent_mlir(src, metadata, options)
+            stages["cpp"] = lambda src, metadata: self.make_ttmlir_cpp_file(src, metadata, options)
             stages['so'] = lambda src, metadata: self.make_tenstorrent_binary(src, metadata, options)
 
     @functools.lru_cache()
