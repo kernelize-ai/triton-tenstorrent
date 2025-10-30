@@ -36,11 +36,11 @@ module attributes {"ttg.num-ctas" = 1 : i32, "ttg.num-warps" = 1 : i32, ttg.targ
     // CHECK-DAG: %[[C1_1:.*]] = arith.constant 1 : index
     // CHECK-DAG: %[[C2_0:.*]] = arith.constant 2 : index
     // CHECK: ttkernel.add_tiles(%[[X1D]], %[[Y1D]], %[[C0_3]], %[[C1_1]], %[[C2_0]])
-    %output = triton_tenstorrent.binary_compute["arith.addf"] %x_0, %y_1 : (tensor<1024xf32, #triton_tenstorrent.tile_encoding<{index = 0, parent = #blocked}>>, tensor<1024xf32, #triton_tenstorrent.tile_encoding<{index = 1, parent = #blocked}>>) -> tensor<1024xf32, #blocked>
+    %output = triton_tenstorrent.binary_compute["arith.addf"] %x_0, %y_1 : (tensor<1024xf32, #triton_tenstorrent.tile_encoding<{index = 0, parent = #blocked}>>, tensor<1024xf32, #triton_tenstorrent.tile_encoding<{index = 1, parent = #blocked}>>) -> tensor<1024xf32, #triton_tenstorrent.tile_encoding<{index = 2, parent = #blocked}>>
     // CHECK-DAG: %[[C2_1:.*]] = arith.constant 2 : index
     // CHECK-DAG: %[[C0_4:.*]] = arith.constant 0 : index
     // CHECK: ttkernel.pack_tile(%[[C2_1]], %[[OUTPUT]], %[[C0_4]], true)
-    ttg.local_store %output, %0 : tensor<1024xf32, #blocked> -> !ttg.memdesc<1024xf32, #shared, #smem, mutable>
+    ttg.local_store %output, %0 : tensor<1024xf32, #triton_tenstorrent.tile_encoding<{index = 2, parent = #blocked}>> -> !ttg.memdesc<1024xf32, #shared, #smem, mutable>
     return
   }
 }
