@@ -1,5 +1,6 @@
 #include "npu/include/TritonNPUToTenstorrent/Passes.h"
 
+#include "mlir/Analysis/SliceAnalysis.h"
 #include "mlir/Transforms/DialectConversion.h"
 #include "llvm/Support/Debug.h"
 
@@ -98,13 +99,26 @@ struct ConvertLocalStoreOp : public OpConversionPattern<gpu::LocalStoreOp> {
 
     auto dst = adaptor.getDst();
 
+    auto cbType = cast<ttkernel::CBType>(dst.getType());
+    MemRefType cbTileMemref = cbType.getMemref();
+
+    // add the one-D reinterpret cast at the compile time arg site for now
+    rewriter.setInsertionPointAfter(dst.getDefiningOp());
+    MemRefType oneDTileType = MemRefType::get(
+        {1}, cbTileMemref.getElementType(), MemRefLayoutAttrInterface{},
+        cbTileMemref.getMemorySpace());
+    auto oneDTile = rewriter.create<ttkernel::CBReinterpretShapeOp>(
+        loc, ttkernel::CBType::get(rewriter.getContext(), oneDTileType), dst);
+
+    rewriter.setInsertionPoint(op);
     Value destRegisterIndex = rewriter.create<arith::ConstantOp>(
         loc, rewriter.getIndexType(),
         rewriter.getIntegerAttr(rewriter.getIndexType(), 2));
     Value outIndex = rewriter.create<arith::ConstantOp>(
         loc, rewriter.getIndexType(),
         rewriter.getIntegerAttr(rewriter.getIndexType(), 0));
-    rewriter.create<ttkernel::PackTileOp>(loc, destRegisterIndex, dst, outIndex,
+    rewriter.create<ttkernel::PackTileOp>(loc, destRegisterIndex, oneDTile,
+                                          outIndex,
                                           /*outOfOrder=*/true);
 
     auto srcOp = op.getSrc().getDefiningOp();
@@ -180,6 +194,107 @@ struct ConvertLocalAllocOp : public OpConversionPattern<gpu::LocalAllocOp> {
 
     return success();
   }
+};
+
+static bool isCBOp(Operation *op) {
+  if (auto compileTimeArg = dyn_cast<ttkernel::GetCompileArgValOp>(op)) {
+    return isa<ttkernel::CBType>(compileTimeArg.getType());
+  }
+  return isa<ttkernel::CBReinterpretShapeOp>(op);
+}
+
+class InitializationHelper {
+public:
+  struct ComputeOpInfo {
+    ComputeOpInfo() {}
+    ComputeOpInfo(Operation *op) : op(op) {}
+    Value input;
+    Value output;
+    Operation *op;
+  };
+
+  InitializationHelper(func::FuncOp F) : funcOp(F) {}
+
+  void insertTileRegsAcquireOps() {
+    llvm::SetVector<Block *> visited;
+    // TODO: this should generically visit all compute ops
+    funcOp.walk([&](ttkernel::AddTilesOp addTilesOp) {
+      Block *b = addTilesOp->getBlock();
+      if (visited.insert(b))
+        insertTileRegsAcquireInBlock(b, ComputeOpInfo(addTilesOp));
+    });
+  }
+
+  void collectInputs() {
+    for (auto &[_, computeOpInfo] : acquireRegistersToComputeOps) {
+
+      auto firstComputeOperand = computeOpInfo.op->getOperand(0);
+      Operation *op = firstComputeOperand.getDefiningOp();
+      // TODO: I think should always have the cb feeding the compute op, but
+      // leaving this somewhat generic until we confirm
+      if (isCBOp(op)) {
+        assert(op->getNumResults() == 1 && "expected single result for cb op");
+        computeOpInfo.input = op->getResult(0);
+        continue;
+      }
+
+      assert(computeOpInfo.input && "expected to find input value");
+    }
+  }
+
+  void collectOutputs() {
+    funcOp.walk([&](ttkernel::PackTileOp packTileOp) {
+      // Note: this is completely disassociated from the compute op, which seems
+      // wrong
+      assert(acquireRegistersToComputeOps.size() == 1 &&
+             "expecting single compute op");
+      ComputeOpInfo &computeOpInfo =
+          acquireRegistersToComputeOps.begin()->second;
+
+      SetVector<Operation *> backwardSlice;
+      BackwardSliceOptions opt;
+      (void)getBackwardSlice(packTileOp, &backwardSlice, opt);
+
+      for (auto op : llvm::reverse(backwardSlice)) {
+        if (isCBOp(op)) {
+          assert(op->getNumResults() == 1 &&
+                 "expected single result for cb op");
+          computeOpInfo.output = op->getResult(0);
+          break;
+        }
+      }
+
+      assert(computeOpInfo.output && "expected to find output value");
+    });
+  }
+
+  void insertSFPUInitOps() {
+    for (auto [acquireOp, computeOpInfo] : acquireRegistersToComputeOps) {
+      OpBuilder builder(acquireOp);
+      builder.setInsertionPoint(acquireOp);
+
+      builder.create<ttkernel::InitSFPUOp>(
+          acquireOp->getLoc(), computeOpInfo.input, computeOpInfo.output);
+    }
+  }
+
+private:
+  void insertTileRegsAcquireInBlock(Block *block, ComputeOpInfo computeOpInfo) {
+    for (Operation &op : *block) {
+      // acquire tile registers before the first copy tile
+      if (isa<ttkernel::CopyTileInitOp>(op)) {
+        OpBuilder builder(&op);
+        builder.setInsertionPoint(&op);
+        Operation *regsAcquireOp =
+            builder.create<ttkernel::TileRegsAcquireOp>(op.getLoc());
+        acquireRegistersToComputeOps[regsAcquireOp] = computeOpInfo;
+        return;
+      }
+    }
+  }
+
+  DenseMap<Operation *, ComputeOpInfo> acquireRegistersToComputeOps;
+  func::FuncOp funcOp;
 };
 
 } // namespace
@@ -258,6 +373,18 @@ struct ConvertTritonNPUToTTKernelPass
 
     if (applyPartialConversion(mod, target, std::move(patterns)).failed())
       signalPassFailure();
+
+    // insert tile regs acquire before copy tile ops
+    mod.walk([&](func::FuncOp funcOp) {
+      if (!funcOp.getSymName().ends_with("__compute"))
+        return;
+
+      InitializationHelper initHelper(funcOp);
+      initHelper.insertTileRegsAcquireOps();
+      initHelper.collectInputs();
+      initHelper.collectOutputs();
+      initHelper.insertSFPUInitOps();
+    });
   }
 };
 
