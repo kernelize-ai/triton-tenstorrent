@@ -59,4 +59,16 @@ def DropFunction : Pass<"drop-function", "mlir::ModuleOp"> {
     let dependentDialects = ["mlir::func::FuncDialect"];
 }
 
+def FinalizeCBTransaction : Pass<"finalize-cb-transaction", "mlir::ModuleOp"> {
+    let summary = "Finalize CB transactions in TTKernel ops";
+
+    let description = [{
+        Finalizes circular buffer (CB) transactions in TTKernel operations by inserting necessary pop/push operations.
+    }];
+
+    let dependentDialects = ["mlir::tt::ttkernel::TTKernelDialect",
+                             "mlir::arith::ArithDialect"
+                            ];
+}
+
 #endif
