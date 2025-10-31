@@ -44,6 +44,12 @@ set(TTMLIR_PYTHON_VERSION "${_python_vers}" CACHE STRING "Python for tt-mlir")
 
 file(MAKE_DIRECTORY "${TTMLIR_TOOLCHAIN_DIR}")
 
+if (DEFINED ENV{TTMLIR_RUNTIME_ENABLED})
+  set(NO_TTMLIR_RUNTIME "")
+else()
+  set(NO_TTMLIR_RUNTIME "ON")
+endif()
+
 add_custom_target(build_tt_mlir
   COMMAND ${CMAKE_COMMAND} -E env
           CC=${CLANG_BIN}
@@ -52,7 +58,7 @@ add_custom_target(build_tt_mlir
           LLVM_BUILD_DIR=${LLVM_LIBRARY_DIR}/../
           TTMLIR_PYTHON_VERSION=${TTMLIR_PYTHON_VERSION}
           TTMLIR_TOOLCHAIN_DIR=${TTMLIR_TOOLCHAIN_DIR}
-          NO_TTMLIR_RUNTIME=ON
+          NO_TTMLIR_RUNTIME=${NO_TTMLIR_RUNTIME}
           bash ${CMAKE_CURRENT_SOURCE_DIR}/../scripts/build-tt-mlir.sh
   BYPRODUCTS ${TTMLIR_LIB_PATHS}
   WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/../
