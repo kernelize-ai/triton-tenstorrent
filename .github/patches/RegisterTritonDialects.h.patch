@@ -1,8 +1,8 @@
 diff --git a/bin/RegisterTritonDialects.h b/bin/RegisterTritonDialects.h
-index 48049f026..1924273ae 100644
+index 48049f026..26c9422d2 100644
 --- a/bin/RegisterTritonDialects.h
 +++ b/bin/RegisterTritonDialects.h
-@@ -39,6 +39,12 @@
+@@ -39,6 +39,15 @@
  #include "mlir/Dialect/LLVMIR/Transforms/InlinerInterfaceImpl.h"
  #include "mlir/InitAllPasses.h"
  
@@ -12,10 +12,13 @@ index 48049f026..1924273ae 100644
 +#include "npu/include/Dialect/TritonTenstorrent/Transforms/Passes.h"
 +#include "npu/include/TritonNPUToTenstorrent/Passes.h"
 +
++#include "third_party/tt-mlir/include/ttmlir/Dialect/TTKernel/IR/TTKernel.h"
++#include "third_party/tt-mlir/include/ttmlir/Dialect/TTCore/IR/TTCore.h"
++
  #include "mlir/Conversion/ArithToLLVM/ArithToLLVM.h"
  #include "mlir/Conversion/ControlFlowToLLVM/ControlFlowToLLVM.h"
  #include "mlir/Conversion/MathToLLVM/MathToLLVM.h"
-@@ -136,6 +142,18 @@ inline void registerTritonDialects(mlir::DialectRegistry &registry) {
+@@ -136,6 +145,19 @@ inline void registerTritonDialects(mlir::DialectRegistry &registry) {
    mlir::triton::proton::gpu::registerScheduleBufferStorePass();
    mlir::triton::proton::gpu::registerAddSchedBarriersPass();
  
@@ -29,17 +32,20 @@ index 48049f026..1924273ae 100644
 +  mlir::triton::npu::registerTritonTenstorrentPropagateRegisterIndices();
 +  mlir::triton::npu::registerTritonTenstorrentConvertComputeOps();
 +  mlir::triton::npu::registerConvertTritonNPUToTTKernel();
++  mlir::triton::npu::registerFinalizeCBTransaction();
 +  mlir::triton::cpu::registerCoreSpecialize();
 +
    registry.insert<
        mlir::triton::TritonDialect, mlir::cf::ControlFlowDialect,
        mlir::triton::nvidia_gpu::TritonNvidiaGPUDialect,
-@@ -147,5 +165,7 @@ inline void registerTritonDialects(mlir::DialectRegistry &registry) {
+@@ -147,5 +169,9 @@ inline void registerTritonDialects(mlir::DialectRegistry &registry) {
        mlir::triton::amdgpu::TritonAMDGPUDialect,
        mlir::triton::proton::ProtonDialect,
        mlir::triton::proton::gpu::ProtonGPUDialect, mlir::ROCDL::ROCDLDialect,
 -      mlir::triton::gluon::GluonDialect>();
 +      mlir::triton::gluon::GluonDialect, mlir::triton::cpu::TritonCPUDialect,
 +      mlir::triton::npu::tt::TritonTenstorrentDialect,
++      mlir::tt::ttkernel::TTKernelDialect,
++      mlir::tt::ttcore::TTCoreDialect,
 +      mlir::func::FuncDialect>();
  }
