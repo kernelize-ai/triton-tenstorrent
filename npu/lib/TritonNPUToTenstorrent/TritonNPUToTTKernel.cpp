@@ -5,6 +5,7 @@
 #include "llvm/Support/Debug.h"
 
 #include "triton/Dialect/Triton/IR/Dialect.h"
+#include "triton/Dialect/Triton/IR/Utility.h"
 #include "triton/Dialect/TritonGPU/IR/Dialect.h"
 
 #include "PatternTritonNPUToTenstorrent.h"
@@ -83,11 +84,28 @@ struct ConvertBinaryComputeOp
     rewriter.create<ttkernel::AddBinaryTilesOp>(loc, lhsIndex, rhsIndex,
                                                 destIndex);
 
-    if (op->use_empty())
-      rewriter.eraseOp(op);
+    rewriter.eraseOp(op);
     return success();
   }
 };
+
+static Value traceToAddress(Value ptr) {
+  auto op = ptr.getDefiningOp();
+  if (!op) {
+    return ptr;
+  }
+  if (isa<triton::AddPtrOp>(op)) {
+    auto addPtrOp = cast<triton::AddPtrOp>(op);
+    if (!isa<RankedTensorType>(addPtrOp.getType())) {
+      return addPtrOp.getPtr();
+    }
+    return traceToAddress(addPtrOp.getPtr());
+  } else if (isa<triton::SplatOp>(op)) {
+    auto splatOp = cast<triton::SplatOp>(op);
+    return splatOp.getSrc();
+  }
+  return ptr;
+}
 
 struct ConvertLocalStoreOp : public OpConversionPattern<gpu::LocalStoreOp> {
   using OpConversionPattern<gpu::LocalStoreOp>::OpConversionPattern;
@@ -98,40 +116,110 @@ struct ConvertLocalStoreOp : public OpConversionPattern<gpu::LocalStoreOp> {
     Location loc = op.getLoc();
 
     auto dst = adaptor.getDst();
+    auto srcOp = op.getSrc().getDefiningOp();
 
-    auto cbType = cast<ttkernel::CBType>(dst.getType());
-    MemRefType cbTileMemref = cbType.getMemref();
+    if (!isa<triton::LoadOp>(srcOp)) {
+      auto cbType = cast<ttkernel::CBType>(dst.getType());
+      MemRefType cbTileMemref = cbType.getMemref();
 
-    // add the one-D reinterpret cast at the compile time arg site for now
-    rewriter.setInsertionPointAfter(dst.getDefiningOp());
-    MemRefType oneDTileType = MemRefType::get(
-        {1}, cbTileMemref.getElementType(), MemRefLayoutAttrInterface{},
-        cbTileMemref.getMemorySpace());
-    auto oneDTile = rewriter.create<ttkernel::CBReinterpretShapeOp>(
-        loc, ttkernel::CBType::get(rewriter.getContext(), oneDTileType), dst);
+      // add the one-D reinterpret cast at the compile time arg site for now
+      rewriter.setInsertionPointAfter(dst.getDefiningOp());
+      MemRefType oneDTileType = MemRefType::get(
+          {1}, cbTileMemref.getElementType(), MemRefLayoutAttrInterface{},
+          cbTileMemref.getMemorySpace());
+      auto oneDTile = rewriter.create<ttkernel::CBReinterpretShapeOp>(
+          loc, ttkernel::CBType::get(rewriter.getContext(), oneDTileType), dst);
 
-    // reserve back the cb for the store
-    Value numPages = rewriter.create<arith::ConstantOp>(
+      // reserve back the cb for the store
+      Value numPages = rewriter.create<arith::ConstantOp>(
+          loc, rewriter.getI32Type(),
+          rewriter.getIntegerAttr(rewriter.getI32Type(), 1));
+      rewriter.create<ttkernel::CBReserveBackOp>(loc, dst, numPages);
+
+      rewriter.setInsertionPoint(op);
+      Value destRegisterIndex = rewriter.create<arith::ConstantOp>(
+          loc, rewriter.getIndexType(),
+          rewriter.getIntegerAttr(rewriter.getIndexType(), 2));
+      Value outIndex = rewriter.create<arith::ConstantOp>(
+          loc, rewriter.getIndexType(),
+          rewriter.getIntegerAttr(rewriter.getIndexType(), 0));
+      rewriter.create<ttkernel::PackTileOp>(loc, destRegisterIndex, oneDTile,
+                                            outIndex,
+                                            /*outOfOrder=*/true);
+
+      rewriter.eraseOp(op);
+      return success();
+    }
+    auto loadOp = cast<triton::LoadOp>(srcOp);
+
+    // ASSUME: tilize has padded to full tiles. Drop masking.
+
+    Value const1 = rewriter.create<arith::ConstantOp>(
         loc, rewriter.getI32Type(),
         rewriter.getIntegerAttr(rewriter.getI32Type(), 1));
-    rewriter.create<ttkernel::CBReserveBackOp>(loc, dst, numPages);
+    Value const0 = rewriter.create<arith::ConstantOp>(
+        loc, rewriter.getI32Type(),
+        rewriter.getIntegerAttr(rewriter.getI32Type(), 0));
 
-    rewriter.setInsertionPoint(op);
-    Value destRegisterIndex = rewriter.create<arith::ConstantOp>(
+    // 1. reserve back on the cb to know data is ready to store to SRAM
+    //       ttkernel.cb_reserve_back(%0, %c1_i32) :
+    //       (!ttkernel.cb<memref<1x1x!ttcore.tile<32x32, f32>,
+    //       #ttcore.memory_space<l1>>>, i32) -> ()
+    rewriter.create<ttkernel::CBReserveBackOp>(loc, dst, const1);
+
+    // 2. get noc address
+    // trace back to base address
+    //       %10 = ttkernel.get_noc_addr(%9, %8, %7) : (index, index, i32) ->
+    //       !ttkernel.noc_addr
+    Value baseAddr = traceToAddress(loadOp.getPtr());
+    Value baseAddrInt = rewriter
+                            .create<UnrealizedConversionCastOp>(
+                                loc, rewriter.getI32Type(), baseAddr)
+                            .getResult(0);
+
+    // NOC coords -> DRAM channel
+    // TODO: currently hardcoded to 0,0.. compute from program id?
+    //   - Mod the x-coord to left side DRAM column
+    //   - addr bits 31:16 are the DRAM row
+    Value nocAddr = rewriter.create<ttkernel::GetNocAddrOp>(loc, const0, const0,
+                                                            baseAddrInt);
+
+    // 3. get L1 address
+    //       %11 = ttkernel.get_write_ptr(%0) :
+    //       (!ttkernel.cb<memref<1x1x!ttcore.tile<32x32, f32>,
+    //       #ttcore.memory_space<l1>>>) -> i32
+    Value l1Addr = rewriter.create<ttkernel::GetWritePtrOp>(loc, dst);
+
+    // 4. async read from noc to l1, size in bytes
+    //       ttkernel.noc_async_read(%10, %13, %c4096_i32) :
+    //       (!ttkernel.noc_addr, i32, i32) -> ()
+    auto srcType = op.getSrc().getType();
+    auto size = srcType.getNumElements() * srcType.getElementTypeBitWidth() / 8;
+    Value sizeInt = rewriter.create<arith::ConstantOp>(
         loc, rewriter.getIndexType(),
-        rewriter.getIntegerAttr(rewriter.getIndexType(), 2));
-    Value outIndex = rewriter.create<arith::ConstantOp>(
-        loc, rewriter.getIndexType(),
-        rewriter.getIntegerAttr(rewriter.getIndexType(), 0));
-    rewriter.create<ttkernel::PackTileOp>(loc, destRegisterIndex, oneDTile,
-                                          outIndex,
-                                          /*outOfOrder=*/true);
+        rewriter.getIntegerAttr(rewriter.getIndexType(), size));
 
-    auto srcOp = op.getSrc().getDefiningOp();
-    op.erase();
+    rewriter.create<ttkernel::NocAsyncReadOp>(loc, nocAddr, l1Addr, sizeInt);
 
-    if (srcOp)
-      rewriter.eraseOp(srcOp);
+    // 5. barrier to ensure data is read from noc to l1
+    //       ttkernel.noc_async_read_barrier() : () -> ()
+    rewriter.create<ttkernel::NocAsyncReadBarrierOp>(loc);
+
+    // 6. push back on the cb to know data is ready to load from SRAM
+    //       ttkernel.cb_push_back(%0, %c1_i32) :
+    //       (!ttkernel.cb<memref<1x1x!ttcore.tile<32x32, f32>,
+    //       #ttcore.memory_space<l1>>>, i32) -> ()
+    rewriter.create<ttkernel::CBPushBackOp>(loc, dst, const1);
+
+    rewriter.eraseOp(op);
+
+    // cleanup the global load op
+    auto mask = loadOp.getMask();
+    rewriter.eraseOp(loadOp);
+    if (mask && mask.getDefiningOp()) {
+      rewriter.eraseOp(mask.getDefiningOp());
+    }
+
     return success();
   }
 };
@@ -162,7 +250,11 @@ struct ConvertLocalLoadOp : public OpConversionPattern<gpu::LocalLoadOp> {
                   ConversionPatternRewriter &rewriter) const override {
     Location loc = op.getLoc();
 
+    auto dst = op.getResult();
     // 1. wait_front on the cb to know data is ready to load from SRAM
+    Value c0 = rewriter.create<arith::ConstantOp>(
+        loc, rewriter.getIndexType(),
+        rewriter.getIntegerAttr(rewriter.getIndexType(), 0));
     Value c1 = rewriter.create<arith::ConstantOp>(
         loc, rewriter.getI32Type(),
         rewriter.getIntegerAttr(rewriter.getI32Type(), 1));
@@ -180,13 +272,39 @@ struct ConvertLocalLoadOp : public OpConversionPattern<gpu::LocalLoadOp> {
     MemRefType oneDTileType = MemRefType::get(
         {1}, cbTileMemref.getElementType(), MemRefLayoutAttrInterface{},
         cbTileMemref.getMemorySpace());
-    auto oneDTile = rewriter.create<ttkernel::CBReinterpretShapeOp>(
-        loc, ttkernel::CBType::get(rewriter.getContext(), oneDTileType),
-        adaptor.getSrc());
+    auto oneDTile =
+        rewriter
+            .create<ttkernel::CBReinterpretShapeOp>(
+                loc, ttkernel::CBType::get(rewriter.getContext(), oneDTileType),
+                adaptor.getSrc())
+            .getResult();
 
-    rewriter.replaceOp(
-        op, oneDTile); // TODO: this should come from the cb root eventually,
-                       // replaceOp is probably not appropriate here
+    auto user = *dst.getUsers().begin();
+
+    if (dst.hasOneUse() && isa<triton::StoreOp>(user)) {
+      auto storeOp = cast<triton::StoreOp>(user);
+      auto srcType = cast<RankedTensorType>(storeOp.getValue().getType());
+      auto size =
+          srcType.getNumElements() * srcType.getElementTypeBitWidth() / 8;
+      Value sizeInt = rewriter.create<arith::ConstantOp>(
+          loc, rewriter.getIndexType(),
+          rewriter.getIntegerAttr(rewriter.getIndexType(), size));
+      Value baseAddr = traceToAddress(storeOp.getPtr());
+      Value baseAddrInt = rewriter
+                              .create<UnrealizedConversionCastOp>(
+                                  loc, rewriter.getI32Type(), baseAddr)
+                              .getResult(0);
+      Value l1Addr = rewriter.create<ttkernel::GetWritePtrOp>(loc, oneDTile);
+      Value nocAddr =
+          rewriter.create<ttkernel::GetNocAddrOp>(loc, c0, c0, baseAddrInt);
+      rewriter.create<ttkernel::NocAsyncWriteOp>(loc, l1Addr, nocAddr, sizeInt);
+      rewriter.create<ttkernel::NocAsyncWriteBarrierOp>(loc);
+      rewriter.create<ttkernel::CBPopFrontOp>(loc, oneDTile, c1);
+      rewriter.eraseOp(user);
+    }
+    // replace uses of the load with the CB output (possibly reshaped but we
+    // should handle that elsewhere)
+    rewriter.replaceOp(op, oneDTile);
     return success();
   }
 };
@@ -216,6 +334,87 @@ struct ConvertLocalAllocOp : public OpConversionPattern<gpu::LocalAllocOp> {
     rewriter.replaceOpWithNewOp<ttkernel::GetCompileArgValOp>(op, cbMemRefType,
                                                               allocIdxValue);
 
+    return success();
+  }
+};
+
+struct ConvertSplatOp : public OpConversionPattern<SplatOp> {
+  using OpConversionPattern<SplatOp>::OpConversionPattern;
+
+  LogicalResult
+  matchAndRewrite(SplatOp op, OpAdaptor adaptor,
+                  ConversionPatternRewriter &rewriter) const override {
+    Location loc = op.getLoc();
+
+    // these should be dropped by dce
+    rewriter.replaceOp(op, adaptor.getSrc());
+
+    return success();
+  }
+};
+
+struct ConvertMakeRangeOp : public OpConversionPattern<MakeRangeOp> {
+  using OpConversionPattern<MakeRangeOp>::OpConversionPattern;
+
+  LogicalResult
+  matchAndRewrite(MakeRangeOp op, OpAdaptor adaptor,
+                  ConversionPatternRewriter &rewriter) const override {
+    Location loc = op.getLoc();
+
+    auto start = adaptor.getStart();
+    auto end = adaptor.getEnd();
+
+    auto constEnd = rewriter.create<arith::ConstantOp>(
+        loc, rewriter.getIndexType(),
+        rewriter.getIntegerAttr(rewriter.getIndexType(), end));
+
+    rewriter.replaceOp(op, constEnd);
+
+    return success();
+  }
+};
+
+struct ConvertAddPtrOp : public OpConversionPattern<AddPtrOp> {
+  using OpConversionPattern<AddPtrOp>::OpConversionPattern;
+
+  LogicalResult
+  matchAndRewrite(AddPtrOp op, OpAdaptor adaptor,
+                  ConversionPatternRewriter &rewriter) const override {
+    Location loc = op.getLoc();
+
+    auto baseAddr = adaptor.getPtr();
+    auto offset = adaptor.getOffset();
+
+    if (op->use_empty()) {
+      rewriter.eraseOp(op);
+      return success();
+    }
+    auto newAddPtrOp = rewriter.create<arith::AddIOp>(loc, baseAddr, offset);
+    rewriter.replaceOp(op, newAddPtrOp.getResult());
+
+    return success();
+  }
+};
+
+struct ConvertGetProgramIdOp : public OpConversionPattern<GetProgramIdOp> {
+  using OpConversionPattern<GetProgramIdOp>::OpConversionPattern;
+
+  LogicalResult
+  matchAndRewrite(GetProgramIdOp op, OpAdaptor adaptor,
+                  ConversionPatternRewriter &rewriter) const override {
+    Location loc = op.getLoc();
+
+    // TODO: map from virtual grid to physical grid
+    // - this is a hack to get the program id from the my_x and my_y ops
+    if (adaptor.getAxis() == ProgramIDDim::X) {
+      auto programId =
+          rewriter.create<ttkernel::MyXOp>(loc, /*Optional noc=*/Value());
+      rewriter.replaceOp(op, programId);
+    } else if (adaptor.getAxis() == ProgramIDDim::Y) {
+      auto programId =
+          rewriter.create<ttkernel::MyYOp>(loc, /*Optional noc=*/Value());
+      rewriter.replaceOp(op, programId);
+    }
     return success();
   }
 };
@@ -352,12 +551,17 @@ struct ConvertTritonNPUToTTKernelPass
       return ttkernel::CBType::get(memdesc.getContext(), cbMemRefType);
     });
     typeConverter.addConversion([](RankedTensorType type) -> Type {
+      auto etype = type.getElementType();
+      if (isa<triton::PointerType>(etype)) {
+        etype = IntegerType::get(type.getContext(), 32);
+        return RankedTensorType::get(type.getShape(), etype);
+      }
       if (isa<npu::tt::TileEncodingAttr>(type.getEncoding())) {
         // TODO: same caveats as above re:ttts layout
         auto shape = SmallVector<int64_t>(1, 1);
         auto ttcoreTileType = ttcore::TileType::get(
             type.getContext(), ttcore::TileType::getDefaultShape(),
-            ttcore::elementTypeToDataType(type.getElementType()));
+            ttcore::elementTypeToDataType(etype));
         MemRefType cbMemRefType = MemRefType::get(
             shape, ttcoreTileType, MemRefLayoutAttrInterface{},
             ttcore::MemorySpaceAttr::get(type.getContext(),
@@ -365,6 +569,10 @@ struct ConvertTritonNPUToTTKernelPass
         return ttkernel::CBType::get(type.getContext(), cbMemRefType);
       }
       return type;
+    });
+    typeConverter.addConversion([](triton::PointerType type) -> Type {
+      // convert pointer to i32
+      return IntegerType::get(type.getContext(), 32);
     });
 
     mlir::ConversionTarget funcTarget(*context);
@@ -412,9 +620,16 @@ struct ConvertTritonNPUToTTKernelPass
     });
 
     mlir::RewritePatternSet patterns(context);
+    // triton ops
+    patterns.add<ConvertAddPtrOp>(typeConverter, patterns.getContext());
+    patterns.add<ConvertSplatOp>(typeConverter, patterns.getContext());
+    patterns.add<ConvertMakeRangeOp>(typeConverter, patterns.getContext());
+    patterns.add<ConvertGetProgramIdOp>(typeConverter, patterns.getContext());
+    // triton-gpu ops
     patterns.add<ConvertLocalStoreOp>(typeConverter, patterns.getContext());
     patterns.add<ConvertLocalLoadOp>(typeConverter, patterns.getContext());
     patterns.add<ConvertLocalAllocOp>(typeConverter, patterns.getContext());
+    // triton-tt ops
     patterns.add<ConvertBinaryComputeOp>(typeConverter, patterns.getContext());
     patterns.add<DropFunctionArguments>(typeConverter, patterns.getContext());
 
