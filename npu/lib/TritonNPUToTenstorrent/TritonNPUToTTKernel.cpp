@@ -162,15 +162,12 @@ struct ConvertLocalStoreOp : public OpConversionPattern<gpu::LocalStoreOp> {
         rewriter.getIntegerAttr(rewriter.getI32Type(), 0));
 
     // 1. reserve back on the cb to know data is ready to store to SRAM
-    //       ttkernel.cb_reserve_back(%0, %c1_i32) :
-    //       (!ttkernel.cb<memref<1x1x!ttcore.tile<32x32, f32>,
-    //       #ttcore.memory_space<l1>>>, i32) -> ()
+    //       ttkernel.cb_reserve_back(%0, %c1_i32)
     rewriter.create<ttkernel::CBReserveBackOp>(loc, dst, const1);
 
     // 2. get noc address
     // trace back to base address
-    //       %10 = ttkernel.get_noc_addr(%9, %8, %7) : (index, index, i32) ->
-    //       !ttkernel.noc_addr
+    //       %10 = ttkernel.get_noc_addr(%9, %8, %7)
     Value baseAddr = traceToAddress(loadOp.getPtr());
     Value baseAddrInt = rewriter
                             .create<UnrealizedConversionCastOp>(
@@ -185,14 +182,11 @@ struct ConvertLocalStoreOp : public OpConversionPattern<gpu::LocalStoreOp> {
                                                             baseAddrInt);
 
     // 3. get L1 address
-    //       %11 = ttkernel.get_write_ptr(%0) :
-    //       (!ttkernel.cb<memref<1x1x!ttcore.tile<32x32, f32>,
-    //       #ttcore.memory_space<l1>>>) -> i32
+    //       %11 = ttkernel.get_write_ptr(%0)
     Value l1Addr = rewriter.create<ttkernel::GetWritePtrOp>(loc, dst);
 
     // 4. async read from noc to l1, size in bytes
-    //       ttkernel.noc_async_read(%10, %13, %c4096_i32) :
-    //       (!ttkernel.noc_addr, i32, i32) -> ()
+    //       ttkernel.noc_async_read(%10, %13, %c4096_i32)
     auto srcType = op.getSrc().getType();
     auto size = srcType.getNumElements() * srcType.getElementTypeBitWidth() / 8;
     Value sizeInt = rewriter.create<arith::ConstantOp>(
@@ -206,9 +200,7 @@ struct ConvertLocalStoreOp : public OpConversionPattern<gpu::LocalStoreOp> {
     rewriter.create<ttkernel::NocAsyncReadBarrierOp>(loc);
 
     // 6. push back on the cb to know data is ready to load from SRAM
-    //       ttkernel.cb_push_back(%0, %c1_i32) :
-    //       (!ttkernel.cb<memref<1x1x!ttcore.tile<32x32, f32>,
-    //       #ttcore.memory_space<l1>>>, i32) -> ()
+    //       ttkernel.cb_push_back(%0, %c1_i32)
     rewriter.create<ttkernel::CBPushBackOp>(loc, dst, const1);
 
     rewriter.eraseOp(op);
@@ -283,6 +275,10 @@ struct ConvertLocalLoadOp : public OpConversionPattern<gpu::LocalLoadOp> {
 
     if (dst.hasOneUse() && isa<triton::StoreOp>(user)) {
       auto storeOp = cast<triton::StoreOp>(user);
+      auto mask = storeOp.getMask();
+      if (mask && mask.getDefiningOp()) {
+        rewriter.eraseOp(mask.getDefiningOp());
+      }
       auto srcType = cast<RankedTensorType>(storeOp.getValue().getType());
       auto size =
           srcType.getNumElements() * srcType.getElementTypeBitWidth() / 8;
@@ -302,8 +298,8 @@ struct ConvertLocalLoadOp : public OpConversionPattern<gpu::LocalLoadOp> {
       rewriter.create<ttkernel::CBPopFrontOp>(loc, oneDTile, c1);
       rewriter.eraseOp(user);
     }
-    // replace uses of the load with the CB output (possibly reshaped but we
-    // should handle that elsewhere)
+    // TODO: this should come from the cb root eventually,
+    // but replaceOp is probably not appropriate here
     rewriter.replaceOp(op, oneDTile);
     return success();
   }
@@ -338,42 +334,6 @@ struct ConvertLocalAllocOp : public OpConversionPattern<gpu::LocalAllocOp> {
   }
 };
 
-struct ConvertSplatOp : public OpConversionPattern<SplatOp> {
-  using OpConversionPattern<SplatOp>::OpConversionPattern;
-
-  LogicalResult
-  matchAndRewrite(SplatOp op, OpAdaptor adaptor,
-                  ConversionPatternRewriter &rewriter) const override {
-    Location loc = op.getLoc();
-
-    // these should be dropped by dce
-    rewriter.replaceOp(op, adaptor.getSrc());
-
-    return success();
-  }
-};
-
-struct ConvertMakeRangeOp : public OpConversionPattern<MakeRangeOp> {
-  using OpConversionPattern<MakeRangeOp>::OpConversionPattern;
-
-  LogicalResult
-  matchAndRewrite(MakeRangeOp op, OpAdaptor adaptor,
-                  ConversionPatternRewriter &rewriter) const override {
-    Location loc = op.getLoc();
-
-    auto start = adaptor.getStart();
-    auto end = adaptor.getEnd();
-
-    auto constEnd = rewriter.create<arith::ConstantOp>(
-        loc, rewriter.getIndexType(),
-        rewriter.getIntegerAttr(rewriter.getIndexType(), end));
-
-    rewriter.replaceOp(op, constEnd);
-
-    return success();
-  }
-};
-
 struct ConvertAddPtrOp : public OpConversionPattern<AddPtrOp> {
   using OpConversionPattern<AddPtrOp>::OpConversionPattern;
 
@@ -389,10 +349,29 @@ struct ConvertAddPtrOp : public OpConversionPattern<AddPtrOp> {
       rewriter.eraseOp(op);
       return success();
     }
+    if (!isa<IntegerType>(baseAddr.getType()) ||
+        !isa<IntegerType>(offset.getType())) {
+      return failure();
+    }
     auto newAddPtrOp = rewriter.create<arith::AddIOp>(loc, baseAddr, offset);
     rewriter.replaceOp(op, newAddPtrOp.getResult());
 
     return success();
+  }
+};
+
+template <typename OpTy>
+struct DeadCodeEliminationOp : public OpConversionPattern<OpTy> {
+  using OpConversionPattern<OpTy>::OpConversionPattern;
+
+  LogicalResult
+  matchAndRewrite(OpTy op, typename OpTy::Adaptor adaptor,
+                  ConversionPatternRewriter &rewriter) const override {
+    if (op->use_empty()) {
+      rewriter.eraseOp(op);
+      return success();
+    }
+    return failure();
   }
 };
 
@@ -633,8 +612,69 @@ struct ConvertTritonNPUToTTKernelPass
     patterns.add<ConvertBinaryComputeOp>(typeConverter, patterns.getContext());
     patterns.add<DropFunctionArguments>(typeConverter, patterns.getContext());
 
-    if (applyPartialConversion(mod, target, std::move(patterns)).failed())
-      signalPassFailure();
+
+      target.addLegalDialect<ttkernel::TTKernelDialect>();
+      target.addLegalDialect<arith::ArithDialect>();
+      target.addLegalDialect<func::FuncDialect>();
+      target.addLegalDialect<triton::TritonDialect>();
+
+      target.addLegalOp<UnrealizedConversionCastOp>();
+
+      mlir::RewritePatternSet patterns(context);
+      // triton-gpu ops
+      patterns.add<ConvertLocalStoreOp>(typeConverter, patterns.getContext());
+      patterns.add<ConvertLocalLoadOp>(typeConverter, patterns.getContext());
+      patterns.add<ConvertLocalAllocOp>(typeConverter, patterns.getContext());
+      // triton-tt ops
+      patterns.add<ConvertBinaryComputeOp>(typeConverter,
+                                           patterns.getContext());
+
+      if (applyPartialConversion(mod, target, std::move(patterns), config)
+              .failed())
+        ; // message
+    }
+
+    //  Pass 2: Dead code elimination
+    {
+      mlir::ConversionTarget target{*context};
+
+      target.addLegalDialect<ttkernel::TTKernelDialect>();
+      target.addLegalDialect<arith::ArithDialect>();
+      target.addLegalDialect<func::FuncDialect>();
+
+      target.addDynamicallyLegalOp<func::FuncOp>([](func::FuncOp funcOp) {
+        StringRef funcName = funcOp.getSymName();
+        if (!funcName.ends_with("__compute"))
+          return true;
+
+        return funcOp.getNumArguments() == 0;
+      });
+
+      auto isIntegerType = [](Operation *op) {
+        return isa<IntegerType>(op->getOperand(0).getType());
+      };
+      target.addDynamicallyLegalOp<arith::AddIOp>(isIntegerType);
+      target.addDynamicallyLegalOp<arith::CmpIOp>(isIntegerType);
+
+      mlir::RewritePatternSet patterns(context);
+      patterns.add<DeadCodeEliminationOp<arith::AddIOp>>(typeConverter,
+                                                         patterns.getContext());
+      patterns.add<DeadCodeEliminationOp<arith::CmpIOp>>(typeConverter,
+                                                         patterns.getContext());
+      // triton ops
+      patterns.add<ConvertAddPtrOp>(typeConverter, patterns.getContext());
+      patterns.add<DeadCodeEliminationOp<SplatOp>>(typeConverter,
+                                                   patterns.getContext());
+      patterns.add<DeadCodeEliminationOp<MakeRangeOp>>(typeConverter,
+                                                       patterns.getContext());
+      patterns.add<ConvertGetProgramIdOp>(typeConverter, patterns.getContext());
+      // triton-tt ops
+      patterns.add<DropFunctionArguments>(typeConverter, patterns.getContext());
+
+      if (applyPartialConversion(mod, target, std::move(patterns), config)
+              .failed())
+        signalPassFailure();
+    }
 
     // insert tile regs acquire before copy tile ops
     mod.walk([&](func::FuncOp funcOp) {
