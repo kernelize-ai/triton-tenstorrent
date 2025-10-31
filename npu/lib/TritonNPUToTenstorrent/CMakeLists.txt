@@ -3,6 +3,7 @@ add_triton_library(TritonNPUToTenstorrent
     TritonNPUToTenstorrent.cpp
 
     DropFunctionPass.cpp
+    FinalizeCBTransaction.cpp
     TritonFuncOpToFuncOp.cpp
     TritonNPUToTTKernel.cpp
 
