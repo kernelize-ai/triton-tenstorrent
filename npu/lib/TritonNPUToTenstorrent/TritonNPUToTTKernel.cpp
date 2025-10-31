@@ -68,9 +68,7 @@ struct ConvertBinaryComputeOp
     copyAndInitializeRegister(op.getLhs(), lhs);
     copyAndInitializeRegister(op.getRhs(), rhs);
 
-    // create init op
-    rewriter.create<ttkernel::AddTilesInitOp>(loc, lhs, rhs);
-
+    rewriter.create<ttkernel::AddBinaryTilesInitOp>(loc);
     Value lhsIndex = rewriter.create<arith::ConstantOp>(
         loc, rewriter.getIndexType(),
         rewriter.getIntegerAttr(rewriter.getIndexType(), 0));
@@ -80,8 +78,8 @@ struct ConvertBinaryComputeOp
     Value destIndex = rewriter.create<arith::ConstantOp>(
         loc, rewriter.getIndexType(),
         rewriter.getIntegerAttr(rewriter.getIndexType(), 2));
-    rewriter.create<ttkernel::AddTilesOp>(loc, lhs, rhs, lhsIndex, rhsIndex,
-                                          destIndex);
+    rewriter.create<ttkernel::AddBinaryTilesOp>(loc, lhsIndex, rhsIndex,
+                                                destIndex);
 
     if (op->use_empty())
       rewriter.eraseOp(op);
@@ -241,11 +239,14 @@ public:
 
   void insertTileRegsAcquireOps() {
     llvm::SetVector<Block *> visited;
-    // TODO: this should generically visit all compute ops
-    funcOp.walk([&](ttkernel::AddTilesOp addTilesOp) {
-      Block *b = addTilesOp->getBlock();
+    // TODO: this now visits copy tiles since the compute op operates directly
+    // on the DST register. cleanup the naming (and possibly the algorithm)
+    // here. We probably want to record some info about the compute op so we put
+    // the right init in, but we might be able to do that elsewhere.
+    funcOp.walk([&](ttkernel::CopyTileOp copyTilesOp) {
+      Block *b = copyTilesOp->getBlock();
       if (visited.insert(b))
-        insertTileRegsAcquireInBlock(b, ComputeOpInfo(addTilesOp));
+        insertTileRegsAcquireInBlock(b, ComputeOpInfo(copyTilesOp));
     });
   }
 
