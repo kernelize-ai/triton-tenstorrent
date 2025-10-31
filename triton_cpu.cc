@@ -5,12 +5,21 @@
 #include "npu/include/TritonNPUToTenstorrent/Passes.h"
 
 #include "mlir/Pass/PassManager.h"
+#include "llvm/ADT/ScopeExit.h"
 #include "llvm/IR/Module.h"
 #include "llvm/TargetParser/Host.h"
 
+#include "mlir/Dialect/EmitC/Transforms/Passes.h"
+#include "mlir/Target/Cpp/CppEmitter.h"
+
 // TODO: conditionally include based on if we're building with tenstorrent
 // support
+#include "ttmlir/Conversion/TTKernelToEmitC/TTKernelToEmitC.h"
 #include "ttmlir/Dialect/TTKernel/IR/TTKernel.h"
+#include "ttmlir/Dialect/TTKernel/Transforms/Passes.h"
+#include "ttmlir/Target/TTKernel/TTKernelToCpp.h"
+
+#include "mlir/Dialect/Arith/Transforms/Passes.h"
 
 #include <pybind11/pybind11.h>
 
@@ -66,6 +75,33 @@ void init_triton_npu_passes_tenstorrent(py::module &&m) {
   m.def("add_to_ttkernel_dialect", [](mlir::PassManager &pm) {
     pm.addPass(mlir::triton::npu::createConvertTritonNPUToTTKernel());
   });
+
+  m.def("add_drop_function",
+        [](mlir::PassManager &pm, const std::string &funcName) {
+          pm.addPass(mlir::triton::npu::createDropFunction({funcName}));
+        });
+
+  // tt-mlir specific passes
+  m.def("add_ttkernel_control_dst_selection", [](mlir::PassManager &pm) {
+    pm.addPass(mlir::tt::ttkernel::createTTKernelControlDstSection());
+  });
+  m.def("add_ttkernel_device_zone_scopes", [](mlir::PassManager &pm) {
+    pm.addPass(mlir::tt::ttkernel::createTTKernelInsertDeviceZoneScopes());
+  });
+
+  // emit-c -- TODO should this be part of a different namespace?
+  m.def("add_ttkernel_to_emitc", [](mlir::PassManager &pm) {
+    pm.addPass(mlir::tt::createConvertTTKernelToEmitC());
+  });
+  m.def("add_form_expressions_pass", [](mlir::PassManager &pm) {
+    pm.addPass(mlir::emitc::createFormExpressionsPass());
+  });
+}
+
+void init_triton_npu_passes_common(py::module &&m) {
+  m.def("add_arith_int_range_opts", [](mlir::PassManager &pm) {
+    pm.addPass(mlir::arith::createArithIntRangeOpts());
+  });
 }
 
 void init_triton_cpu_passes_ttgpuir(py::module &&m) {
@@ -82,6 +118,24 @@ void init_triton_cpu(py::module &&m) {
   init_triton_cpu_passes(passes.def_submodule("ttcpuir"));
 
   init_triton_npu_passes_tenstorrent(passes.def_submodule("tenstorrent"));
+  init_triton_npu_passes_common(passes.def_submodule("common"));
+
+  m.def(
+      "translate_to_cpp",
+      [](mlir::ModuleOp moduleOp, const std::string &symbolName) -> py::object {
+        mlir::SymbolTable symbolTable(moduleOp);
+        auto entry = symbolTable.lookup<mlir::func::FuncOp>(symbolName);
+        assert(entry && "expected kernel func with given symbol name");
+        assert(entry->hasAttr(mlir::tt::ttkernel::ThreadTypeAttr::name) &&
+               "expected thread type attr on kernel func");
+
+        std::string cppCode;
+        llvm::raw_string_ostream os(cppCode);
+        assert(mlir::succeeded(
+                   mlir::tt::ttkernel::translateKernelFuncToCpp(entry, os)) &&
+               "failed to translate kernel func to C++");
+        return py::str(cppCode);
+      });
 
   m.def("load_dialects",
         [](mlir::MLIRContext &context, const std::string &device) {
