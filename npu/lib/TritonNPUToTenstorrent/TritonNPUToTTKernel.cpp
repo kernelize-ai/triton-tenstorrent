@@ -629,8 +629,7 @@ struct ConvertTritonNPUToTTKernelPass
       patterns.add<ConvertBinaryComputeOp>(typeConverter,
                                            patterns.getContext());
 
-      if (applyPartialConversion(mod, target, std::move(patterns))
-              .failed())
+      if (applyPartialConversion(mod, target, std::move(patterns)).failed())
         ; // message
     }
 
@@ -671,8 +670,7 @@ struct ConvertTritonNPUToTTKernelPass
       // triton-tt ops
       patterns.add<DropFunctionArguments>(typeConverter, patterns.getContext());
 
-      if (applyPartialConversion(mod, target, std::move(patterns))
-              .failed())
+      if (applyPartialConversion(mod, target, std::move(patterns)).failed())
         signalPassFailure();
     }
 
