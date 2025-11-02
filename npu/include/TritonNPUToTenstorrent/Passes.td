@@ -40,7 +40,8 @@ def ConvertTritonNPUToTTKernel : Pass<"convert-triton-npu-to-ttkernel", "mlir::M
     let dependentDialects = ["mlir::triton::TritonDialect",
                             "mlir::triton::gpu::TritonGPUDialect",
                              "mlir::tt::ttkernel::TTKernelDialect",
-                             "mlir::arith::ArithDialect"
+                             "mlir::arith::ArithDialect",
+                             "func::FuncDialect",
                             ];
 }
 

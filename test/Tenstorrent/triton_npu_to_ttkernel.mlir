@@ -5,8 +5,8 @@
 #shared = #ttg.padded_shared<[1:+1] {order = [0], shape = [1024]}>
 #smem = #ttg.shared_memory
 module attributes {"ttg.num-ctas" = 1 : i32, "ttg.num-warps" = 1 : i32, ttg.target = "cpu", "ttg.threads-per-warp" = 1 : i32} {
-  // CHECK: @add_kernel__compute()
-  func.func public @add_kernel__compute(%x_ptr: !tt.ptr<f32>, %y_ptr: !tt.ptr<f32>, %output_ptr: !tt.ptr<f32>, %n_elements: i32) {
+  // CHECK: func.func public @add_kernel__compute() attributes {ttkernel.arg_spec = #ttkernel.arg_spec< ct_args = [<arg_type = cb_port, operand_index = 0>, <arg_type = cb_port, operand_index = 1>, <arg_type = cb_port, operand_index = 2>]>, ttkernel.thread = #ttkernel.thread<compute>} {
+  tt.func public @add_kernel__compute(%x_ptr: !tt.ptr<f32> {tt.divisibility = 8 : i32}, %y_ptr: !tt.ptr<f32> {tt.divisibility = 8 : i32}, %output_ptr: !tt.ptr<f32> {tt.divisibility = 8 : i32}, %n_elements: i32 {tt.divisibility = 8 : i32}) attributes {noinline = false} {
     // CHECK-DAG: %[[X:.*]] = ttkernel.get_compile_time_arg_val(0)
     // CHECK-DAG: %[[Y:.*]] = ttkernel.get_compile_time_arg_val(1)
     // CHECK-DAG: %[[OUTPUT:.*]] = ttkernel.get_compile_time_arg_val(2)
@@ -47,6 +47,7 @@ module attributes {"ttg.num-ctas" = 1 : i32, "ttg.num-warps" = 1 : i32, ttg.targ
     // CHECK-DAG: %[[C0_4:.*]] = arith.constant 0 : index
     // CHECK: ttkernel.pack_tile(%[[C2_1]], %[[OUTPUT1D]], %[[C0_4]], true)
     ttg.local_store %output, %0 : tensor<1024xf32, #triton_tenstorrent.tile_encoding<{index = 2, parent = #blocked}>> -> !ttg.memdesc<1024xf32, #shared, #smem, mutable>
-    return
+    // CHECK: return
+    tt.return
   }
 }

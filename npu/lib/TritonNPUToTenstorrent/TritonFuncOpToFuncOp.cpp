@@ -1,5 +1,7 @@
 #include "npu/include/TritonNPUToTenstorrent/Passes.h"
 
+#include "PatternTritonNPUToTenstorrent.h"
+
 #include "mlir/Transforms/DialectConversion.h"
 
 #include "triton/Dialect/Triton/IR/Dialect.h"
@@ -127,6 +129,14 @@ struct ConvertTritonFuncOpToFuncOpPass
       signalPassFailure();
   }
 };
+
+void populateFuncOpConversionPattern(TypeConverter &typeConverter,
+                                     RewritePatternSet &patterns,
+                                     PatternBenefit benefit) {
+  patterns.add<ConvertTritonFunc>(typeConverter, patterns.getContext(),
+                                  benefit);
+  patterns.add<ConvertReturnOp>(typeConverter, patterns.getContext(), benefit);
+}
 
 } // namespace npu
 } // namespace triton
