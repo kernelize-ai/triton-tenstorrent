@@ -67,9 +67,24 @@ if(TRITON_BUILD_PYTHON_MODULE)
     build_tt_mlir)
   target_link_libraries(TritonCPU PRIVATE Python3::Module pybind11::headers)
 
-  target_include_directories(TritonCPU PRIVATE
+  target_include_directories(TritonCPU PUBLIC
       "${TENSTORRENT_MLIR}/include"
       "${TENSTORRENT_MLIR}/build/include"
+  )
+
+  # copy ttmlir headers to the build directory so dependent targets in Triton can see them
+  set(TTMLIR_HEADER_SRC_DIR "${TENSTORRENT_MLIR}/build/include")
+  set(TTMLIR_HEADER_DST_DIR "${CMAKE_CURRENT_BINARY_DIR}")
+  add_custom_command(
+    OUTPUT "${TTMLIR_HEADER_DST_DIR}"
+    COMMAND ${CMAKE_COMMAND} -E make_directory "${TTMLIR_HEADER_DST_DIR}"
+    COMMAND ${CMAKE_COMMAND} -E copy_directory "${TTMLIR_HEADER_SRC_DIR}" "${TTMLIR_HEADER_DST_DIR}"
+    COMMENT "Copying tt-mlir headers to build directory"
+  )
+  add_custom_target(copy_ttmlir_headers ALL DEPENDS "${TTMLIR_HEADER_DST_DIR}")
+  add_dependencies(TritonCPU copy_ttmlir_headers)
+  target_include_directories(TritonCPU PUBLIC
+      "${TTMLIR_HEADER_DST_DIR}"
   )
 
 endif()
