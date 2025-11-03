@@ -7,6 +7,8 @@
 #include "triton/Dialect/Triton/IR/Dialect.h"
 #include "triton/Dialect/TritonGPU/IR/Dialect.h"
 
+#include "PatternTritonNPUToTenstorrent.h"
+
 #include "npu/include/Dialect/TritonTenstorrent/IR/Attributes.h"
 #include "npu/include/Dialect/TritonTenstorrent/IR/Dialect.h"
 
@@ -330,38 +332,6 @@ struct ConvertTritonNPUToTTKernelPass
     MLIRContext *context = &getContext();
     ModuleOp mod = getOperation();
 
-    mlir::ConversionTarget target{*context};
-    target.addLegalDialect<ttkernel::TTKernelDialect>();
-    target.addLegalDialect<arith::ArithDialect>();
-    target.addLegalDialect<func::FuncDialect>();
-
-    target.addIllegalOp<npu::tt::BinaryComputeOp>();
-    target.addDynamicallyLegalOp<gpu::LocalStoreOp>([](gpu::LocalStoreOp op) {
-      auto funcOp = op->getParentOfType<func::FuncOp>();
-      assert(funcOp && "expected func::funcOp parent");
-      StringRef funcName = funcOp.getSymName();
-      return !funcName.ends_with("__compute");
-    });
-    target.addDynamicallyLegalOp<gpu::LocalLoadOp>([](gpu::LocalLoadOp op) {
-      auto funcOp = op->getParentOfType<func::FuncOp>();
-      assert(funcOp && "expected func::funcOp parent");
-      StringRef funcName = funcOp.getSymName();
-      return !funcName.ends_with("__compute");
-    });
-    target.addDynamicallyLegalOp<gpu::LocalAllocOp>([](gpu::LocalAllocOp op) {
-      auto funcOp = op->getParentOfType<func::FuncOp>();
-      assert(funcOp && "expected func::funcOp parent");
-      StringRef funcName = funcOp.getSymName();
-      return !funcName.ends_with("__compute");
-    });
-    target.addDynamicallyLegalOp<func::FuncOp>([](func::FuncOp funcOp) {
-      StringRef funcName = funcOp.getSymName();
-      if (!funcName.ends_with("__compute"))
-        return true;
-
-      return funcOp.getNumArguments() == 0;
-    });
-
     TypeConverter typeConverter;
     typeConverter.addConversion([](Type type) { return type; });
     typeConverter.addConversion([](gpu::MemDescType memdesc) {
@@ -394,6 +364,50 @@ struct ConvertTritonNPUToTTKernelPass
         return ttkernel::CBType::get(type.getContext(), cbMemRefType);
       }
       return type;
+    });
+
+    mlir::ConversionTarget funcTarget(*context);
+    funcTarget.addLegalDialect<func::FuncDialect>();
+    funcTarget.addIllegalOp<triton::FuncOp>();
+    funcTarget.addIllegalOp<triton::ReturnOp>();
+
+    mlir::RewritePatternSet funcPatterns(context);
+    populateFuncOpConversionPattern(typeConverter, funcPatterns,
+                                    PatternBenefit(1));
+    if (applyPartialConversion(mod, funcTarget, std::move(funcPatterns))
+            .failed())
+      signalPassFailure();
+
+    mlir::ConversionTarget target{*context};
+    target.addLegalDialect<ttkernel::TTKernelDialect>();
+    target.addLegalDialect<arith::ArithDialect>();
+    target.addLegalDialect<func::FuncDialect>();
+
+    target.addIllegalOp<npu::tt::BinaryComputeOp>();
+    target.addDynamicallyLegalOp<gpu::LocalStoreOp>([](gpu::LocalStoreOp op) {
+      auto funcOp = op->getParentOfType<func::FuncOp>();
+      assert(funcOp && "expected func::funcOp parent");
+      StringRef funcName = funcOp.getSymName();
+      return !funcName.ends_with("__compute");
+    });
+    target.addDynamicallyLegalOp<gpu::LocalLoadOp>([](gpu::LocalLoadOp op) {
+      auto funcOp = op->getParentOfType<func::FuncOp>();
+      assert(funcOp && "expected func::funcOp parent");
+      StringRef funcName = funcOp.getSymName();
+      return !funcName.ends_with("__compute");
+    });
+    target.addDynamicallyLegalOp<gpu::LocalAllocOp>([](gpu::LocalAllocOp op) {
+      auto funcOp = op->getParentOfType<func::FuncOp>();
+      assert(funcOp && "expected func::funcOp parent");
+      StringRef funcName = funcOp.getSymName();
+      return !funcName.ends_with("__compute");
+    });
+    target.addDynamicallyLegalOp<func::FuncOp>([](func::FuncOp funcOp) {
+      StringRef funcName = funcOp.getSymName();
+      if (!funcName.ends_with("__compute"))
+        return true;
+
+      return funcOp.getNumArguments() == 0;
     });
 
     mlir::RewritePatternSet patterns(context);
