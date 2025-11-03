@@ -90,8 +90,11 @@ struct ConvertBinaryComputeOp
 };
 
 static Value traceToScalar(Value ptr, bool isPtr = true) {
+  auto isScalar = [](Value v) {
+    return !isa<RankedTensorType>(v.getType());
+  };
   auto op = ptr.getDefiningOp();
-  if (!isa<RankedTensorType>(ptr.getType()) || op == nullptr) {
+  if (isScalar(ptr) || op == nullptr) {
     return ptr;
   }
   if (auto addPtr = dyn_cast<triton::AddPtrOp>(op)) {
@@ -103,10 +106,14 @@ static Value traceToScalar(Value ptr, bool isPtr = true) {
   } else if (auto addOp = dyn_cast<arith::AddIOp>(op)) {
     auto lhs = traceToScalar(addOp.getLhs(), isPtr);
     auto rhs = traceToScalar(addOp.getRhs(), isPtr);
-    if (!isa<RankedTensorType>(lhs.getType()))
+    if (isScalar(lhs)) {
+      assert(!isScalar(rhs) && "expected non-scalar rhs");
       return lhs;
-    if (!isa<RankedTensorType>(rhs.getType()))
+    }
+    if (isScalar(rhs))
       return rhs;
+  } else if (auto makeRangeOp = dyn_cast<triton::MakeRangeOp>(op)) {
+    // 
   } else {
     assert(0 && "unhandled op");
   }
@@ -567,6 +574,8 @@ struct ConvertTritonNPUToTTKernelPass
               .failed())
         signalPassFailure();
     }
+    llvm::errs() << "Pass 0: TritonFunc to Func completed\n";
+
     //  Pass 1: TritonGPU to TTKernel
     {
       mlir::ConversionTarget target{*context};
@@ -588,49 +597,27 @@ struct ConvertTritonNPUToTTKernelPass
                                            patterns.getContext());
 
       if (applyPartialConversion(mod, target, std::move(patterns)).failed())
-        ; // message
+        llvm::errs() << "Failed to convert TritonNPU to TTKernel\n"; // message
     }
+    llvm::errs() << "Pass 1: TritonNPU to TTKernel completed\n";
 
     //  Pass 2: Dead code elimination
     {
-      mlir::ConversionTarget target{*context};
-
-      target.addLegalDialect<ttkernel::TTKernelDialect>();
-      target.addLegalDialect<arith::ArithDialect>();
-      target.addLegalDialect<func::FuncDialect>();
-
-      target.addDynamicallyLegalOp<func::FuncOp>([](func::FuncOp funcOp) {
-        StringRef funcName = funcOp.getSymName();
-        if (!funcName.ends_with("__compute"))
-          return true;
-
-        return funcOp.getNumArguments() == 0;
-      });
-
-      auto isIntegerType = [](Operation *op) {
-        return isa<IntegerType>(op->getOperand(0).getType());
-      };
-      target.addDynamicallyLegalOp<arith::AddIOp>(isIntegerType);
-      target.addDynamicallyLegalOp<arith::CmpIOp>(isIntegerType);
-
-      mlir::RewritePatternSet patterns(context);
-      patterns.add<DeadCodeEliminationOp<arith::AddIOp>>(typeConverter,
-                                                         patterns.getContext());
-      patterns.add<DeadCodeEliminationOp<arith::CmpIOp>>(typeConverter,
-                                                         patterns.getContext());
-      // triton ops
-      patterns.add<ConvertAddPtrOp>(typeConverter, patterns.getContext());
-      patterns.add<DeadCodeEliminationOp<SplatOp>>(typeConverter,
-                                                   patterns.getContext());
-      patterns.add<DeadCodeEliminationOp<MakeRangeOp>>(typeConverter,
-                                                       patterns.getContext());
-      patterns.add<ConvertGetProgramIdOp>(typeConverter, patterns.getContext());
-      // triton-tt ops
-      patterns.add<DropFunctionArguments>(typeConverter, patterns.getContext());
-
-      if (applyPartialConversion(mod, target, std::move(patterns)).failed())
-        signalPassFailure();
+      // Expensive iterative DCE
+      // TODO: Walk once, then track inputs to recursively erase dead ops
+      int cnt = 1;
+      while (cnt > 0) {
+        cnt = 0;
+        mod.walk<WalkOrder::PreOrder>([&](Operation *op) {
+          if (op != mod.getOperation() && isOpTriviallyDead(op)) {
+            op->erase();
+            cnt++;
+          }
+        });
+      }
+      mod.dump();
     }
+    llvm::errs() << "Pass 2: Dead code elimination completed\n";
 
     // insert tile regs acquire before copy tile ops
     mod.walk([&](func::FuncOp funcOp) {
