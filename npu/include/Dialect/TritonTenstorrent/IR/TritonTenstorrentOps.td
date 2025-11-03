@@ -30,17 +30,4 @@ def TTTS_BinaryComputeOp : TTTS_Op<"binary_compute", [Pure, NoMemoryEffect, Same
   }];
 }
 
-def TTTS_KernelArgOp : TTTS_Op<"kernel_arg"> {
-  let summary = "Placeholder for translation of a runtime kernel arg to compile time constant in the Tenstorrent compute kernel.";
-
-  let arguments = (ins IndexAttr:$arg_index);
-
-  let results = (outs AnyTypeOf<[TT_PtrLike, TT_FloatLike, TT_IntLike]>:$result);
-
-  let description = [{
-    Coming soon...
-  }];
-
-}
-
 #endif

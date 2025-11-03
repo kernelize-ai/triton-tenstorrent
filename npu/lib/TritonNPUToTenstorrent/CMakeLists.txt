@@ -1,7 +1,4 @@
 add_triton_library(TritonNPUToTenstorrent
-    FuncOpToMLIRFunc.cpp
-    TritonNPUToTenstorrent.cpp
-
     DropFunctionPass.cpp
     FinalizeCBTransaction.cpp
     TritonFuncOpToFuncOp.cpp
