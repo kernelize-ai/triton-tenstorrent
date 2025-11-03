@@ -327,6 +327,7 @@ struct ConvertLocalAllocOp : public OpConversionPattern<gpu::LocalAllocOp> {
     LDBG("is converted to memref type: " << convertedType << "\n");
     auto cbMemRefType = cast<ttkernel::CBType>(convertedType);
 
+    // TODO: update the function argspec when we add these cb calls
     rewriter.replaceOpWithNewOp<ttkernel::GetCompileArgValOp>(op, cbMemRefType,
                                                               allocIdxValue);
 
@@ -513,6 +514,8 @@ struct ConvertTritonNPUToTTKernelPass
 
     TypeConverter typeConverter;
     typeConverter.addConversion([](Type type) { return type; });
+    typeConverter.addConversion(
+        [](PointerType ptr) { return IntegerType::get(ptr.getContext(), 32); });
     typeConverter.addConversion([](gpu::MemDescType memdesc) {
       // convert memdesc to memref
       // TODO: this currently blindly changes the shape from 1024 to the
@@ -547,8 +550,18 @@ struct ConvertTritonNPUToTTKernelPass
 
     mlir::ConversionTarget funcTarget(*context);
     funcTarget.addLegalDialect<func::FuncDialect>();
+    funcTarget.addLegalDialect<arith::ArithDialect>();
+    funcTarget.addLegalOp<ttkernel::GetArgValOp>();
+    funcTarget.addLegalOp<mlir::UnrealizedConversionCastOp>();
     funcTarget.addIllegalOp<triton::FuncOp>();
     funcTarget.addIllegalOp<triton::ReturnOp>();
+    funcTarget.addDynamicallyLegalOp<func::FuncOp>([](func::FuncOp funcOp) {
+      StringRef funcName = funcOp.getSymName();
+      if (!funcName.ends_with("__compute"))
+        return true;
+
+      return funcOp.getNumArguments() == 0;
+    });
 
     mlir::RewritePatternSet funcPatterns(context);
     populateFuncOpConversionPattern(typeConverter, funcPatterns,
@@ -581,20 +594,14 @@ struct ConvertTritonNPUToTTKernelPass
       StringRef funcName = funcOp.getSymName();
       return !funcName.ends_with("__compute");
     });
-    target.addDynamicallyLegalOp<func::FuncOp>([](func::FuncOp funcOp) {
-      StringRef funcName = funcOp.getSymName();
-      if (!funcName.ends_with("__compute"))
-        return true;
-
-      return funcOp.getNumArguments() == 0;
-    });
 
     mlir::RewritePatternSet patterns(context);
     patterns.add<ConvertLocalStoreOp>(typeConverter, patterns.getContext());
     patterns.add<ConvertLocalLoadOp>(typeConverter, patterns.getContext());
     patterns.add<ConvertLocalAllocOp>(typeConverter, patterns.getContext());
     patterns.add<ConvertBinaryComputeOp>(typeConverter, patterns.getContext());
-    patterns.add<DropFunctionArguments>(typeConverter, patterns.getContext());
+    // patterns.add<DropFunctionArguments>(typeConverter,
+    // patterns.getContext());
 
     if (applyPartialConversion(mod, target, std::move(patterns)).failed())
       signalPassFailure();

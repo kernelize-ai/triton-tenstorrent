@@ -3,6 +3,7 @@
 #include "PatternTritonNPUToTenstorrent.h"
 
 #include "mlir/Transforms/DialectConversion.h"
+#include "llvm/Support/Debug.h"
 
 #include "triton/Dialect/Triton/IR/Dialect.h"
 #include "triton/Dialect/Triton/IR/Utility.h"
@@ -16,6 +17,10 @@ namespace npu {
 
 #define GEN_PASS_DEF_CONVERTTRITONFUNCTOFUNC
 #include "npu/include/TritonNPUToTenstorrent/Passes.h.inc"
+
+#define DEBUG_TYPE "convert-triton-func-to-func"
+#define DBGS() (llvm::dbgs() << "[" DEBUG_TYPE "]: ")
+#define LDBG(X) LLVM_DEBUG(DBGS() << X << "\n")
 
 namespace {
 
@@ -44,6 +49,8 @@ struct ConvertTritonFunc : public OpConversionPattern<triton::FuncOp> {
           funcOp, "non-kernel functions are not yet supported");
     }
 
+    LDBG("Converting triton.func " << funcOp.getName() << "\n");
+
     Location loc = funcOp.getLoc();
     MLIRContext *context = funcOp.getContext();
 
@@ -69,6 +76,41 @@ struct ConvertTritonFunc : public OpConversionPattern<triton::FuncOp> {
                      rewriter.getAttr<tt::ttkernel::ThreadTypeAttr>(
                          getThreadTypeFromFunctionName(funcOp.getName())));
 
+    // copy the body
+    rewriter.inlineRegionBefore(funcOp.getBody(), newFunc.getBody(),
+                                newFunc.end());
+
+    auto typeConverter = getTypeConverter();
+
+    SmallVector<ttkernel::ArgAttr> rtArgs;
+    for (int i = newFunc.getNumArguments() - 1; i >= 0; --i) {
+      auto arg = newFunc.getArgument(i);
+      Type argType = arg.getType();
+      if (isa<PointerType>(argType)) {
+        if (!arg.use_empty()) {
+          Type newType = typeConverter->convertType(argType);
+          Value argIndex = rewriter.create<arith::ConstantOp>(
+              loc, rewriter.getIndexType(),
+              rewriter.getIntegerAttr(rewriter.getIndexType(), i));
+          rewriter.replaceAllUsesWith(
+              arg,
+              rewriter.create<ttkernel::GetArgValOp>(loc, newType, argIndex));
+        }
+        // assert(newFunc.getArgument(i).use_empty() && "expected unused
+        // argument"); might need to keep this in the drop function arg
+        // post-processing pass
+        if (newFunc.getArgument(i).use_empty())
+          (void)newFunc.eraseArgument(i);
+      } else {
+        // add to rtArgs?
+        // TODO
+        // assert(newFunc.getArgument(i).use_empty() && "expected unused
+        // argument");
+        if (newFunc.getArgument(i).use_empty())
+          (void)newFunc.eraseArgument(i);
+      }
+    }
+
     // build the arg spec using the function ops - tt.ptr ops become cb ports,
     // others are ignored
     SmallVector<ttkernel::ArgAttr> ctArgs;
@@ -78,14 +120,9 @@ struct ConvertTritonFunc : public OpConversionPattern<triton::FuncOp> {
             ttkernel::ArgType::CBPort, ctArgs.size()));
       }
     }
-    SmallVector<ttkernel::ArgAttr> rtArgs;
 
     ttkernel::ArgSpecAttr::setArgSpec(
         newFunc, rewriter.getAttr<ttkernel::ArgSpecAttr>(rtArgs, ctArgs));
-
-    // copy the body
-    rewriter.inlineRegionBefore(funcOp.getBody(), newFunc.getBody(),
-                                newFunc.end());
 
     rewriter.eraseOp(funcOp);
     return success();
