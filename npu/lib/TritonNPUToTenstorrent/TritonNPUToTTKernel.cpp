@@ -530,17 +530,12 @@ struct ConvertTritonNPUToTTKernelPass
       return ttkernel::CBType::get(memdesc.getContext(), cbMemRefType);
     });
     typeConverter.addConversion([](RankedTensorType type) -> Type {
-      auto etype = type.getElementType();
-      if (isa<triton::PointerType>(etype)) {
-        etype = IntegerType::get(type.getContext(), 32);
-        return RankedTensorType::get(type.getShape(), etype);
-      }
       if (isa<npu::tt::TileEncodingAttr>(type.getEncoding())) {
         // TODO: same caveats as above re:ttts layout
         auto shape = SmallVector<int64_t>(1, 1);
         auto ttcoreTileType = ttcore::TileType::get(
             type.getContext(), ttcore::TileType::getDefaultShape(),
-            ttcore::elementTypeToDataType(etype));
+            ttcore::elementTypeToDataType(type.getElementType()));
         MemRefType cbMemRefType = MemRefType::get(
             shape, ttcoreTileType, MemRefLayoutAttrInterface{},
             ttcore::MemorySpaceAttr::get(type.getContext(),
@@ -548,10 +543,6 @@ struct ConvertTritonNPUToTTKernelPass
         return ttkernel::CBType::get(type.getContext(), cbMemRefType);
       }
       return type;
-    });
-    typeConverter.addConversion([](triton::PointerType type) -> Type {
-      // convert pointer to i32
-      return IntegerType::get(type.getContext(), 32);
     });
 
     mlir::ConversionTarget funcTarget(*context);
@@ -599,80 +590,14 @@ struct ConvertTritonNPUToTTKernelPass
     });
 
     mlir::RewritePatternSet patterns(context);
-    // triton ops
-    patterns.add<ConvertAddPtrOp>(typeConverter, patterns.getContext());
-    patterns.add<ConvertSplatOp>(typeConverter, patterns.getContext());
-    patterns.add<ConvertMakeRangeOp>(typeConverter, patterns.getContext());
-    patterns.add<ConvertGetProgramIdOp>(typeConverter, patterns.getContext());
-    // triton-gpu ops
     patterns.add<ConvertLocalStoreOp>(typeConverter, patterns.getContext());
     patterns.add<ConvertLocalLoadOp>(typeConverter, patterns.getContext());
     patterns.add<ConvertLocalAllocOp>(typeConverter, patterns.getContext());
-    // triton-tt ops
     patterns.add<ConvertBinaryComputeOp>(typeConverter, patterns.getContext());
     patterns.add<DropFunctionArguments>(typeConverter, patterns.getContext());
 
-
-      target.addLegalDialect<ttkernel::TTKernelDialect>();
-      target.addLegalDialect<arith::ArithDialect>();
-      target.addLegalDialect<func::FuncDialect>();
-      target.addLegalDialect<triton::TritonDialect>();
-
-      target.addLegalOp<UnrealizedConversionCastOp>();
-
-      mlir::RewritePatternSet patterns(context);
-      // triton-gpu ops
-      patterns.add<ConvertLocalStoreOp>(typeConverter, patterns.getContext());
-      patterns.add<ConvertLocalLoadOp>(typeConverter, patterns.getContext());
-      patterns.add<ConvertLocalAllocOp>(typeConverter, patterns.getContext());
-      // triton-tt ops
-      patterns.add<ConvertBinaryComputeOp>(typeConverter,
-                                           patterns.getContext());
-
-      if (applyPartialConversion(mod, target, std::move(patterns)).failed())
-        ; // message
-    }
-
-    //  Pass 2: Dead code elimination
-    {
-      mlir::ConversionTarget target{*context};
-
-      target.addLegalDialect<ttkernel::TTKernelDialect>();
-      target.addLegalDialect<arith::ArithDialect>();
-      target.addLegalDialect<func::FuncDialect>();
-
-      target.addDynamicallyLegalOp<func::FuncOp>([](func::FuncOp funcOp) {
-        StringRef funcName = funcOp.getSymName();
-        if (!funcName.ends_with("__compute"))
-          return true;
-
-        return funcOp.getNumArguments() == 0;
-      });
-
-      auto isIntegerType = [](Operation *op) {
-        return isa<IntegerType>(op->getOperand(0).getType());
-      };
-      target.addDynamicallyLegalOp<arith::AddIOp>(isIntegerType);
-      target.addDynamicallyLegalOp<arith::CmpIOp>(isIntegerType);
-
-      mlir::RewritePatternSet patterns(context);
-      patterns.add<DeadCodeEliminationOp<arith::AddIOp>>(typeConverter,
-                                                         patterns.getContext());
-      patterns.add<DeadCodeEliminationOp<arith::CmpIOp>>(typeConverter,
-                                                         patterns.getContext());
-      // triton ops
-      patterns.add<ConvertAddPtrOp>(typeConverter, patterns.getContext());
-      patterns.add<DeadCodeEliminationOp<SplatOp>>(typeConverter,
-                                                   patterns.getContext());
-      patterns.add<DeadCodeEliminationOp<MakeRangeOp>>(typeConverter,
-                                                       patterns.getContext());
-      patterns.add<ConvertGetProgramIdOp>(typeConverter, patterns.getContext());
-      // triton-tt ops
-      patterns.add<DropFunctionArguments>(typeConverter, patterns.getContext());
-
-      if (applyPartialConversion(mod, target, std::move(patterns)).failed())
-        signalPassFailure();
-    }
+    if (applyPartialConversion(mod, target, std::move(patterns)).failed())
+      signalPassFailure();
 
     // insert tile regs acquire before copy tile ops
     mod.walk([&](func::FuncOp funcOp) {
