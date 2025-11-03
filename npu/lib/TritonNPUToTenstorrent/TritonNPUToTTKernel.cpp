@@ -148,6 +148,41 @@ struct DropFunctionArguments : public OpConversionPattern<func::FuncOp> {
            "expected compute function");
 
     for (int i = funcOp.getNumArguments() - 1; i >= 0; --i) {
+      llvm::errs() << "processing arg " << i << "\n";
+      llvm::errs() << "arg = " << funcOp.getArgument(i) << "\n";
+      Type argType = funcOp.getArgument(i).getType();
+      if (isa<PointerType>(argType)) {
+        // compile time arg
+        
+        SetVector<Operation *> forwardSlice;
+        getForwardSlice(funcOp.getArgument(i), &forwardSlice);
+        llvm::errs() << "slice for arg " << i << ":\n";
+        for (Operation *op : forwardSlice) {
+          llvm::errs() << "op = " << *op << "\n";
+        }
+
+        if (forwardSlice.empty()) 
+          continue;
+
+        assert(false && "TODO");
+#if 0
+        // need to get the memref type 
+        rewrtier.replaceAllUsesWith(
+            funcOp.getArgument(i),
+            rewriter.create<ttkernel::GetCompileArgValOp>(
+                funcOp.getLoc(), argType, i));
+#endif 
+      } else {
+        // runtime arg. 
+        Value c_index = rewriter.create<arith::ConstantOp>(
+            funcOp.getLoc(), rewriter.getIndexType(),
+            rewriter.getIntegerAttr(rewriter.getIndexType(), i));
+        rewriter.replaceAllUsesWith(
+            funcOp.getArgument(i),
+            rewriter.create<ttkernel::GetArgValOp>(
+                funcOp.getLoc(), argType, c_index));
+      }
+
       assert(funcOp.getArgument(i).use_empty() && "expected unused argument");
       (void)funcOp.eraseArgument(i);
     }
@@ -365,15 +400,36 @@ struct ConvertTritonNPUToTTKernelPass
       }
       return type;
     });
+    typeConverter.addSourceMaterialization([](OpBuilder &builder, RankedTensorType tensorType,
+                                ValueRange inputs, Location loc) -> Value {
+      return builder.create<UnrealizedConversionCastOp>(loc, tensorType, inputs)
+          .getResult(0);
+    });
 
     mlir::ConversionTarget funcTarget(*context);
     funcTarget.addLegalDialect<func::FuncDialect>();
+    funcTarget.addLegalDialect<arith::ArithDialect>();
+    funcTarget.addLegalOp<ttkernel::GetArgValOp>();
+    funcTarget.addLegalOp<ttkernel::GetCompileArgValOp>();
+    funcTarget.addLegalOp<mlir::UnrealizedConversionCastOp>();
     funcTarget.addIllegalOp<triton::FuncOp>();
     funcTarget.addIllegalOp<triton::ReturnOp>();
+#if 0
+    // move back down and keep drop fucntion args?
+    funcTarget.addDynamicallyLegalOp<func::FuncOp>([](func::FuncOp funcOp) {
+      StringRef funcName = funcOp.getSymName();
+      if (!funcName.ends_with("__compute"))
+        return true;
+
+      return funcOp.getNumArguments() == 0;
+    });
+#endif 
 
     mlir::RewritePatternSet funcPatterns(context);
     populateFuncOpConversionPattern(typeConverter, funcPatterns,
                                     PatternBenefit(1));
+    // funcPatterns.add<DropFunctionArguments>(typeConverter, funcPatterns.getContext());
+
     if (applyPartialConversion(mod, funcTarget, std::move(funcPatterns))
             .failed())
       signalPassFailure();
@@ -402,21 +458,13 @@ struct ConvertTritonNPUToTTKernelPass
       StringRef funcName = funcOp.getSymName();
       return !funcName.ends_with("__compute");
     });
-    target.addDynamicallyLegalOp<func::FuncOp>([](func::FuncOp funcOp) {
-      StringRef funcName = funcOp.getSymName();
-      if (!funcName.ends_with("__compute"))
-        return true;
-
-      return funcOp.getNumArguments() == 0;
-    });
 
     mlir::RewritePatternSet patterns(context);
     patterns.add<ConvertLocalStoreOp>(typeConverter, patterns.getContext());
     patterns.add<ConvertLocalLoadOp>(typeConverter, patterns.getContext());
     patterns.add<ConvertLocalAllocOp>(typeConverter, patterns.getContext());
     patterns.add<ConvertBinaryComputeOp>(typeConverter, patterns.getContext());
-    patterns.add<DropFunctionArguments>(typeConverter, patterns.getContext());
-
+    
     if (applyPartialConversion(mod, target, std::move(patterns)).failed())
       signalPassFailure();
 
