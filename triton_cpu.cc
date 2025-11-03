@@ -53,9 +53,6 @@ void init_triton_cpu_passes(py::module &&m) {
 }
 
 void init_triton_npu_passes_tenstorrent(py::module &&m) {
-  m.def("add_to_kernel_dialect", [](mlir::PassManager &pm) {
-    pm.addPass(mlir::triton::npu::createConvertTritonNPUToTenstorrentPass());
-  });
   m.def("add_core_specialize", [](mlir::PassManager &pm) {
     pm.addPass(mlir::triton::cpu::createCoreSpecialize());
   });

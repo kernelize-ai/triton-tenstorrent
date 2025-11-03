@@ -3,20 +3,6 @@
 
 include "mlir/Pass/PassBase.td"
 
-def ConvertTritonNPUToTenstorrent : Pass<"convert-triton-npu-to-tenstorrent", "mlir::ModuleOp"> {
-    let summary = "Convert TritonNPU to Tenstorrent";
-    let description = [{
-        The `convert-triton-npu-to-tenstorrent` pass converts Triton NPU operations
-        into Tenstorrent operations, enabling further optimizations and code generation.
-    }];
-
-    let dependentDialects = ["mlir::triton::TritonDialect",
-                             "mlir::triton::npu::tt::TritonTenstorrentDialect",
-                             "mlir::func::FuncDialect",
-                             "mlir::tt::ttkernel::TTKernelDialect"
-                            ];
-}
-
 def ConvertTritonFuncToFunc : Pass<"convert-triton-func-to-func", "mlir::ModuleOp"> {
     let summary = "Convert tt::FuncOp to canonical func:FuncOp";
 

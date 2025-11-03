@@ -14,9 +14,6 @@ namespace npu {
 #define GEN_PASS_DECL
 #include "npu/include/TritonNPUToTenstorrent/Passes.h.inc"
 
-std::unique_ptr<OperationPass<ModuleOp>>
-createConvertTritonNPUToTenstorrentPass();
-
 #define GEN_PASS_REGISTRATION
 #include "npu/include/TritonNPUToTenstorrent/Passes.h.inc"
 
