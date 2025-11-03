@@ -107,6 +107,8 @@ static Value traceToScalar(Value ptr, bool isPtr = true) {
       return lhs;
     if (!isa<RankedTensorType>(rhs.getType()))
       return rhs;
+  } else {
+    assert(0 && "unhandled op");
   }
   return ptr;
 }
@@ -172,6 +174,7 @@ struct ConvertLocalStoreOp : public OpConversionPattern<gpu::LocalStoreOp> {
     auto pageSize = rewriter.create<ttkernel::GetTileSizeOp>(loc, dst);
 
     // 0. Create tensor accessor
+    // TODO: move to top scope
     Value c1bit = rewriter.create<arith::ConstantOp>(
       loc, rewriter.getI1Type(),
       rewriter.getIntegerAttr(rewriter.getI1Type(), 1));
@@ -238,6 +241,7 @@ struct ConvertLocalLoadOp : public OpConversionPattern<gpu::LocalLoadOp> {
                   ConversionPatternRewriter &rewriter) const override {
     Location loc = op.getLoc();
 
+    auto src = adaptor.getSrc();
     auto dst = op.getResult();
     // 1. wait_front on the cb to know data is ready to load from SRAM
     Value c0 = rewriter.create<arith::ConstantOp>(
@@ -275,21 +279,21 @@ struct ConvertLocalLoadOp : public OpConversionPattern<gpu::LocalLoadOp> {
       if (mask && mask.getDefiningOp()) {
         rewriter.eraseOp(mask.getDefiningOp());
       }
-      auto srcType = cast<RankedTensorType>(storeOp.getValue().getType());
-      auto size =
-          srcType.getNumElements() * srcType.getElementTypeBitWidth() / 8;
-      Value sizeInt = rewriter.create<arith::ConstantOp>(
-          loc, rewriter.getIndexType(),
-          rewriter.getIntegerAttr(rewriter.getIndexType(), size));
-      Value baseAddr = traceToScalar(storeOp.getPtr());
-      Value baseAddrInt = rewriter
-                              .create<UnrealizedConversionCastOp>(
-                                  loc, rewriter.getI32Type(), baseAddr)
-                              .getResult(0);
+      Value baseAddr = traceToScalar(storeOp.getPtr(), true);
+      Value offset = traceToScalar(storeOp.getPtr(), false);
+      // Compute page size in bytes
+      auto dataFormat = rewriter.create<ttkernel::GetDataFormatOp>(loc, src);
+      auto pageSize = rewriter.create<ttkernel::GetTileSizeOp>(loc, src);
+
+      // 0. Create tensor accessor
+      // TODO: move to top scope
+      Value c1bit = rewriter.create<arith::ConstantOp>(
+        loc, rewriter.getI1Type(),
+        rewriter.getIntegerAttr(rewriter.getI1Type(), 1));
+      Value addrGen = rewriter.create<ttkernel::GetInterleavedAddrGenFastOp>(loc, c1bit, baseAddr, pageSize, dataFormat);
+
       Value l1Addr = rewriter.create<ttkernel::GetWritePtrOp>(loc, oneDTile);
-      Value nocAddr =
-          rewriter.create<ttkernel::GetNocAddrOp>(loc, c0, c0, baseAddrInt);
-      rewriter.create<ttkernel::NocAsyncWriteOp>(loc, l1Addr, nocAddr, sizeInt);
+      rewriter.create<ttkernel::NocAsyncWriteTileOp>(loc, offset, addrGen, l1Addr);
       rewriter.create<ttkernel::NocAsyncWriteBarrierOp>(loc);
       rewriter.create<ttkernel::CBPopFrontOp>(loc, oneDTile, c1);
       rewriter.eraseOp(user);
