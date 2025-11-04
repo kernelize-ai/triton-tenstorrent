@@ -90,9 +90,7 @@ struct ConvertBinaryComputeOp
 };
 
 static Value traceToScalar(Value ptr, bool isPtr = true) {
-  auto isScalar = [](Value v) {
-    return !isa<RankedTensorType>(v.getType());
-  };
+  auto isScalar = [](Value v) { return !isa<RankedTensorType>(v.getType()); };
   auto op = ptr.getDefiningOp();
   if (isScalar(ptr) || op == nullptr) {
     return ptr;
@@ -113,7 +111,7 @@ static Value traceToScalar(Value ptr, bool isPtr = true) {
     if (isScalar(rhs))
       return rhs;
   } else if (auto makeRangeOp = dyn_cast<triton::MakeRangeOp>(op)) {
-    // 
+    //
   } else {
     assert(0 && "unhandled op");
   }
@@ -163,6 +161,8 @@ struct ConvertLocalStoreOp : public OpConversionPattern<gpu::LocalStoreOp> {
       rewriter.eraseOp(op);
       return success();
     }
+
+    // FOR PATTERN: tt.load -> ttg.local_store
     auto loadOp = cast<triton::LoadOp>(srcOp);
 
     // ASSUME: tilize has padded to full tiles. Drop masking.
@@ -183,9 +183,10 @@ struct ConvertLocalStoreOp : public OpConversionPattern<gpu::LocalStoreOp> {
     // 0. Create tensor accessor
     // TODO: move to top scope
     Value c1bit = rewriter.create<arith::ConstantOp>(
-      loc, rewriter.getI1Type(),
-      rewriter.getIntegerAttr(rewriter.getI1Type(), 1));
-    Value addrGen = rewriter.create<ttkernel::GetInterleavedAddrGenFastOp>(loc, c1bit, baseAddr, pageSize, dataFormat);
+        loc, rewriter.getI1Type(),
+        rewriter.getIntegerAttr(rewriter.getI1Type(), 1));
+    Value addrGen = rewriter.create<ttkernel::GetInterleavedAddrGenFastOp>(
+        loc, c1bit, baseAddr, pageSize, dataFormat);
 
     // 1. reserve back on the cb to know data is ready to store to SRAM
     //       ttkernel.cb_reserve_back(%0, %c1_i32)
@@ -281,6 +282,7 @@ struct ConvertLocalLoadOp : public OpConversionPattern<gpu::LocalLoadOp> {
     auto user = *dst.getUsers().begin();
 
     if (dst.hasOneUse() && isa<triton::StoreOp>(user)) {
+      // FOR PATTERN: ttg.local_load -> tt.store
       auto storeOp = cast<triton::StoreOp>(user);
       auto mask = storeOp.getMask();
       if (mask && mask.getDefiningOp()) {
@@ -295,12 +297,14 @@ struct ConvertLocalLoadOp : public OpConversionPattern<gpu::LocalLoadOp> {
       // 0. Create tensor accessor
       // TODO: move to top scope
       Value c1bit = rewriter.create<arith::ConstantOp>(
-        loc, rewriter.getI1Type(),
-        rewriter.getIntegerAttr(rewriter.getI1Type(), 1));
-      Value addrGen = rewriter.create<ttkernel::GetInterleavedAddrGenFastOp>(loc, c1bit, baseAddr, pageSize, dataFormat);
+          loc, rewriter.getI1Type(),
+          rewriter.getIntegerAttr(rewriter.getI1Type(), 1));
+      Value addrGen = rewriter.create<ttkernel::GetInterleavedAddrGenFastOp>(
+          loc, c1bit, baseAddr, pageSize, dataFormat);
 
       Value l1Addr = rewriter.create<ttkernel::GetWritePtrOp>(loc, oneDTile);
-      rewriter.create<ttkernel::NocAsyncWriteTileOp>(loc, offset, addrGen, l1Addr);
+      rewriter.create<ttkernel::NocAsyncWriteTileOp>(loc, offset, addrGen,
+                                                     l1Addr);
       rewriter.create<ttkernel::NocAsyncWriteBarrierOp>(loc);
       rewriter.create<ttkernel::CBPopFrontOp>(loc, oneDTile, c1);
       rewriter.eraseOp(user);
