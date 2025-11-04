@@ -45,4 +45,16 @@ def TritonTenstorrentPtrRotate : Pass<"tritontenstorrent-ptr-rotate", "mlir::Mod
                             ];
 }
 
+def TritonTenstorrentRemoveRedundantMasks : Pass<"tritontenstorrent-remove-redundant-masks", "mlir::ModuleOp"> {
+    let summary = "Remove redundant mask operations in Tenstorrent kernels";
+
+    let description = [{
+        coming soon
+    }];
+
+    let dependentDialects = ["mlir::triton::npu::tt::TritonTenstorrentDialect",
+                             "mlir::triton::TritonDialect"
+                            ];
+}
+
 #endif
