@@ -63,6 +63,10 @@ void init_triton_npu_passes_tenstorrent(py::module &&m) {
     pm.addPass(
         mlir::triton::npu::createTritonTenstorrentPropagateTileEncoding());
   });
+  m.def("remove_redundant_masks", [](mlir::PassManager &pm) {
+    pm.addPass(
+        mlir::triton::npu::createTritonTenstorrentRemoveRedundantMasks());
+  });
   m.def("add_ptr_rotate", [](mlir::PassManager &pm) {
     pm.addPass(mlir::triton::npu::createTritonTenstorrentPtrRotate());
   });
