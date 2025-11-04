@@ -471,9 +471,34 @@ struct ConvertStoreOp : public OpConversionPattern<triton::StoreOp> {
     }
 #endif 
 
-    auto load = adaptor.getPtr();
-    llvm::errs() << "load = " << load << "\n";
-    assert(false && "TODO");
+    auto oneDTile = adaptor.getValue();
+    Value l1Addr = rewriter.create<ttkernel::GetWritePtrOp>(loc, oneDTile);
+
+    Value c0 = rewriter.create<arith::ConstantOp>(
+          loc, rewriter.getIndexType(),
+          rewriter.getIntegerAttr(rewriter.getIndexType(), 0));
+
+    llvm::errs() << "adaptor ptr = " << adaptor.getPtr()
+                 << "\n\t type = " << adaptor.getPtr().getType() << "\n";
+    Value nocAddr =
+          rewriter.create<ttkernel::GetNocAddrOp>(loc, c0, c0, adaptor.getPtr());
+
+    auto srcType = cast<RankedTensorType>(op.getValue().getType());
+    auto size =
+          srcType.getNumElements() * srcType.getElementTypeBitWidth() / 8;
+    Value sizeInt = rewriter.create<arith::ConstantOp>(
+          loc, rewriter.getIndexType(),
+          rewriter.getIntegerAttr(rewriter.getIndexType(), size));
+    rewriter.create<ttkernel::NocAsyncWriteOp>(loc, l1Addr, nocAddr, sizeInt);
+    rewriter.create<ttkernel::NocAsyncWriteBarrierOp>(loc);
+
+    // auto cbType = cast<ttkernel::CBType>(oneDTile.getType());
+    Value c1 = rewriter.create<arith::ConstantOp>(
+        loc, rewriter.getI32Type(),
+        rewriter.getIntegerAttr(rewriter.getI32Type(), 1));
+    rewriter.create<ttkernel::CBPopFrontOp>(loc, oneDTile, c1);
+    rewriter.eraseOp(op);
+  
 #if 0
     auto cbType = cast<ttkernel::CBType>(load.getType());
     
@@ -521,10 +546,10 @@ struct ConvertAddPtrOp : public OpConversionPattern<AddPtrOp> {
     if (!isa<IntegerType>(baseAddr.getType()) ||
         !isa<IntegerType>(offset.getType())) {
       LDBG("ConvertAddPtrOp failed: non-integer types\n");
-      LDBG("  baseAddr type: " << baseAddr.getType() << "\n");
-      LDBG("  offset type: " << offset.getType() << "\n");
+      LDBG("  baseAddr: " << baseAddr << "\n");
+      LDBG("  offset: " << offset << "\n");
 #if 1
-      rewriter.eraseOp(op);
+      rewriter.replaceOp(op, adaptor.getPtr());
       return success();
 #else
       return failure();
@@ -551,7 +576,13 @@ struct ConvertSplatOp : public OpConversionPattern<SplatOp> {
                   ConversionPatternRewriter &rewriter) const override {
     Location loc = op.getLoc();
 
-    rewriter.eraseOp(op);
+    auto tensorTy = dyn_cast<RankedTensorType>(op.getType());
+    if (tensorTy && isa<PointerType>(tensorTy.getElementType())) {
+      llvm::errs() << "splat op src = " << adaptor.getSrc() << "\n";
+      rewriter.replaceOp(op, adaptor.getSrc());
+    } else {
+      rewriter.eraseOp(op);
+    }
 
     return success();
   }
