@@ -136,18 +136,29 @@ struct ConvertLocalStoreOp : public OpConversionPattern<gpu::LocalStoreOp> {
   }
 };
 
-struct DropFunctionArguments : public OpConversionPattern<func::FuncOp> {
+struct ReplaceFunctionArguments : public OpConversionPattern<func::FuncOp> {
   using OpConversionPattern<func::FuncOp>::OpConversionPattern;
 
   LogicalResult
   matchAndRewrite(func::FuncOp funcOp, OpAdaptor adaptor,
                   ConversionPatternRewriter &rewriter) const override {
-    assert(funcOp.getName().ends_with("__compute") &&
-           "expected compute function");
+    Location loc = funcOp.getLoc();
+    auto typeConverter = getTypeConverter();
 
     for (int i = funcOp.getNumArguments() - 1; i >= 0; --i) {
-      assert(funcOp.getArgument(i).use_empty() && "expected unused argument");
-      (void)funcOp.eraseArgument(i);
+      auto arg = funcOp.getArgument(i);
+      if (arg.use_empty()) {
+        (void)funcOp.eraseArgument(i);
+        continue;
+      }
+
+      Type newType = typeConverter->convertType(arg.getType());
+      Value argIndex = rewriter.create<arith::ConstantOp>(
+          loc, rewriter.getIndexType(),
+          rewriter.getIntegerAttr(rewriter.getIndexType(), i));
+      rewriter.replaceAllUsesWith(
+          arg, rewriter.create<ttkernel::GetArgValOp>(loc, newType, argIndex));
+      //(void)funcOp.eraseArgument(i);
     }
 
     return success();
@@ -335,6 +346,9 @@ struct ConvertTritonNPUToTTKernelPass
 
     TypeConverter typeConverter;
     typeConverter.addConversion([](Type type) { return type; });
+    typeConverter.addConversion([](PointerType type) {
+      return IntegerType::get(type.getContext(), 32);
+    });
     typeConverter.addConversion([](gpu::MemDescType memdesc) {
       // convert memdesc to memref
       // TODO: this currently blindly changes the shape from 1024 to the
@@ -416,7 +430,8 @@ struct ConvertTritonNPUToTTKernelPass
     patterns.add<ConvertLocalLoadOp>(typeConverter, patterns.getContext());
     patterns.add<ConvertLocalAllocOp>(typeConverter, patterns.getContext());
     patterns.add<ConvertBinaryComputeOp>(typeConverter, patterns.getContext());
-    patterns.add<DropFunctionArguments>(typeConverter, patterns.getContext());
+    patterns.add<ReplaceFunctionArguments>(typeConverter,
+                                           patterns.getContext());
 
     if (applyPartialConversion(mod, target, std::move(patterns)).failed())
       signalPassFailure();
