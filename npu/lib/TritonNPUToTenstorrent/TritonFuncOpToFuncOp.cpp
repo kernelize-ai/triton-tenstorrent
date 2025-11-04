@@ -79,6 +79,7 @@ struct ConvertTritonFunc : public OpConversionPattern<triton::FuncOp> {
     // copy the body
     rewriter.inlineRegionBefore(funcOp.getBody(), newFunc.getBody(),
                                 newFunc.end());
+    rewriter.setInsertionPointToStart(&newFunc.getBody().front());
 
     auto typeConverter = getTypeConverter();
 
