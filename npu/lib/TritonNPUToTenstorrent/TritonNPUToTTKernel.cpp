@@ -237,9 +237,6 @@ struct ConvertLoadOp : public OpConversionPattern<triton::LoadOp> {
       return failure();
     }
 
-    npu::tt::TileEncodingAttr encoding =
-        cast<npu::tt::TileEncodingAttr>(tensorTy.getEncoding());
-
     auto users = llvm::to_vector(loadOp->getUsers());
     if (users.size() != 1) {
       LDBG("Load op has multiple users, cannot convert\n");
@@ -398,33 +395,6 @@ struct ConvertLocalLoadOp : public OpConversionPattern<gpu::LocalLoadOp> {
                 adaptor.getSrc())
             .getResult();
 
-    auto user = *dst.getUsers().begin();
-
-    if (dst.hasOneUse() && isa<triton::StoreOp>(user)) {
-      auto storeOp = cast<triton::StoreOp>(user);
-      auto mask = storeOp.getMask();
-      if (mask && mask.getDefiningOp()) {
-        rewriter.eraseOp(mask.getDefiningOp());
-      }
-      auto srcType = cast<RankedTensorType>(storeOp.getValue().getType());
-      auto size =
-          srcType.getNumElements() * srcType.getElementTypeBitWidth() / 8;
-      Value sizeInt = rewriter.create<arith::ConstantOp>(
-          loc, rewriter.getIndexType(),
-          rewriter.getIntegerAttr(rewriter.getIndexType(), size));
-      Value baseAddr = traceToAddress(storeOp.getPtr());
-      Value baseAddrInt = rewriter
-                              .create<UnrealizedConversionCastOp>(
-                                  loc, rewriter.getI32Type(), baseAddr)
-                              .getResult(0);
-      Value l1Addr = rewriter.create<ttkernel::GetWritePtrOp>(loc, oneDTile);
-      Value nocAddr =
-          rewriter.create<ttkernel::GetNocAddrOp>(loc, c0, c0, baseAddrInt);
-      rewriter.create<ttkernel::NocAsyncWriteOp>(loc, l1Addr, nocAddr, sizeInt);
-      rewriter.create<ttkernel::NocAsyncWriteBarrierOp>(loc);
-      rewriter.create<ttkernel::CBPopFrontOp>(loc, oneDTile, c1);
-      rewriter.eraseOp(user);
-    }
     // TODO: this should come from the cb root eventually,
     // but replaceOp is probably not appropriate here
     rewriter.replaceOp(op, oneDTile);
@@ -458,6 +428,53 @@ struct ConvertLocalAllocOp : public OpConversionPattern<gpu::LocalAllocOp> {
     rewriter.replaceOpWithNewOp<ttkernel::GetCompileArgValOp>(op, cbMemRefType,
                                                               allocIdxValue);
 
+    return success();
+  }
+};
+
+struct ConvertStoreOp : public OpConversionPattern<triton::StoreOp> {
+  using OpConversionPattern<triton::StoreOp>::OpConversionPattern;
+
+  LogicalResult
+  matchAndRewrite(triton::StoreOp op, OpAdaptor adaptor,
+                  ConversionPatternRewriter &rewriter) const override {
+    Location loc = op.getLoc();
+#if 0
+    RankedTensorType tensorTy = dyn_cast<RankedTensorType>(op.getType());
+    if (!tensorTy && !isa<npu::tt::TileEncodingAttr>(tensorTy.getEncoding())) {
+      LDBG("Store op type failure: " << op.getType() << "\n");
+      return failure();
+    }
+#endif 
+
+    auto load = adaptor.getPtr();
+    llvm::errs() << "load = " << load << "\n";
+    assert(false && "TODO");
+#if 0
+    auto cbType = cast<ttkernel::CBType>(load.getType());
+    
+
+
+      auto srcType = cast<RankedTensorType>(storeOp.getValue().getType());
+      auto size =
+          srcType.getNumElements() * srcType.getElementTypeBitWidth() / 8;
+      Value sizeInt = rewriter.create<arith::ConstantOp>(
+          loc, rewriter.getIndexType(),
+          rewriter.getIntegerAttr(rewriter.getIndexType(), size));
+      Value baseAddr = traceToAddress(storeOp.getPtr());
+      Value baseAddrInt = rewriter
+                              .create<UnrealizedConversionCastOp>(
+                                  loc, rewriter.getI32Type(), baseAddr)
+                              .getResult(0);
+      Value l1Addr = rewriter.create<ttkernel::GetWritePtrOp>(loc, cbType);
+      Value nocAddr =
+          rewriter.create<ttkernel::GetNocAddrOp>(loc, c0, c0, baseAddrInt);
+      rewriter.create<ttkernel::NocAsyncWriteOp>(loc, l1Addr, nocAddr, sizeInt);
+      rewriter.create<ttkernel::NocAsyncWriteBarrierOp>(loc);
+      rewriter.create<ttkernel::CBPopFrontOp>(loc, cbType, c1);
+      rewriter.eraseOp(user);
+    }
+#endif 
     return success();
   }
 };
@@ -786,13 +803,16 @@ struct ConvertTritonNPUToTTKernelPass
     target.addIllegalOp<UnrealizedConversionCastOp>();
     target.addIllegalOp<npu::tt::BinaryComputeOp>();
 
-#if 0
+#if 1
+    target.addIllegalOp<LoadOp>();
+    target.addIllegalOp<StoreOp>();
     target.addIllegalOp<gpu::LocalStoreOp>();
     target.addIllegalOp<gpu::LocalLoadOp>();
     target.addIllegalOp<gpu::LocalAllocOp>();
-
     target.addIllegalOp<triton::AddPtrOp>();
     target.addIllegalOp<triton::SplatOp>();
+    target.addIllegalOp<arith::AddIOp>();
+    target.addIllegalOp<arith::CmpIOp>();
 #else
     target.addDynamicallyLegalOp<LoadOp>([](LoadOp op) {
       auto funcOp = op->getParentOfType<func::FuncOp>();
@@ -818,7 +838,6 @@ struct ConvertTritonNPUToTTKernelPass
       StringRef funcName = funcOp.getSymName();
       return funcName.ends_with("__writer");
     });
-#if 1
     target.addDynamicallyLegalOp<triton::AddPtrOp>([](triton::AddPtrOp op) {
       auto funcOp = op->getParentOfType<func::FuncOp>();
       assert(funcOp && "expected func::funcOp parent");
@@ -850,11 +869,11 @@ struct ConvertTritonNPUToTTKernelPass
           StringRef funcName = funcOp.getSymName();
           return funcName.ends_with("__writer");
         });
-#endif
-#endif
+#endif 
 
     mlir::RewritePatternSet patterns(context);
     patterns.add<ConvertLoadOp>(typeConverter, patterns.getContext());
+    patterns.add<ConvertStoreOp>(typeConverter, patterns.getContext());
     patterns.add<ConvertLocalStoreOp>(typeConverter, patterns.getContext());
     patterns.add<ConvertLocalLoadOp>(typeConverter, patterns.getContext());
     patterns.add<ConvertLocalAllocOp>(typeConverter, patterns.getContext());
