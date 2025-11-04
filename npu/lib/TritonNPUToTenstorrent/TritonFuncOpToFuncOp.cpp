@@ -79,41 +79,10 @@ struct ConvertTritonFunc : public OpConversionPattern<triton::FuncOp> {
     // copy the body
     rewriter.inlineRegionBefore(funcOp.getBody(), newFunc.getBody(),
                                 newFunc.end());
-    rewriter.setInsertionPointToStart(&newFunc.getBody().front());
-
-    auto typeConverter = getTypeConverter();
-
-    SmallVector<ttkernel::ArgAttr> rtArgs;
-    for (int i = newFunc.getNumArguments() - 1; i >= 0; --i) {
-      auto arg = newFunc.getArgument(i);
-      Type argType = arg.getType();
-      if (isa<PointerType>(argType)) {
-        if (!arg.use_empty()) {
-          Type newType = typeConverter->convertType(argType);
-          Value argIndex = rewriter.create<arith::ConstantOp>(
-              loc, rewriter.getIndexType(),
-              rewriter.getIntegerAttr(rewriter.getIndexType(), i));
-          rewriter.replaceAllUsesWith(
-              arg,
-              rewriter.create<ttkernel::GetArgValOp>(loc, newType, argIndex));
-        }
-        // assert(newFunc.getArgument(i).use_empty() && "expected unused
-        // argument"); might need to keep this in the drop function arg
-        // post-processing pass
-        if (newFunc.getArgument(i).use_empty())
-          (void)newFunc.eraseArgument(i);
-      } else {
-        // add to rtArgs?
-        // TODO
-        // assert(newFunc.getArgument(i).use_empty() && "expected unused
-        // argument");
-        if (newFunc.getArgument(i).use_empty())
-          (void)newFunc.eraseArgument(i);
-      }
-    }
 
     // build the arg spec using the function ops - tt.ptr ops become cb ports,
     // others are ignored
+    SmallVector<ttkernel::ArgAttr> rtArgs;
     SmallVector<ttkernel::ArgAttr> ctArgs;
     for (auto argType : tritonTy.getInputs()) {
       if (isa<PointerType>(argType)) {

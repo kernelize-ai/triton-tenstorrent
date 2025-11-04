@@ -346,12 +346,36 @@ struct DropFunctionArguments : public OpConversionPattern<func::FuncOp> {
   LogicalResult
   matchAndRewrite(func::FuncOp funcOp, OpAdaptor adaptor,
                   ConversionPatternRewriter &rewriter) const override {
-    assert(funcOp.getName().ends_with("__compute") &&
-           "expected compute function");
+    Location loc = funcOp.getLoc();
+    rewriter.setInsertionPointToStart(&funcOp.getBody().front());
 
+    auto typeConverter = getTypeConverter();
     for (int i = funcOp.getNumArguments() - 1; i >= 0; --i) {
-      assert(funcOp.getArgument(i).use_empty() && "expected unused argument");
-      (void)funcOp.eraseArgument(i);
+      auto arg = funcOp.getArgument(i);
+      Type argType = arg.getType();
+      if (isa<PointerType>(argType)) {
+        if (!arg.use_empty()) {
+          Type newType = typeConverter->convertType(argType);
+          Value argIndex = rewriter.create<arith::ConstantOp>(
+              loc, rewriter.getIndexType(),
+              rewriter.getIntegerAttr(rewriter.getIndexType(), i));
+          rewriter.replaceAllUsesWith(
+              arg,
+              rewriter.create<ttkernel::GetArgValOp>(loc, newType, argIndex));
+        }
+        // assert(funcOp.getArgument(i).use_empty() && "expected unused
+        // argument"); might need to keep this in the drop function arg
+        // post-processing pass
+        if (funcOp.getArgument(i).use_empty())
+          (void)funcOp.eraseArgument(i);
+      } else {
+        // add to rtArgs?
+        // TODO
+        // assert(funcOp.getArgument(i).use_empty() && "expected unused
+        // argument");
+        if (funcOp.getArgument(i).use_empty())
+          (void)funcOp.eraseArgument(i);
+      }
     }
 
     return success();
@@ -508,9 +532,11 @@ struct ConvertAddPtrOp : public OpConversionPattern<AddPtrOp> {
     }
     auto newAddPtrOp = rewriter.create<arith::AddIOp>(loc, baseAddr, offset);
 
+#if 0
     if (isa<UnrealizedConversionCastOp>(op.getPtr().getDefiningOp())) {
       rewriter.eraseOp(op.getPtr().getDefiningOp());
     }
+#endif
     rewriter.replaceOp(op, newAddPtrOp.getResult());
 
     return success();
@@ -779,13 +805,6 @@ struct ConvertTritonNPUToTTKernelPass
     funcTarget.addLegalOp<ttkernel::GetArgValOp>();
     funcTarget.addIllegalOp<triton::FuncOp>();
     funcTarget.addIllegalOp<triton::ReturnOp>();
-    funcTarget.addDynamicallyLegalOp<func::FuncOp>([](func::FuncOp funcOp) {
-      StringRef funcName = funcOp.getSymName();
-      if (!funcName.ends_with("__compute"))
-        return true;
-
-      return funcOp.getNumArguments() == 0;
-    });
     funcTarget.addLegalOp<UnrealizedConversionCastOp>();
 
     mlir::RewritePatternSet funcPatterns(context);
@@ -813,6 +832,13 @@ struct ConvertTritonNPUToTTKernelPass
     target.addIllegalOp<triton::SplatOp>();
     target.addIllegalOp<arith::AddIOp>();
     target.addIllegalOp<arith::CmpIOp>();
+    target.addDynamicallyLegalOp<func::FuncOp>([](func::FuncOp funcOp) {
+      StringRef funcName = funcOp.getSymName();
+      if (!funcName.ends_with("__compute"))
+        return true;
+
+      return funcOp.getNumArguments() == 0;
+    });
 #else
     target.addDynamicallyLegalOp<LoadOp>([](LoadOp op) {
       auto funcOp = op->getParentOfType<func::FuncOp>();
@@ -882,6 +908,8 @@ struct ConvertTritonNPUToTTKernelPass
     patterns.add<ConvertSplatOp>(typeConverter, patterns.getContext());
     patterns.add<ConvertArithAddIOp>(typeConverter, patterns.getContext());
     patterns.add<ConvertArithCmpIOp>(typeConverter, patterns.getContext());
+    patterns.add<DropFunctionArguments>(typeConverter,
+                                        patterns.getContext());
 
     if (applyPartialConversion(mod, target, std::move(patterns)).failed())
       signalPassFailure();
