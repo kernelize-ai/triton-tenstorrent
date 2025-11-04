@@ -229,13 +229,23 @@ struct DropFunctionArguments : public OpConversionPattern<func::FuncOp> {
   LogicalResult
   matchAndRewrite(func::FuncOp funcOp, OpAdaptor adaptor,
                   ConversionPatternRewriter &rewriter) const override {
-    assert(funcOp.getName().ends_with("__compute") &&
-           "expected compute function");
+    Location loc = funcOp.getLoc();
+    auto typeConverter = getTypeConverter();
 
-    for (int i = funcOp.getNumArguments() - 1; i >= 0; --i) {
-      assert(funcOp.getArgument(i).use_empty() && "expected unused argument");
-      (void)funcOp.eraseArgument(i);
+    OpBuilder::InsertionGuard guard(rewriter);
+    rewriter.setInsertionPointToStart(&funcOp.getBody().front());
+
+    for (auto arg : llvm::enumerate(funcOp.getArguments())) {
+      Type newType = typeConverter->convertType(arg.value().getType());
+      Value argIndex = rewriter.create<arith::ConstantOp>(
+          loc, rewriter.getIndexType(),
+          rewriter.getIntegerAttr(rewriter.getIndexType(), arg.index()));
+      auto getArgValOp =
+          rewriter.create<ttkernel::GetArgValOp>(loc, newType, argIndex);
+      arg.value().replaceAllUsesWith(getArgValOp);
     }
+    BitVector erasedArgs(funcOp.getNumArguments(), true);
+    (void)funcOp.eraseArguments(erasedArgs);
 
     return success();
   }
@@ -587,9 +597,10 @@ struct ConvertTritonNPUToTTKernelPass
       target.addLegalDialect<ttkernel::TTKernelDialect>();
       target.addLegalDialect<arith::ArithDialect>();
       target.addLegalDialect<func::FuncDialect>();
-      target.addLegalDialect<triton::TritonDialect>();
 
       target.addLegalOp<UnrealizedConversionCastOp>();
+      target.addDynamicallyLegalOp<func::FuncOp>(
+          [](func::FuncOp funcOp) { return funcOp.getNumArguments() == 0; });
 
       mlir::RewritePatternSet patterns(context);
       // triton-gpu ops
@@ -599,6 +610,9 @@ struct ConvertTritonNPUToTTKernelPass
       // triton-tt ops
       patterns.add<ConvertBinaryComputeOp>(typeConverter,
                                            patterns.getContext());
+      patterns.add<ConvertAddPtrOp>(typeConverter, patterns.getContext());
+      patterns.add<ConvertGetProgramIdOp>(typeConverter, patterns.getContext());
+      patterns.add<DropFunctionArguments>(typeConverter, patterns.getContext());
 
       if (applyPartialConversion(mod, target, std::move(patterns)).failed())
         llvm::errs() << "Failed to convert TritonNPU to TTKernel\n"; // message
@@ -619,7 +633,6 @@ struct ConvertTritonNPUToTTKernelPass
           }
         });
       }
-      mod.dump();
     }
     llvm::errs() << "Pass 2: Dead code elimination completed\n";
 
