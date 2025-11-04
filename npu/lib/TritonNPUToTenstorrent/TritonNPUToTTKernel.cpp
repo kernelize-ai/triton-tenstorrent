@@ -1,6 +1,7 @@
 #include "npu/include/TritonNPUToTenstorrent/Passes.h"
 
 #include "mlir/Analysis/SliceAnalysis.h"
+#include "mlir/IR/BuiltinDialect.h"
 #include "mlir/Transforms/DialectConversion.h"
 #include "llvm/Support/Debug.h"
 
@@ -150,6 +151,10 @@ struct ConvertLocalStoreOp : public OpConversionPattern<gpu::LocalStoreOp> {
       rewriter.eraseOp(op);
       return success();
     }
+
+    rewriter.eraseOp(op);
+    return success();
+#if 0
     auto loadOp = cast<triton::LoadOp>(srcOp);
 
     // ASSUME: tilize has padded to full tiles. Drop masking.
@@ -212,6 +217,128 @@ struct ConvertLocalStoreOp : public OpConversionPattern<gpu::LocalStoreOp> {
       rewriter.eraseOp(mask.getDefiningOp());
     }
 
+    return success();
+#endif
+  }
+};
+
+struct ConvertLoadOp : public OpConversionPattern<triton::LoadOp> {
+  using OpConversionPattern<triton::LoadOp>::OpConversionPattern;
+
+  LogicalResult
+  matchAndRewrite(triton::LoadOp loadOp, OpAdaptor adaptor,
+                  ConversionPatternRewriter &rewriter) const override {
+    Location loc = loadOp.getLoc();
+    // ASSUME: tilize has padded to full tiles. Drop masking.
+
+    RankedTensorType tensorTy = dyn_cast<RankedTensorType>(loadOp.getType());
+    if (!tensorTy && !isa<npu::tt::TileEncodingAttr>(tensorTy.getEncoding())) {
+      LDBG("Load op type failure: " << loadOp.getType() << "\n");
+      return failure();
+    }
+
+    npu::tt::TileEncodingAttr encoding =
+        cast<npu::tt::TileEncodingAttr>(tensorTy.getEncoding());
+
+    auto users = llvm::to_vector(loadOp->getUsers());
+    if (users.size() != 1) {
+      LDBG("Load op has multiple users, cannot convert\n");
+      return failure();
+    }
+    auto user = users.front();
+    if (!isa<gpu::LocalStoreOp>(user)) {
+      LDBG("Load op user is not a local store op: " << *user << "\n");
+      return failure();
+    }
+
+    llvm::errs() << "user = " << *user << "\n";
+    Value dst =
+        rewriter.getRemappedValue(cast<gpu::LocalStoreOp>(user).getDst());
+
+    Value const1 = rewriter.create<arith::ConstantOp>(
+        loc, rewriter.getI32Type(),
+        rewriter.getIntegerAttr(rewriter.getI32Type(), 1));
+    Value const0 = rewriter.create<arith::ConstantOp>(
+        loc, rewriter.getI32Type(),
+        rewriter.getIntegerAttr(rewriter.getI32Type(), 0));
+
+    // 1. reserve back on the cb to know data is ready to store to SRAM
+    //       ttkernel.cb_reserve_back(%0, %c1_i32)
+    rewriter.create<ttkernel::CBReserveBackOp>(loc, dst, const1);
+
+    // 2. get noc address
+    // trace back to base address
+    //       %10 = ttkernel.get_noc_addr(%9, %8, %7)
+    llvm::errs() << "loadOp.getPtr() = " << loadOp.getPtr() << "\n";
+    llvm::errs() << "converted ptr = " << adaptor.getPtr() << "\n";
+#if 1
+    Value baseAddrInt = dst;
+    llvm::errs() << "adaptor ptr = " << adaptor.getPtr()
+                 << "\n\t type = " << adaptor.getPtr().getType() << "\n";
+    // assert(isa<IntegerType>(baseAddr.getType()) && "expecting ptr to int
+    // conversion");
+#else
+    Value baseAddr = traceToAddress(loadOp.getPtr());
+    Value baseAddrInt = rewriter
+                            .create<UnrealizedConversionCastOp>(
+                                loc, rewriter.getI32Type(), baseAddr)
+                            .getResult(0);
+#endif
+
+    // NOC coords -> DRAM channel
+    // TODO: currently hardcoded to 0,0.. compute from program id?
+    //   - Mod the x-coord to left side DRAM column
+    //   - addr bits 31:16 are the DRAM row
+    Value nocAddr = rewriter.create<ttkernel::GetNocAddrOp>(loc, const0, const0,
+                                                            baseAddrInt);
+
+    // 3. get L1 address
+    //       %11 = ttkernel.get_write_ptr(%0)
+    Value l1Addr = rewriter.create<ttkernel::GetWritePtrOp>(loc, dst);
+
+    // 4. async read from noc to l1, size in bytes
+    //       ttkernel.noc_async_read(%10, %13, %c4096_i32)
+#if 1
+    auto srcType = cast<gpu::LocalStoreOp>(user).getSrc().getType();
+#else
+    RankedTensorType srcType;
+#endif
+    auto size = srcType.getNumElements() * srcType.getElementTypeBitWidth() / 8;
+    Value sizeInt = rewriter.create<arith::ConstantOp>(
+        loc, rewriter.getIndexType(),
+        rewriter.getIntegerAttr(rewriter.getIndexType(), size));
+
+    rewriter.create<ttkernel::NocAsyncReadOp>(loc, nocAddr, l1Addr, sizeInt);
+
+    // 5. barrier to ensure data is read from noc to l1
+    //       ttkernel.noc_async_read_barrier() : () -> ()
+    rewriter.create<ttkernel::NocAsyncReadBarrierOp>(loc);
+
+    // 6. push back on the cb to know data is ready to load from SRAM
+    //       ttkernel.cb_push_back(%0, %c1_i32)
+    rewriter.create<ttkernel::CBPushBackOp>(loc, dst, const1);
+
+    // rewriter.eraseOp(op);
+
+    // cleanup the global load op
+    auto mask = loadOp.getMask();
+    rewriter.eraseOp(loadOp);
+#if 0
+    if (mask) {
+      SetVector<Operation*> backwardSlice;
+      (void)getBackwardSlice(mask, &backwardSlice);
+      for (auto op : llvm::reverse(backwardSlice)) {
+        if (llvm::all_of(op->getResults(), [](Value v) {
+              return isa<RankedTensorType>(v.getType());
+            }))
+          rewriter.eraseOp(op);
+      }
+    }
+// #else
+    if (mask && mask.getDefiningOp()) {
+      rewriter.eraseOp(mask.getDefiningOp());
+    }
+#endif
     return success();
   }
 };
@@ -352,10 +479,64 @@ struct ConvertAddPtrOp : public OpConversionPattern<AddPtrOp> {
     }
     if (!isa<IntegerType>(baseAddr.getType()) ||
         !isa<IntegerType>(offset.getType())) {
+      LDBG("ConvertAddPtrOp failed: non-integer types\n");
+      LDBG("  baseAddr type: " << baseAddr.getType() << "\n");
+      LDBG("  offset type: " << offset.getType() << "\n");
+#if 1
+      rewriter.eraseOp(op);
+      return success();
+#else
       return failure();
+#endif
     }
     auto newAddPtrOp = rewriter.create<arith::AddIOp>(loc, baseAddr, offset);
+
+    if (isa<UnrealizedConversionCastOp>(op.getPtr().getDefiningOp())) {
+      rewriter.eraseOp(op.getPtr().getDefiningOp());
+    }
     rewriter.replaceOp(op, newAddPtrOp.getResult());
+
+    return success();
+  }
+};
+
+struct ConvertSplatOp : public OpConversionPattern<SplatOp> {
+  using OpConversionPattern<SplatOp>::OpConversionPattern;
+
+  LogicalResult
+  matchAndRewrite(SplatOp op, OpAdaptor adaptor,
+                  ConversionPatternRewriter &rewriter) const override {
+    Location loc = op.getLoc();
+
+    rewriter.eraseOp(op);
+
+    return success();
+  }
+};
+
+struct ConvertArithAddIOp : public OpConversionPattern<arith::AddIOp> {
+  using OpConversionPattern<arith::AddIOp>::OpConversionPattern;
+
+  LogicalResult
+  matchAndRewrite(arith::AddIOp op, OpAdaptor adaptor,
+                  ConversionPatternRewriter &rewriter) const override {
+    Location loc = op.getLoc();
+
+    rewriter.eraseOp(op);
+
+    return success();
+  }
+};
+
+struct ConvertArithCmpIOp : public OpConversionPattern<arith::CmpIOp> {
+  using OpConversionPattern<arith::CmpIOp>::OpConversionPattern;
+
+  LogicalResult
+  matchAndRewrite(arith::CmpIOp op, OpAdaptor adaptor,
+                  ConversionPatternRewriter &rewriter) const override {
+    Location loc = op.getLoc();
+
+    rewriter.eraseOp(op);
 
     return success();
   }
@@ -371,6 +552,9 @@ struct DeadCodeEliminationOp : public OpConversionPattern<OpTy> {
     if (op->use_empty()) {
       rewriter.eraseOp(op);
       return success();
+    }
+    for (auto user : op->getUsers()) {
+      LDBG("Splat op user: " << *user << "\n");
     }
     return failure();
   }
@@ -533,12 +717,21 @@ struct ConvertTritonNPUToTTKernelPass
       return ttkernel::CBType::get(memdesc.getContext(), cbMemRefType);
     });
     typeConverter.addConversion([](RankedTensorType type) -> Type {
+      auto etype = type.getElementType();
+      if (isa<triton::PointerType>(etype)) {
+#if 1
+        return type;
+#else
+        etype = IntegerType::get(type.getContext(), 32);
+        return RankedTensorType::get(type.getShape(), etype);
+#endif
+      }
       if (isa<npu::tt::TileEncodingAttr>(type.getEncoding())) {
         // TODO: same caveats as above re:ttts layout
         auto shape = SmallVector<int64_t>(1, 1);
         auto ttcoreTileType = ttcore::TileType::get(
             type.getContext(), ttcore::TileType::getDefaultShape(),
-            ttcore::elementTypeToDataType(type.getElementType()));
+            ttcore::elementTypeToDataType(etype));
         MemRefType cbMemRefType = MemRefType::get(
             shape, ttcoreTileType, MemRefLayoutAttrInterface{},
             ttcore::MemorySpaceAttr::get(type.getContext(),
@@ -547,12 +740,26 @@ struct ConvertTritonNPUToTTKernelPass
       }
       return type;
     });
+#if 0 // nope
+    typeConverter.addSourceMaterialization(
+        [](OpBuilder &builder, Type type, ValueRange inputs,
+           Location loc) -> Value {
+          assert(inputs.size() == 1 && "expected single input");
+          return builder
+              .create<UnrealizedConversionCastOp>(loc, type, inputs)
+              .getResult(0);
+        });
+  typeConverter.addTargetMaterialization([](OpBuilder &builder, Type type, ValueRange inputs,
+                              Location loc) {
+    auto cast = builder.create<UnrealizedConversionCastOp>(loc, type, inputs);
+    return cast.getResult(0);
+  });
+#endif
 
     mlir::ConversionTarget funcTarget(*context);
     funcTarget.addLegalDialect<func::FuncDialect>();
     funcTarget.addLegalDialect<arith::ArithDialect>();
     funcTarget.addLegalOp<ttkernel::GetArgValOp>();
-    funcTarget.addLegalOp<mlir::UnrealizedConversionCastOp>();
     funcTarget.addIllegalOp<triton::FuncOp>();
     funcTarget.addIllegalOp<triton::ReturnOp>();
     funcTarget.addDynamicallyLegalOp<func::FuncOp>([](func::FuncOp funcOp) {
@@ -562,6 +769,7 @@ struct ConvertTritonNPUToTTKernelPass
 
       return funcOp.getNumArguments() == 0;
     });
+    funcTarget.addLegalOp<UnrealizedConversionCastOp>();
 
     mlir::RewritePatternSet funcPatterns(context);
     populateFuncOpConversionPattern(typeConverter, funcPatterns,
@@ -575,33 +783,86 @@ struct ConvertTritonNPUToTTKernelPass
     target.addLegalDialect<arith::ArithDialect>();
     target.addLegalDialect<func::FuncDialect>();
 
+    target.addIllegalOp<UnrealizedConversionCastOp>();
     target.addIllegalOp<npu::tt::BinaryComputeOp>();
+
+#if 0
+    target.addIllegalOp<gpu::LocalStoreOp>();
+    target.addIllegalOp<gpu::LocalLoadOp>();
+    target.addIllegalOp<gpu::LocalAllocOp>();
+
+    target.addIllegalOp<triton::AddPtrOp>();
+    target.addIllegalOp<triton::SplatOp>();
+#else
+    target.addDynamicallyLegalOp<LoadOp>([](LoadOp op) {
+      auto funcOp = op->getParentOfType<func::FuncOp>();
+      assert(funcOp && "expected func::funcOp parent");
+      StringRef funcName = funcOp.getSymName();
+      return funcName.ends_with("__writer");
+    });
     target.addDynamicallyLegalOp<gpu::LocalStoreOp>([](gpu::LocalStoreOp op) {
       auto funcOp = op->getParentOfType<func::FuncOp>();
       assert(funcOp && "expected func::funcOp parent");
       StringRef funcName = funcOp.getSymName();
-      return !funcName.ends_with("__compute");
+      return funcName.ends_with("__writer");
     });
     target.addDynamicallyLegalOp<gpu::LocalLoadOp>([](gpu::LocalLoadOp op) {
       auto funcOp = op->getParentOfType<func::FuncOp>();
       assert(funcOp && "expected func::funcOp parent");
       StringRef funcName = funcOp.getSymName();
-      return !funcName.ends_with("__compute");
+      return funcName.ends_with("__writer");
     });
     target.addDynamicallyLegalOp<gpu::LocalAllocOp>([](gpu::LocalAllocOp op) {
       auto funcOp = op->getParentOfType<func::FuncOp>();
       assert(funcOp && "expected func::funcOp parent");
       StringRef funcName = funcOp.getSymName();
-      return !funcName.ends_with("__compute");
+      return funcName.ends_with("__writer");
     });
+#if 1
+    target.addDynamicallyLegalOp<triton::AddPtrOp>([](triton::AddPtrOp op) {
+      auto funcOp = op->getParentOfType<func::FuncOp>();
+      assert(funcOp && "expected func::funcOp parent");
+      StringRef funcName = funcOp.getSymName();
+      return funcName.ends_with("__writer");
+    });
+    target.addDynamicallyLegalOp<triton::SplatOp>([](triton::SplatOp op) {
+      auto funcOp = op->getParentOfType<func::FuncOp>();
+      assert(funcOp && "expected func::funcOp parent");
+      StringRef funcName = funcOp.getSymName();
+      return funcName.ends_with("__writer");
+    });
+    target.addDynamicallyLegalOp<arith::AddIOp>([](arith::AddIOp op) {
+      auto funcOp = op->getParentOfType<func::FuncOp>();
+      assert(funcOp && "expected func::funcOp parent");
+      StringRef funcName = funcOp.getSymName();
+      return funcName.ends_with("__writer");
+    });
+    target.addDynamicallyLegalOp<arith::CmpIOp>([](arith::CmpIOp op) {
+      auto funcOp = op->getParentOfType<func::FuncOp>();
+      assert(funcOp && "expected func::funcOp parent");
+      StringRef funcName = funcOp.getSymName();
+      return funcName.ends_with("__writer");
+    });
+    target.addDynamicallyLegalOp<UnrealizedConversionCastOp>(
+        [](UnrealizedConversionCastOp op) {
+          auto funcOp = op->getParentOfType<func::FuncOp>();
+          assert(funcOp && "expected func::funcOp parent");
+          StringRef funcName = funcOp.getSymName();
+          return funcName.ends_with("__writer");
+        });
+#endif
+#endif
 
     mlir::RewritePatternSet patterns(context);
+    patterns.add<ConvertLoadOp>(typeConverter, patterns.getContext());
     patterns.add<ConvertLocalStoreOp>(typeConverter, patterns.getContext());
     patterns.add<ConvertLocalLoadOp>(typeConverter, patterns.getContext());
     patterns.add<ConvertLocalAllocOp>(typeConverter, patterns.getContext());
     patterns.add<ConvertBinaryComputeOp>(typeConverter, patterns.getContext());
-    // patterns.add<DropFunctionArguments>(typeConverter,
-    // patterns.getContext());
+    patterns.add<ConvertAddPtrOp>(typeConverter, patterns.getContext());
+    patterns.add<ConvertSplatOp>(typeConverter, patterns.getContext());
+    patterns.add<ConvertArithAddIOp>(typeConverter, patterns.getContext());
+    patterns.add<ConvertArithCmpIOp>(typeConverter, patterns.getContext());
 
     if (applyPartialConversion(mod, target, std::move(patterns)).failed())
       signalPassFailure();
