@@ -203,9 +203,6 @@ class CPUBackend(BaseBackend):
         pm = ir.pass_manager(mod.context)
         pm.enable_debug()
 
-        cpu.passes.tenstorrent.add_drop_function(pm, "add_kernel__reader")
-        cpu.passes.tenstorrent.add_drop_function(pm, "add_kernel__writer")
-
         # tt-mlir continued
         cpu.passes.tenstorrent.add_ttkernel_device_zone_scopes(pm)
         passes.common.add_canonicalizer(pm)
@@ -220,7 +217,16 @@ class CPUBackend(BaseBackend):
 
         pm.run(mod, "make_ttmlir_cpp")
 
-        return cpu.translate_to_cpp(mod, "add_kernel__compute")
+        cpp_file = "#ifdef COMPUTE_KERNEL\n"
+        cpp_file += cpu.translate_to_cpp(mod, "add_kernel__compute")
+        cpp_file += "\n#endif  // COMPUTE_KERNEL\n\n"
+        cpp_file += "\n#ifdef READER_KERNEL\n"
+        cpp_file += cpu.translate_to_cpp(mod, "add_kernel__reader")
+        cpp_file += "\n#endif  // READER_KERNEL\n\n"
+        cpp_file += "\n#ifdef WRITER_KERNEL\n"
+        cpp_file += cpu.translate_to_cpp(mod, "add_kernel__writer")
+        cpp_file += "\n#endif  // WRITER_KERNEL\n"
+        return cpp_file
 
     @staticmethod
     def make_asm(src, metadata, options):
