@@ -406,15 +406,21 @@ struct ConvertGetProgramIdOp : public OpConversionPattern<GetProgramIdOp> {
 
     // TODO: map from virtual grid to physical grid
     // - this is a hack to get the program id from the my_x and my_y ops
+    Value programId;
     if (adaptor.getAxis() == ProgramIDDim::X) {
-      auto programId =
+      programId =
           rewriter.create<ttkernel::MyXOp>(loc, /*Optional noc=*/Value());
-      rewriter.replaceOp(op, programId);
     } else if (adaptor.getAxis() == ProgramIDDim::Y) {
-      auto programId =
+      programId =
           rewriter.create<ttkernel::MyYOp>(loc, /*Optional noc=*/Value());
-      rewriter.replaceOp(op, programId);
+    } else {
+      llvm_unreachable("unsupported program id dimension");
     }
+
+    auto castOp = rewriter.create<arith::IndexCastOp>(
+        loc, rewriter.getI32Type(), programId);
+    rewriter.replaceOp(op, castOp.getResult());
+
     return success();
   }
 };
