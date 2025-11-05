@@ -167,6 +167,10 @@ struct ConvertLocalStoreOp : public OpConversionPattern<gpu::LocalStoreOp> {
 
     // ASSUME: tilize has padded to full tiles. Drop masking.
     Value baseAddr = traceToScalar(loadOp.getPtr(), true);
+    Value baseAddrI32 = rewriter
+                            .create<UnrealizedConversionCastOp>(
+                                loc, rewriter.getI32Type(), baseAddr)
+                            .getResult(0);
     Value offset = traceToScalar(loadOp.getPtr(), false);
 
     Value const1 = rewriter.create<arith::ConstantOp>(
@@ -186,7 +190,10 @@ struct ConvertLocalStoreOp : public OpConversionPattern<gpu::LocalStoreOp> {
         loc, rewriter.getI1Type(),
         rewriter.getIntegerAttr(rewriter.getI1Type(), 1));
     Value addrGen = rewriter.create<ttkernel::GetInterleavedAddrGenFastOp>(
-        loc, c1bit, baseAddr, pageSize, dataFormat);
+        loc, c1bit, baseAddrI32, pageSize, dataFormat);
+    Value nocAddr =
+        rewriter.create<ttkernel::InterleavedAddrGenFastGetNocAddrOp>(
+            loc, addrGen, const0, offset, Value());
 
     // 1. reserve back on the cb to know data is ready to store to SRAM
     //       ttkernel.cb_reserve_back(%0, %c1_i32)
@@ -198,7 +205,7 @@ struct ConvertLocalStoreOp : public OpConversionPattern<gpu::LocalStoreOp> {
 
     // 4. async read from noc to l1, size in bytes
     //       ttkernel.noc_async_read(%10, %13, %c4096_i32)
-    rewriter.create<ttkernel::NocAsyncReadTileOp>(loc, offset, addrGen, l1Addr);
+    rewriter.create<ttkernel::NocAsyncReadOp>(loc, nocAddr, l1Addr, pageSize);
 
     // 5. barrier to ensure data is read from noc to l1
     //       ttkernel.noc_async_read_barrier() : () -> ()
@@ -211,14 +218,7 @@ struct ConvertLocalStoreOp : public OpConversionPattern<gpu::LocalStoreOp> {
     rewriter.eraseOp(op);
 
     // cleanup the global load op
-    auto mask = loadOp.getMask();
     rewriter.eraseOp(loadOp);
-
-    // Masking is handled by tilize, so we can just erase the mask op
-    if (mask && mask.getDefiningOp()) {
-      rewriter.eraseOp(mask.getDefiningOp());
-    }
-
     return success();
   }
 };
@@ -294,12 +294,13 @@ struct ConvertLocalLoadOp : public OpConversionPattern<gpu::LocalLoadOp> {
     if (dst.hasOneUse() && isa<triton::StoreOp>(user)) {
       // FOR PATTERN: ttg.local_load -> tt.store
       auto storeOp = cast<triton::StoreOp>(user);
-      auto mask = storeOp.getMask();
-      if (mask && mask.getDefiningOp()) {
-        rewriter.eraseOp(mask.getDefiningOp());
-      }
       Value baseAddr = traceToScalar(storeOp.getPtr(), true);
+      Value baseAddrI32 = rewriter
+                              .create<UnrealizedConversionCastOp>(
+                                  loc, rewriter.getI32Type(), baseAddr)
+                              .getResult(0);
       Value offset = traceToScalar(storeOp.getPtr(), false);
+
       // Compute page size in bytes
       auto dataFormat = rewriter.create<ttkernel::GetDataFormatOp>(loc, src);
       auto pageSize = rewriter.create<ttkernel::GetTileSizeOp>(loc, src);
@@ -309,12 +310,18 @@ struct ConvertLocalLoadOp : public OpConversionPattern<gpu::LocalLoadOp> {
       Value c1bit = rewriter.create<arith::ConstantOp>(
           loc, rewriter.getI1Type(),
           rewriter.getIntegerAttr(rewriter.getI1Type(), 1));
+      Value const0 = rewriter.create<arith::ConstantOp>(
+          loc, rewriter.getI32Type(),
+          rewriter.getIntegerAttr(rewriter.getI32Type(), 0));
       Value addrGen = rewriter.create<ttkernel::GetInterleavedAddrGenFastOp>(
-          loc, c1bit, baseAddr, pageSize, dataFormat);
+          loc, c1bit, baseAddrI32, pageSize, dataFormat);
+      Value nocAddr =
+          rewriter.create<ttkernel::InterleavedAddrGenFastGetNocAddrOp>(
+              loc, addrGen, const0, offset, Value());
 
       Value l1Addr = rewriter.create<ttkernel::GetWritePtrOp>(loc, oneDTile);
-      rewriter.create<ttkernel::NocAsyncWriteTileOp>(loc, offset, addrGen,
-                                                     l1Addr);
+      rewriter.create<ttkernel::NocAsyncWriteOp>(loc, l1Addr, nocAddr,
+                                                 pageSize);
       rewriter.create<ttkernel::NocAsyncWriteBarrierOp>(loc);
       rewriter.create<ttkernel::CBPopFrontOp>(loc, oneDTile, c1);
       rewriter.eraseOp(user);
