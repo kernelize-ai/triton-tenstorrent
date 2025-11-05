@@ -165,9 +165,14 @@ struct ConvertLocalStoreOp : public OpConversionPattern<gpu::LocalStoreOp> {
     // FOR PATTERN: tt.load -> ttg.local_store
     auto loadOp = cast<triton::LoadOp>(srcOp);
 
+    // Compute page size in bytes
+    auto dataFormat = rewriter.create<ttkernel::GetDataFormatOp>(loc, dst);
+    auto pageSize = rewriter.create<ttkernel::GetTileSizeOp>(loc, dst);
+
     // ASSUME: tilize has padded to full tiles. Drop masking.
     Value baseAddr = traceToScalar(loadOp.getPtr(), true);
     Value offset = traceToScalar(loadOp.getPtr(), false);
+    Value tile_id = rewriter.create<arith::DivUIOp>(loc, offset, pageSize);
 
     Value const1 = rewriter.create<arith::ConstantOp>(
         loc, rewriter.getI32Type(),
@@ -176,10 +181,6 @@ struct ConvertLocalStoreOp : public OpConversionPattern<gpu::LocalStoreOp> {
         loc, rewriter.getI32Type(),
         rewriter.getIntegerAttr(rewriter.getI32Type(), 0));
 
-    // Compute page size in bytes
-    auto dataFormat = rewriter.create<ttkernel::GetDataFormatOp>(loc, dst);
-    auto pageSize = rewriter.create<ttkernel::GetTileSizeOp>(loc, dst);
-
     // 0. Create tensor accessor
     // TODO: move to top scope
     Value c1bit = rewriter.create<arith::ConstantOp>(
@@ -187,6 +188,9 @@ struct ConvertLocalStoreOp : public OpConversionPattern<gpu::LocalStoreOp> {
         rewriter.getIntegerAttr(rewriter.getI1Type(), 1));
     Value addrGen = rewriter.create<ttkernel::GetInterleavedAddrGenFastOp>(
         loc, c1bit, baseAddr, pageSize, dataFormat);
+    Value nocAddr =
+        rewriter.create<ttkernel::InterleavedAddrGenFastGetNocAddrOp>(
+            loc, addrGen, tile_id, const0, Value());
 
     // 1. reserve back on the cb to know data is ready to store to SRAM
     //       ttkernel.cb_reserve_back(%0, %c1_i32)
@@ -198,7 +202,7 @@ struct ConvertLocalStoreOp : public OpConversionPattern<gpu::LocalStoreOp> {
 
     // 4. async read from noc to l1, size in bytes
     //       ttkernel.noc_async_read(%10, %13, %c4096_i32)
-    rewriter.create<ttkernel::NocAsyncReadTileOp>(loc, offset, addrGen, l1Addr);
+    rewriter.create<ttkernel::NocAsyncReadOp>(loc, nocAddr, l1Addr, pageSize);
 
     // 5. barrier to ensure data is read from noc to l1
     //       ttkernel.noc_async_read_barrier() : () -> ()
@@ -211,14 +215,7 @@ struct ConvertLocalStoreOp : public OpConversionPattern<gpu::LocalStoreOp> {
     rewriter.eraseOp(op);
 
     // cleanup the global load op
-    auto mask = loadOp.getMask();
     rewriter.eraseOp(loadOp);
-
-    // Masking is handled by tilize, so we can just erase the mask op
-    if (mask && mask.getDefiningOp()) {
-      rewriter.eraseOp(mask.getDefiningOp());
-    }
-
     return success();
   }
 };
@@ -294,27 +291,32 @@ struct ConvertLocalLoadOp : public OpConversionPattern<gpu::LocalLoadOp> {
     if (dst.hasOneUse() && isa<triton::StoreOp>(user)) {
       // FOR PATTERN: ttg.local_load -> tt.store
       auto storeOp = cast<triton::StoreOp>(user);
-      auto mask = storeOp.getMask();
-      if (mask && mask.getDefiningOp()) {
-        rewriter.eraseOp(mask.getDefiningOp());
-      }
-      Value baseAddr = traceToScalar(storeOp.getPtr(), true);
-      Value offset = traceToScalar(storeOp.getPtr(), false);
+
       // Compute page size in bytes
       auto dataFormat = rewriter.create<ttkernel::GetDataFormatOp>(loc, src);
       auto pageSize = rewriter.create<ttkernel::GetTileSizeOp>(loc, src);
+
+      Value baseAddr = traceToScalar(storeOp.getPtr(), true);
+      Value offset = traceToScalar(storeOp.getPtr(), false);
+      Value tile_id = rewriter.create<arith::DivUIOp>(loc, offset, pageSize);
 
       // 0. Create tensor accessor
       // TODO: move to top scope
       Value c1bit = rewriter.create<arith::ConstantOp>(
           loc, rewriter.getI1Type(),
           rewriter.getIntegerAttr(rewriter.getI1Type(), 1));
+      Value const0 = rewriter.create<arith::ConstantOp>(
+          loc, rewriter.getI32Type(),
+          rewriter.getIntegerAttr(rewriter.getI32Type(), 0));
       Value addrGen = rewriter.create<ttkernel::GetInterleavedAddrGenFastOp>(
           loc, c1bit, baseAddr, pageSize, dataFormat);
+      Value nocAddr =
+          rewriter.create<ttkernel::InterleavedAddrGenFastGetNocAddrOp>(
+              loc, addrGen, tile_id, const0, Value());
 
       Value l1Addr = rewriter.create<ttkernel::GetWritePtrOp>(loc, oneDTile);
-      rewriter.create<ttkernel::NocAsyncWriteTileOp>(loc, offset, addrGen,
-                                                     l1Addr);
+      rewriter.create<ttkernel::NocAsyncWriteOp>(loc, l1Addr, nocAddr,
+                                                 pageSize);
       rewriter.create<ttkernel::NocAsyncWriteBarrierOp>(loc);
       rewriter.create<ttkernel::CBPopFrontOp>(loc, oneDTile, c1);
       rewriter.eraseOp(user);
@@ -416,6 +418,10 @@ struct ConvertGetProgramIdOp : public OpConversionPattern<GetProgramIdOp> {
     } else {
       llvm_unreachable("unsupported program id dimension");
     }
+    Value pidOffset = rewriter.create<arith::ConstantOp>(
+        loc, rewriter.getIndexType(),
+        rewriter.getIntegerAttr(rewriter.getIndexType(), 18));
+    programId = rewriter.create<arith::SubIOp>(loc, programId, pidOffset);
 
     auto castOp = rewriter.create<arith::IndexCastOp>(
         loc, rewriter.getI32Type(), programId);
@@ -594,7 +600,6 @@ struct ConvertTritonNPUToTTKernelPass
               .failed())
         signalPassFailure();
     }
-    llvm::errs() << "Pass 0: TritonFunc to Func completed\n";
 
     //  Pass 1: TritonGPU to TTKernel
     {
@@ -623,7 +628,6 @@ struct ConvertTritonNPUToTTKernelPass
       if (applyPartialConversion(mod, target, std::move(patterns)).failed())
         llvm::errs() << "Failed to convert TritonNPU to TTKernel\n"; // message
     }
-    llvm::errs() << "Pass 1: TritonNPU to TTKernel completed\n";
 
     //  Pass 2: Dead code elimination
     {
@@ -640,7 +644,6 @@ struct ConvertTritonNPUToTTKernelPass
         });
       }
     }
-    llvm::errs() << "Pass 2: Dead code elimination completed\n";
 
     // insert tile regs acquire before copy tile ops
     mod.walk([&](func::FuncOp funcOp) {
