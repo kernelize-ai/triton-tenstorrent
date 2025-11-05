@@ -171,10 +171,6 @@ struct ConvertLocalStoreOp : public OpConversionPattern<gpu::LocalStoreOp> {
 
     // ASSUME: tilize has padded to full tiles. Drop masking.
     Value baseAddr = traceToScalar(loadOp.getPtr(), true);
-    Value baseAddrI32 = rewriter
-                            .create<UnrealizedConversionCastOp>(
-                                loc, rewriter.getI32Type(), baseAddr)
-                            .getResult(0);
     Value offset = traceToScalar(loadOp.getPtr(), false);
     Value tile_id = rewriter.create<arith::DivUIOp>(loc, offset, pageSize);
 
@@ -191,7 +187,7 @@ struct ConvertLocalStoreOp : public OpConversionPattern<gpu::LocalStoreOp> {
         loc, rewriter.getI1Type(),
         rewriter.getIntegerAttr(rewriter.getI1Type(), 1));
     Value addrGen = rewriter.create<ttkernel::GetInterleavedAddrGenFastOp>(
-        loc, c1bit, baseAddrI32, pageSize, dataFormat);
+        loc, c1bit, baseAddr, pageSize, dataFormat);
     Value nocAddr =
         rewriter.create<ttkernel::InterleavedAddrGenFastGetNocAddrOp>(
             loc, addrGen, tile_id, const0, Value());
@@ -301,10 +297,6 @@ struct ConvertLocalLoadOp : public OpConversionPattern<gpu::LocalLoadOp> {
       auto pageSize = rewriter.create<ttkernel::GetTileSizeOp>(loc, src);
 
       Value baseAddr = traceToScalar(storeOp.getPtr(), true);
-      Value baseAddrI32 = rewriter
-                              .create<UnrealizedConversionCastOp>(
-                                  loc, rewriter.getI32Type(), baseAddr)
-                              .getResult(0);
       Value offset = traceToScalar(storeOp.getPtr(), false);
       Value tile_id = rewriter.create<arith::DivUIOp>(loc, offset, pageSize);
 
@@ -317,7 +309,7 @@ struct ConvertLocalLoadOp : public OpConversionPattern<gpu::LocalLoadOp> {
           loc, rewriter.getI32Type(),
           rewriter.getIntegerAttr(rewriter.getI32Type(), 0));
       Value addrGen = rewriter.create<ttkernel::GetInterleavedAddrGenFastOp>(
-          loc, c1bit, baseAddrI32, pageSize, dataFormat);
+          loc, c1bit, baseAddr, pageSize, dataFormat);
       Value nocAddr =
           rewriter.create<ttkernel::InterleavedAddrGenFastGetNocAddrOp>(
               loc, addrGen, tile_id, const0, Value());
