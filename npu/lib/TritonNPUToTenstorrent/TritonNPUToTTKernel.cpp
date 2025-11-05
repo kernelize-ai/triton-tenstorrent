@@ -426,6 +426,10 @@ struct ConvertGetProgramIdOp : public OpConversionPattern<GetProgramIdOp> {
     } else {
       llvm_unreachable("unsupported program id dimension");
     }
+    Value pidOffset = rewriter.create<arith::ConstantOp>(
+        loc, rewriter.getIndexType(),
+        rewriter.getIntegerAttr(rewriter.getIndexType(), 18));
+    programId = rewriter.create<arith::SubIOp>(loc, programId, pidOffset);
 
     auto castOp = rewriter.create<arith::IndexCastOp>(
         loc, rewriter.getI32Type(), programId);
