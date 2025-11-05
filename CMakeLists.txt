@@ -83,6 +83,7 @@ if(TRITON_BUILD_PYTHON_MODULE)
   )
   add_custom_target(copy_ttmlir_headers ALL DEPENDS "${TTMLIR_HEADER_DST_DIR}")
   add_dependencies(TritonCPU copy_ttmlir_headers)
+  add_dependencies(copy_ttmlir_headers build_tt_mlir)
   target_include_directories(TritonCPU PUBLIC
       "${TTMLIR_HEADER_DST_DIR}"
   )
