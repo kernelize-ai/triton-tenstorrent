@@ -165,6 +165,10 @@ struct ConvertLocalStoreOp : public OpConversionPattern<gpu::LocalStoreOp> {
     // FOR PATTERN: tt.load -> ttg.local_store
     auto loadOp = cast<triton::LoadOp>(srcOp);
 
+    // Compute page size in bytes
+    auto dataFormat = rewriter.create<ttkernel::GetDataFormatOp>(loc, dst);
+    auto pageSize = rewriter.create<ttkernel::GetTileSizeOp>(loc, dst);
+
     // ASSUME: tilize has padded to full tiles. Drop masking.
     Value baseAddr = traceToScalar(loadOp.getPtr(), true);
     Value baseAddrI32 = rewriter
@@ -172,6 +176,7 @@ struct ConvertLocalStoreOp : public OpConversionPattern<gpu::LocalStoreOp> {
                                 loc, rewriter.getI32Type(), baseAddr)
                             .getResult(0);
     Value offset = traceToScalar(loadOp.getPtr(), false);
+    Value tile_id = rewriter.create<arith::DivUIOp>(loc, offset, pageSize);
 
     Value const1 = rewriter.create<arith::ConstantOp>(
         loc, rewriter.getI32Type(),
@@ -179,10 +184,6 @@ struct ConvertLocalStoreOp : public OpConversionPattern<gpu::LocalStoreOp> {
     Value const0 = rewriter.create<arith::ConstantOp>(
         loc, rewriter.getI32Type(),
         rewriter.getIntegerAttr(rewriter.getI32Type(), 0));
-
-    // Compute page size in bytes
-    auto dataFormat = rewriter.create<ttkernel::GetDataFormatOp>(loc, dst);
-    auto pageSize = rewriter.create<ttkernel::GetTileSizeOp>(loc, dst);
 
     // 0. Create tensor accessor
     // TODO: move to top scope
@@ -193,7 +194,7 @@ struct ConvertLocalStoreOp : public OpConversionPattern<gpu::LocalStoreOp> {
         loc, c1bit, baseAddrI32, pageSize, dataFormat);
     Value nocAddr =
         rewriter.create<ttkernel::InterleavedAddrGenFastGetNocAddrOp>(
-            loc, addrGen, const0, offset, Value());
+            loc, addrGen, tile_id, const0, Value());
 
     // 1. reserve back on the cb to know data is ready to store to SRAM
     //       ttkernel.cb_reserve_back(%0, %c1_i32)
@@ -294,16 +295,18 @@ struct ConvertLocalLoadOp : public OpConversionPattern<gpu::LocalLoadOp> {
     if (dst.hasOneUse() && isa<triton::StoreOp>(user)) {
       // FOR PATTERN: ttg.local_load -> tt.store
       auto storeOp = cast<triton::StoreOp>(user);
+
+      // Compute page size in bytes
+      auto dataFormat = rewriter.create<ttkernel::GetDataFormatOp>(loc, src);
+      auto pageSize = rewriter.create<ttkernel::GetTileSizeOp>(loc, src);
+
       Value baseAddr = traceToScalar(storeOp.getPtr(), true);
       Value baseAddrI32 = rewriter
                               .create<UnrealizedConversionCastOp>(
                                   loc, rewriter.getI32Type(), baseAddr)
                               .getResult(0);
       Value offset = traceToScalar(storeOp.getPtr(), false);
-
-      // Compute page size in bytes
-      auto dataFormat = rewriter.create<ttkernel::GetDataFormatOp>(loc, src);
-      auto pageSize = rewriter.create<ttkernel::GetTileSizeOp>(loc, src);
+      Value tile_id = rewriter.create<arith::DivUIOp>(loc, offset, pageSize);
 
       // 0. Create tensor accessor
       // TODO: move to top scope
@@ -317,7 +320,7 @@ struct ConvertLocalLoadOp : public OpConversionPattern<gpu::LocalLoadOp> {
           loc, c1bit, baseAddrI32, pageSize, dataFormat);
       Value nocAddr =
           rewriter.create<ttkernel::InterleavedAddrGenFastGetNocAddrOp>(
-              loc, addrGen, const0, offset, Value());
+              loc, addrGen, tile_id, const0, Value());
 
       Value l1Addr = rewriter.create<ttkernel::GetWritePtrOp>(loc, oneDTile);
       rewriter.create<ttkernel::NocAsyncWriteOp>(loc, l1Addr, nocAddr,
@@ -601,7 +604,6 @@ struct ConvertTritonNPUToTTKernelPass
               .failed())
         signalPassFailure();
     }
-    llvm::errs() << "Pass 0: TritonFunc to Func completed\n";
 
     //  Pass 1: TritonGPU to TTKernel
     {
@@ -630,7 +632,6 @@ struct ConvertTritonNPUToTTKernelPass
       if (applyPartialConversion(mod, target, std::move(patterns)).failed())
         llvm::errs() << "Failed to convert TritonNPU to TTKernel\n"; // message
     }
-    llvm::errs() << "Pass 1: TritonNPU to TTKernel completed\n";
 
     //  Pass 2: Dead code elimination
     {
@@ -647,7 +648,6 @@ struct ConvertTritonNPUToTTKernelPass
         });
       }
     }
-    llvm::errs() << "Pass 2: Dead code elimination completed\n";
 
     // insert tile regs acquire before copy tile ops
     mod.walk([&](func::FuncOp funcOp) {
