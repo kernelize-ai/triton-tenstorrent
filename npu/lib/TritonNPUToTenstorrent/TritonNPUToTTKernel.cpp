@@ -33,19 +33,22 @@ namespace npu {
 
 namespace {
 
-static Value getI32Const(ConversionPatternRewriter &rewriter, Location loc, int64_t value) {
+static Value getI32Const(ConversionPatternRewriter &rewriter, Location loc,
+                         int64_t value) {
   return rewriter.create<arith::ConstantOp>(
       loc, rewriter.getI32Type(),
       rewriter.getIntegerAttr(rewriter.getI32Type(), value));
 }
 
-static Value getI1Const(ConversionPatternRewriter &rewriter, Location loc, bool value) {
+static Value getI1Const(ConversionPatternRewriter &rewriter, Location loc,
+                        bool value) {
   return rewriter.create<arith::ConstantOp>(
       loc, rewriter.getI1Type(),
       rewriter.getIntegerAttr(rewriter.getI1Type(), value));
 }
 
-static Value getIConst(ConversionPatternRewriter &rewriter, Location loc, int64_t value) {
+static Value getIConst(ConversionPatternRewriter &rewriter, Location loc,
+                       int64_t value) {
   return rewriter.create<arith::ConstantOp>(
       loc, rewriter.getIndexType(),
       rewriter.getIntegerAttr(rewriter.getIndexType(), value));
@@ -76,7 +79,8 @@ struct ConvertBinaryComputeOp
       // amusingly we could now deduce the load encoding from the operand index
       npu::tt::TileEncodingAttr loadEncoding =
           cast<npu::tt::TileEncodingAttr>(loadType.getEncoding());
-      Value destRegisterIndex = getIConst(rewriter, loc, loadEncoding.getIndex());
+      Value destRegisterIndex =
+          getIConst(rewriter, loc, loadEncoding.getIndex());
       rewriter.create<ttkernel::CopyTileOp>(loc, convertedOperand, c0,
                                             destRegisterIndex);
     };
@@ -96,9 +100,7 @@ struct ConvertBinaryComputeOp
   }
 };
 
-static bool isScalar(Value v) {
-  return !isa<RankedTensorType>(v.getType());
-}
+static bool isScalar(Value v) { return !isa<RankedTensorType>(v.getType()); }
 
 static Value traceToScalar(Value ptr, bool isPtr = true) {
   auto op = ptr.getDefiningOp();
@@ -158,8 +160,10 @@ struct ConvertLoadOp : public OpConversionPattern<triton::LoadOp> {
       return rewriter.notifyMatchFailure(op, "dependent load not supported");
     }
 
-    auto cbMemRefType = cast<ttkernel::CBType>(typeConverter->convertType(op.getResult().getType()));
-    Value cb = rewriter.create<ttkernel::GetCompileArgValOp>(loc, cbMemRefType, allocIdx);
+    auto cbMemRefType = cast<ttkernel::CBType>(
+        typeConverter->convertType(op.getResult().getType()));
+    Value cb = rewriter.create<ttkernel::GetCompileArgValOp>(loc, cbMemRefType,
+                                                             allocIdx);
 
     // Compute page size in bytes
     auto dataFormat = rewriter.create<ttkernel::GetDataFormatOp>(loc, cb);
@@ -237,8 +241,7 @@ struct ConvertStoreOp : public OpConversionPattern<triton::StoreOp> {
             loc, addrGen, tile_id, const0, Value());
 
     Value l1Addr = rewriter.create<ttkernel::GetWritePtrOp>(loc, src);
-    rewriter.create<ttkernel::NocAsyncWriteOp>(loc, l1Addr, nocAddr,
-                                                pageSize);
+    rewriter.create<ttkernel::NocAsyncWriteOp>(loc, l1Addr, nocAddr, pageSize);
     rewriter.create<ttkernel::NocAsyncWriteBarrierOp>(loc);
     rewriter.create<ttkernel::CBPopFrontOp>(loc, src, const1);
     rewriter.eraseOp(op);
@@ -294,7 +297,6 @@ struct ConvertLocalStoreOp : public OpConversionPattern<gpu::LocalStoreOp> {
     return success();
   }
 };
-
 
 struct ConvertLocalLoadOp : public OpConversionPattern<gpu::LocalLoadOp> {
   using OpConversionPattern<gpu::LocalLoadOp>::OpConversionPattern;
@@ -355,7 +357,8 @@ struct ConvertLocalAllocOp : public OpConversionPattern<gpu::LocalAllocOp> {
       return rewriter.notifyMatchFailure(op, "missing alloc_idx attribute");
     }
 
-    auto cbMemRefType = cast<ttkernel::CBType>(typeConverter->convertType(op.getResult().getType()));
+    auto cbMemRefType = cast<ttkernel::CBType>(
+        typeConverter->convertType(op.getResult().getType()));
     rewriter.replaceOpWithNewOp<ttkernel::GetCompileArgValOp>(op, cbMemRefType,
                                                               allocIdx);
 
