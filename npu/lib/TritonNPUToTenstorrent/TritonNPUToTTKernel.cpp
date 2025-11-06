@@ -33,6 +33,24 @@ namespace npu {
 
 namespace {
 
+static Value getI32Const(ConversionPatternRewriter &rewriter, Location loc, int64_t value) {
+  return rewriter.create<arith::ConstantOp>(
+      loc, rewriter.getI32Type(),
+      rewriter.getIntegerAttr(rewriter.getI32Type(), value));
+}
+
+static Value getI1Const(ConversionPatternRewriter &rewriter, Location loc, bool value) {
+  return rewriter.create<arith::ConstantOp>(
+      loc, rewriter.getI1Type(),
+      rewriter.getIntegerAttr(rewriter.getI1Type(), value));
+}
+
+static Value getIConst(ConversionPatternRewriter &rewriter, Location loc, int64_t value) {
+  return rewriter.create<arith::ConstantOp>(
+      loc, rewriter.getIndexType(),
+      rewriter.getIntegerAttr(rewriter.getIndexType(), value));
+}
+
 struct ConvertBinaryComputeOp
     : public OpConversionPattern<npu::tt::BinaryComputeOp> {
   using OpConversionPattern<npu::tt::BinaryComputeOp>::OpConversionPattern;
@@ -52,18 +70,13 @@ struct ConvertBinaryComputeOp
     auto copyAndInitializeRegister = [&](Value operand,
                                          Value convertedOperand) {
       rewriter.create<ttkernel::CopyTileInitOp>(loc, convertedOperand);
-      Value c0 = rewriter.create<arith::ConstantOp>(
-          loc, rewriter.getIndexType(),
-          rewriter.getIntegerAttr(rewriter.getIndexType(), 0));
+      Value c0 = getIConst(rewriter, loc, 0);
 
       RankedTensorType loadType = cast<RankedTensorType>(operand.getType());
       // amusingly we could now deduce the load encoding from the operand index
       npu::tt::TileEncodingAttr loadEncoding =
           cast<npu::tt::TileEncodingAttr>(loadType.getEncoding());
-      Value destRegisterIndex = rewriter.create<arith::ConstantOp>(
-          loc, rewriter.getIndexType(),
-          rewriter.getIntegerAttr(rewriter.getIndexType(),
-                                  loadEncoding.getIndex()));
+      Value destRegisterIndex = getIConst(rewriter, loc, loadEncoding.getIndex());
       rewriter.create<ttkernel::CopyTileOp>(loc, convertedOperand, c0,
                                             destRegisterIndex);
     };
@@ -72,15 +85,9 @@ struct ConvertBinaryComputeOp
     copyAndInitializeRegister(op.getRhs(), rhs);
 
     rewriter.create<ttkernel::AddBinaryTilesInitOp>(loc);
-    Value lhsIndex = rewriter.create<arith::ConstantOp>(
-        loc, rewriter.getIndexType(),
-        rewriter.getIntegerAttr(rewriter.getIndexType(), 0));
-    Value rhsIndex = rewriter.create<arith::ConstantOp>(
-        loc, rewriter.getIndexType(),
-        rewriter.getIntegerAttr(rewriter.getIndexType(), 1));
-    Value destIndex = rewriter.create<arith::ConstantOp>(
-        loc, rewriter.getIndexType(),
-        rewriter.getIntegerAttr(rewriter.getIndexType(), 2));
+    Value lhsIndex = getIConst(rewriter, loc, 0);
+    Value rhsIndex = getIConst(rewriter, loc, 1);
+    Value destIndex = getIConst(rewriter, loc, 2);
     rewriter.create<ttkernel::AddBinaryTilesOp>(loc, lhsIndex, rhsIndex,
                                                 destIndex);
 
@@ -89,8 +96,11 @@ struct ConvertBinaryComputeOp
   }
 };
 
+static bool isScalar(Value v) {
+  return !isa<RankedTensorType>(v.getType());
+}
+
 static Value traceToScalar(Value ptr, bool isPtr = true) {
-  auto isScalar = [](Value v) { return !isa<RankedTensorType>(v.getType()); };
   auto op = ptr.getDefiningOp();
   if (isScalar(ptr) || op == nullptr) {
     return ptr;
@@ -118,6 +128,124 @@ static Value traceToScalar(Value ptr, bool isPtr = true) {
   return ptr;
 }
 
+static int64_t findAllocIdx(Operation *op) {
+  if (auto localLoadOp = dyn_cast<gpu::LocalLoadOp>(op)) {
+    return findAllocIdx(localLoadOp.getSrc().getDefiningOp());
+  }
+  if (auto localStoreOp = dyn_cast<gpu::LocalStoreOp>(op)) {
+    return findAllocIdx(localStoreOp.getDst().getDefiningOp());
+  }
+  if (auto localAllocOp = dyn_cast<gpu::LocalAllocOp>(op)) {
+    return localAllocOp->getAttrOfType<IntegerAttr>("alloc_idx").getInt();
+  }
+  return -1;
+}
+
+struct ConvertLoadOp : public OpConversionPattern<triton::LoadOp> {
+  using OpConversionPattern<triton::LoadOp>::OpConversionPattern;
+
+  LogicalResult
+  matchAndRewrite(triton::LoadOp op, OpAdaptor adaptor,
+                  ConversionPatternRewriter &rewriter) const override {
+    Location loc = op.getLoc();
+    auto typeConverter = getTypeConverter();
+
+    int64_t allocIdx = -1;
+    for (auto user : op.getResult().getUsers()) {
+      allocIdx = std::max(allocIdx, findAllocIdx(user));
+    }
+    if (allocIdx == -1) {
+      return rewriter.notifyMatchFailure(op, "dependent load not supported");
+    }
+
+    auto cbMemRefType = cast<ttkernel::CBType>(typeConverter->convertType(op.getResult().getType()));
+    Value cb = rewriter.create<ttkernel::GetCompileArgValOp>(loc, cbMemRefType, allocIdx);
+
+    // Compute page size in bytes
+    auto dataFormat = rewriter.create<ttkernel::GetDataFormatOp>(loc, cb);
+    auto pageSize = rewriter.create<ttkernel::GetTileSizeOp>(loc, cb);
+
+    // ASSUME: tilize has padded to full tiles. Drop masking.
+    Value baseAddr = traceToScalar(op.getPtr(), true);
+    Value offset = traceToScalar(op.getPtr(), false);
+    assert(isScalar(offset) && "expected scalar offset");
+    Value tile_id = rewriter.create<arith::DivUIOp>(loc, offset, pageSize);
+
+    Value const1 = getI32Const(rewriter, loc, 1);
+    Value const0 = getI32Const(rewriter, loc, 0);
+
+    // 0. Create tensor accessor
+    // TODO: move to top scope
+    Value c1bit = getI1Const(rewriter, loc, 1);
+    Value addrGen = rewriter.create<ttkernel::GetInterleavedAddrGenFastOp>(
+        loc, c1bit, baseAddr, pageSize, dataFormat);
+    Value nocAddr =
+        rewriter.create<ttkernel::InterleavedAddrGenFastGetNocAddrOp>(
+            loc, addrGen, tile_id, const0, Value());
+
+    // 1. reserve back on the cb to know data is ready to store to SRAM
+    //       ttkernel.cb_reserve_back(%0, %c1_i32)
+    // add later?
+    rewriter.create<ttkernel::CBReserveBackOp>(loc, cb, const1);
+
+    // 3. get L1 address
+    //       %11 = ttkernel.get_write_ptr(%0)
+    Value l1Addr = rewriter.create<ttkernel::GetWritePtrOp>(loc, cb);
+
+    // 4. async read from noc to l1, size in bytes
+    //       ttkernel.noc_async_read(%10, %13, %c4096_i32)
+    rewriter.create<ttkernel::NocAsyncReadOp>(loc, nocAddr, l1Addr, pageSize);
+
+    // 5. barrier to ensure data is read from noc to l1
+    //       ttkernel.noc_async_read_barrier() : () -> ()
+    rewriter.create<ttkernel::NocAsyncReadBarrierOp>(loc);
+
+    rewriter.eraseOp(op);
+    return success();
+  }
+};
+
+struct ConvertStoreOp : public OpConversionPattern<triton::StoreOp> {
+  using OpConversionPattern<triton::StoreOp>::OpConversionPattern;
+
+  LogicalResult
+  matchAndRewrite(triton::StoreOp op, OpAdaptor adaptor,
+                  ConversionPatternRewriter &rewriter) const override {
+    Location loc = op.getLoc();
+
+    auto src = adaptor.getValue();
+
+    // Compute page size in bytes
+    auto dataFormat = rewriter.create<ttkernel::GetDataFormatOp>(loc, src);
+    auto pageSize = rewriter.create<ttkernel::GetTileSizeOp>(loc, src);
+
+    Value baseAddr = traceToScalar(op.getPtr(), true);
+    Value offset = traceToScalar(op.getPtr(), false);
+    assert(isScalar(offset) && "expected scalar offset");
+    Value tile_id = rewriter.create<arith::DivUIOp>(loc, offset, pageSize);
+
+    // 0. Create tensor accessor
+    // TODO: move to top scope
+    Value c1bit = getI1Const(rewriter, loc, 1);
+    Value const0 = getI32Const(rewriter, loc, 0);
+    Value const1 = getI32Const(rewriter, loc, 1);
+
+    Value addrGen = rewriter.create<ttkernel::GetInterleavedAddrGenFastOp>(
+        loc, c1bit, baseAddr, pageSize, dataFormat);
+    Value nocAddr =
+        rewriter.create<ttkernel::InterleavedAddrGenFastGetNocAddrOp>(
+            loc, addrGen, tile_id, const0, Value());
+
+    Value l1Addr = rewriter.create<ttkernel::GetWritePtrOp>(loc, src);
+    rewriter.create<ttkernel::NocAsyncWriteOp>(loc, l1Addr, nocAddr,
+                                                pageSize);
+    rewriter.create<ttkernel::NocAsyncWriteBarrierOp>(loc);
+    rewriter.create<ttkernel::CBPopFrontOp>(loc, src, const1);
+    rewriter.eraseOp(op);
+    return success();
+  }
+};
+
 struct ConvertLocalStoreOp : public OpConversionPattern<gpu::LocalStoreOp> {
   using OpConversionPattern<gpu::LocalStoreOp>::OpConversionPattern;
 
@@ -130,6 +258,7 @@ struct ConvertLocalStoreOp : public OpConversionPattern<gpu::LocalStoreOp> {
     auto srcOp = op.getSrc().getDefiningOp();
 
     if (!isa<triton::LoadOp>(srcOp)) {
+      // COMPUTE KERNEL
       auto cbType = cast<ttkernel::CBType>(dst.getType());
       MemRefType cbTileMemref = cbType.getMemref();
 
@@ -142,18 +271,12 @@ struct ConvertLocalStoreOp : public OpConversionPattern<gpu::LocalStoreOp> {
           loc, ttkernel::CBType::get(rewriter.getContext(), oneDTileType), dst);
 
       // reserve back the cb for the store
-      Value numPages = rewriter.create<arith::ConstantOp>(
-          loc, rewriter.getI32Type(),
-          rewriter.getIntegerAttr(rewriter.getI32Type(), 1));
+      Value numPages = getI32Const(rewriter, loc, 1);
       rewriter.create<ttkernel::CBReserveBackOp>(loc, dst, numPages);
 
       rewriter.setInsertionPoint(op);
-      Value destRegisterIndex = rewriter.create<arith::ConstantOp>(
-          loc, rewriter.getIndexType(),
-          rewriter.getIntegerAttr(rewriter.getIndexType(), 2));
-      Value outIndex = rewriter.create<arith::ConstantOp>(
-          loc, rewriter.getIndexType(),
-          rewriter.getIntegerAttr(rewriter.getIndexType(), 0));
+      Value destRegisterIndex = getIConst(rewriter, loc, 2);
+      Value outIndex = getIConst(rewriter, loc, 0);
       rewriter.create<ttkernel::PackTileOp>(loc, destRegisterIndex, oneDTile,
                                             outIndex,
                                             /*outOfOrder=*/true);
@@ -162,91 +285,16 @@ struct ConvertLocalStoreOp : public OpConversionPattern<gpu::LocalStoreOp> {
       return success();
     }
 
-    // FOR PATTERN: tt.load -> ttg.local_store
-    auto loadOp = cast<triton::LoadOp>(srcOp);
-
-    // Compute page size in bytes
-    auto dataFormat = rewriter.create<ttkernel::GetDataFormatOp>(loc, dst);
-    auto pageSize = rewriter.create<ttkernel::GetTileSizeOp>(loc, dst);
-
-    // ASSUME: tilize has padded to full tiles. Drop masking.
-    Value baseAddr = traceToScalar(loadOp.getPtr(), true);
-    Value offset = traceToScalar(loadOp.getPtr(), false);
-    Value tile_id = rewriter.create<arith::DivUIOp>(loc, offset, pageSize);
-
-    Value const1 = rewriter.create<arith::ConstantOp>(
-        loc, rewriter.getI32Type(),
-        rewriter.getIntegerAttr(rewriter.getI32Type(), 1));
-    Value const0 = rewriter.create<arith::ConstantOp>(
-        loc, rewriter.getI32Type(),
-        rewriter.getIntegerAttr(rewriter.getI32Type(), 0));
-
-    // 0. Create tensor accessor
-    // TODO: move to top scope
-    Value c1bit = rewriter.create<arith::ConstantOp>(
-        loc, rewriter.getI1Type(),
-        rewriter.getIntegerAttr(rewriter.getI1Type(), 1));
-    Value addrGen = rewriter.create<ttkernel::GetInterleavedAddrGenFastOp>(
-        loc, c1bit, baseAddr, pageSize, dataFormat);
-    Value nocAddr =
-        rewriter.create<ttkernel::InterleavedAddrGenFastGetNocAddrOp>(
-            loc, addrGen, tile_id, const0, Value());
-
-    // 1. reserve back on the cb to know data is ready to store to SRAM
-    //       ttkernel.cb_reserve_back(%0, %c1_i32)
-    rewriter.create<ttkernel::CBReserveBackOp>(loc, dst, const1);
-
-    // 3. get L1 address
-    //       %11 = ttkernel.get_write_ptr(%0)
-    Value l1Addr = rewriter.create<ttkernel::GetWritePtrOp>(loc, dst);
-
-    // 4. async read from noc to l1, size in bytes
-    //       ttkernel.noc_async_read(%10, %13, %c4096_i32)
-    rewriter.create<ttkernel::NocAsyncReadOp>(loc, nocAddr, l1Addr, pageSize);
-
-    // 5. barrier to ensure data is read from noc to l1
-    //       ttkernel.noc_async_read_barrier() : () -> ()
-    rewriter.create<ttkernel::NocAsyncReadBarrierOp>(loc);
-
-    // 6. push back on the cb to know data is ready to load from SRAM
+    Value const1 = getI32Const(rewriter, loc, 1);
     //       ttkernel.cb_push_back(%0, %c1_i32)
     rewriter.create<ttkernel::CBPushBackOp>(loc, dst, const1);
 
     rewriter.eraseOp(op);
 
-    // cleanup the global load op
-    rewriter.eraseOp(loadOp);
     return success();
   }
 };
 
-struct DropFunctionArguments : public OpConversionPattern<func::FuncOp> {
-  using OpConversionPattern<func::FuncOp>::OpConversionPattern;
-
-  LogicalResult
-  matchAndRewrite(func::FuncOp funcOp, OpAdaptor adaptor,
-                  ConversionPatternRewriter &rewriter) const override {
-    Location loc = funcOp.getLoc();
-    auto typeConverter = getTypeConverter();
-
-    OpBuilder::InsertionGuard guard(rewriter);
-    rewriter.setInsertionPointToStart(&funcOp.getBody().front());
-
-    for (auto arg : llvm::enumerate(funcOp.getArguments())) {
-      Type newType = typeConverter->convertType(arg.value().getType());
-      Value argIndex = rewriter.create<arith::ConstantOp>(
-          loc, rewriter.getIndexType(),
-          rewriter.getIntegerAttr(rewriter.getIndexType(), arg.index()));
-      auto getArgValOp =
-          rewriter.create<ttkernel::GetArgValOp>(loc, newType, argIndex);
-      arg.value().replaceAllUsesWith(getArgValOp);
-    }
-    BitVector erasedArgs(funcOp.getNumArguments(), true);
-    (void)funcOp.eraseArguments(erasedArgs);
-
-    return success();
-  }
-};
 
 struct ConvertLocalLoadOp : public OpConversionPattern<gpu::LocalLoadOp> {
   using OpConversionPattern<gpu::LocalLoadOp>::OpConversionPattern;
@@ -259,12 +307,8 @@ struct ConvertLocalLoadOp : public OpConversionPattern<gpu::LocalLoadOp> {
     auto src = adaptor.getSrc();
     auto dst = op.getResult();
     // 1. wait_front on the cb to know data is ready to load from SRAM
-    Value c0 = rewriter.create<arith::ConstantOp>(
-        loc, rewriter.getIndexType(),
-        rewriter.getIntegerAttr(rewriter.getIndexType(), 0));
-    Value c1 = rewriter.create<arith::ConstantOp>(
-        loc, rewriter.getI32Type(),
-        rewriter.getIntegerAttr(rewriter.getI32Type(), 1));
+    Value c0 = getIConst(rewriter, loc, 0);
+    Value c1 = getI32Const(rewriter, loc, 1);
     auto waitFrontOp =
         rewriter.create<ttkernel::CBWaitFrontOp>(loc, adaptor.getSrc(), c1);
 
@@ -286,41 +330,6 @@ struct ConvertLocalLoadOp : public OpConversionPattern<gpu::LocalLoadOp> {
                 adaptor.getSrc())
             .getResult();
 
-    auto user = *dst.getUsers().begin();
-
-    if (dst.hasOneUse() && isa<triton::StoreOp>(user)) {
-      // FOR PATTERN: ttg.local_load -> tt.store
-      auto storeOp = cast<triton::StoreOp>(user);
-
-      // Compute page size in bytes
-      auto dataFormat = rewriter.create<ttkernel::GetDataFormatOp>(loc, src);
-      auto pageSize = rewriter.create<ttkernel::GetTileSizeOp>(loc, src);
-
-      Value baseAddr = traceToScalar(storeOp.getPtr(), true);
-      Value offset = traceToScalar(storeOp.getPtr(), false);
-      Value tile_id = rewriter.create<arith::DivUIOp>(loc, offset, pageSize);
-
-      // 0. Create tensor accessor
-      // TODO: move to top scope
-      Value c1bit = rewriter.create<arith::ConstantOp>(
-          loc, rewriter.getI1Type(),
-          rewriter.getIntegerAttr(rewriter.getI1Type(), 1));
-      Value const0 = rewriter.create<arith::ConstantOp>(
-          loc, rewriter.getI32Type(),
-          rewriter.getIntegerAttr(rewriter.getI32Type(), 0));
-      Value addrGen = rewriter.create<ttkernel::GetInterleavedAddrGenFastOp>(
-          loc, c1bit, baseAddr, pageSize, dataFormat);
-      Value nocAddr =
-          rewriter.create<ttkernel::InterleavedAddrGenFastGetNocAddrOp>(
-              loc, addrGen, tile_id, const0, Value());
-
-      Value l1Addr = rewriter.create<ttkernel::GetWritePtrOp>(loc, oneDTile);
-      rewriter.create<ttkernel::NocAsyncWriteOp>(loc, l1Addr, nocAddr,
-                                                 pageSize);
-      rewriter.create<ttkernel::NocAsyncWriteBarrierOp>(loc);
-      rewriter.create<ttkernel::CBPopFrontOp>(loc, oneDTile, c1);
-      rewriter.eraseOp(user);
-    }
     // TODO: this should come from the cb root eventually,
     // but replaceOp is probably not appropriate here
     rewriter.replaceOp(op, oneDTile);
@@ -335,23 +344,52 @@ struct ConvertLocalAllocOp : public OpConversionPattern<gpu::LocalAllocOp> {
   matchAndRewrite(gpu::LocalAllocOp op, OpAdaptor adaptor,
                   ConversionPatternRewriter &rewriter) const override {
     Location loc = op.getLoc();
-
-    // replace the local allocs with cbs from the function signature
-    auto allocIdx = op->getAttrOfType<IntegerAttr>("alloc_idx");
-    if (!allocIdx) {
-      return rewriter.notifyMatchFailure(op, "missing alloc_idx attribute");
-    }
-    int64_t allocIdxValue = allocIdx.getInt();
-
     auto typeConverter = getTypeConverter();
 
-    LDBG("Local alloc op result type: " << op.getResult().getType() << "\n");
-    Type convertedType = typeConverter->convertType(op.getResult().getType());
-    LDBG("is converted to memref type: " << convertedType << "\n");
-    auto cbMemRefType = cast<ttkernel::CBType>(convertedType);
+    // replace the local allocs with cbs from the function signature
+    int64_t allocIdx = -1;
+    for (auto user : op.getResult().getUsers()) {
+      allocIdx = std::max(allocIdx, findAllocIdx(user));
+    }
+    if (allocIdx == -1) {
+      return rewriter.notifyMatchFailure(op, "missing alloc_idx attribute");
+    }
 
+    auto cbMemRefType = cast<ttkernel::CBType>(typeConverter->convertType(op.getResult().getType()));
     rewriter.replaceOpWithNewOp<ttkernel::GetCompileArgValOp>(op, cbMemRefType,
-                                                              allocIdxValue);
+                                                              allocIdx);
+
+    return success();
+  }
+};
+
+struct DropFunctionArguments : public OpConversionPattern<func::FuncOp> {
+  using OpConversionPattern<func::FuncOp>::OpConversionPattern;
+
+  LogicalResult
+  matchAndRewrite(func::FuncOp funcOp, OpAdaptor adaptor,
+                  ConversionPatternRewriter &rewriter) const override {
+    Location loc = funcOp.getLoc();
+    auto typeConverter = getTypeConverter();
+
+    auto numArgs = funcOp.getNumArguments();
+
+    OpBuilder::InsertionGuard guard(rewriter);
+    rewriter.setInsertionPointToStart(&funcOp.getBody().front());
+
+    for (auto arg : llvm::enumerate(funcOp.getArguments())) {
+      Type newType = typeConverter->convertType(arg.value().getType());
+      Value argIndex = getIConst(rewriter, loc, arg.index());
+      auto getArgValOp =
+          rewriter.create<ttkernel::GetArgValOp>(loc, newType, argIndex);
+      arg.value().replaceAllUsesWith(getArgValOp);
+    }
+    BitVector erasedArgs(numArgs, true);
+    (void)funcOp.eraseArguments(erasedArgs);
+
+    // Number of user args
+    // TODO: add launch params (grid size, block size, shared memory size, etc)
+    funcOp->setAttr("tt.num_args", rewriter.getI32IntegerAttr(numArgs));
 
     return success();
   }
@@ -418,9 +456,7 @@ struct ConvertGetProgramIdOp : public OpConversionPattern<GetProgramIdOp> {
     } else {
       llvm_unreachable("unsupported program id dimension");
     }
-    Value pidOffset = rewriter.create<arith::ConstantOp>(
-        loc, rewriter.getIndexType(),
-        rewriter.getIntegerAttr(rewriter.getIndexType(), 18));
+    Value pidOffset = getIConst(rewriter, loc, 18);
     programId = rewriter.create<arith::SubIOp>(loc, programId, pidOffset);
 
     auto castOp = rewriter.create<arith::IndexCastOp>(
@@ -615,6 +651,8 @@ struct ConvertTritonNPUToTTKernelPass
 
       mlir::RewritePatternSet patterns(context);
       // triton-gpu ops
+      patterns.add<ConvertLoadOp>(typeConverter, patterns.getContext());
+      patterns.add<ConvertStoreOp>(typeConverter, patterns.getContext());
       patterns.add<ConvertLocalStoreOp>(typeConverter, patterns.getContext());
       patterns.add<ConvertLocalLoadOp>(typeConverter, patterns.getContext());
       patterns.add<ConvertLocalAllocOp>(typeConverter, patterns.getContext());
