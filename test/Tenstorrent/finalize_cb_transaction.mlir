@@ -18,24 +18,21 @@ module attributes {"ttg.num-ctas" = 1 : i32, "ttg.num-warps" = 1 : i32, ttg.targ
 
         // CHECK: ttkernel.cb_wait_front
         // CHECK: ttkernel.cb_wait_front
-        %0 = ttkernel.get_compile_time_arg_val(2) : () -> !ttkernel.cb<memref<1x1x!ttcore.tile<32x32, f32>, #l1>>
-        %1 = ttkernel.cb_reinterpret_shape(%0) : (!ttkernel.cb<memref<1x1x!ttcore.tile<32x32, f32>, #l1>>) -> !ttkernel.cb<memref<1x!ttcore.tile<32x32, f32>, #l1>>
-        ttkernel.cb_reserve_back(%0, %c1_i32) : (!ttkernel.cb<memref<1x1x!ttcore.tile<32x32, f32>, #l1>>, i32) -> ()
-        %y = ttkernel.get_compile_time_arg_val(1) : () -> !ttkernel.cb<memref<1x1x!ttcore.tile<32x32, f32>, #l1>>
-        %x = ttkernel.get_compile_time_arg_val(0) : () -> !ttkernel.cb<memref<1x1x!ttcore.tile<32x32, f32>, #l1>>
-        ttkernel.cb_wait_front(%x, %c1_i32) : (!ttkernel.cb<memref<1x1x!ttcore.tile<32x32, f32>, #l1>>, i32) -> ()
-        %x_0 = ttkernel.cb_reinterpret_shape(%x) : (!ttkernel.cb<memref<1x1x!ttcore.tile<32x32, f32>, #l1>>) -> !ttkernel.cb<memref<1x!ttcore.tile<32x32, f32>, #l1>>
-        ttkernel.cb_wait_front(%y, %c1_i32) : (!ttkernel.cb<memref<1x1x!ttcore.tile<32x32, f32>, #l1>>, i32) -> ()
-        %y_1 = ttkernel.cb_reinterpret_shape(%y) : (!ttkernel.cb<memref<1x1x!ttcore.tile<32x32, f32>, #l1>>) -> !ttkernel.cb<memref<1x!ttcore.tile<32x32, f32>, #l1>>
-        ttkernel.init_sfpu(%x_0, %1) : (!ttkernel.cb<memref<1x!ttcore.tile<32x32, f32>, #l1>>, !ttkernel.cb<memref<1x!ttcore.tile<32x32, f32>, #l1>>) -> ()
+        %0 = ttkernel.get_compile_time_arg_val(2) : () -> !ttkernel.cb<1, !ttcore.tile<32x32, f32>>
+        ttkernel.cb_reserve_back(%0, %c1_i32) : (!ttkernel.cb<1, !ttcore.tile<32x32, f32>>, i32) -> ()
+        %y = ttkernel.get_compile_time_arg_val(1) : () -> !ttkernel.cb<1, !ttcore.tile<32x32, f32>>
+        %x = ttkernel.get_compile_time_arg_val(0) : () -> !ttkernel.cb<1, !ttcore.tile<32x32, f32>>
+        ttkernel.cb_wait_front(%x, %c1_i32) : (!ttkernel.cb<1, !ttcore.tile<32x32, f32>>, i32) -> ()
+        ttkernel.cb_wait_front(%y, %c1_i32) : (!ttkernel.cb<1, !ttcore.tile<32x32, f32>>, i32) -> ()
+        ttkernel.init_sfpu(%x, %0) : (!ttkernel.cb<1, !ttcore.tile<32x32, f32>>, !ttkernel.cb<1, !ttcore.tile<32x32, f32>>) -> ()
         ttkernel.tile_regs_acquire() : () -> ()
-        ttkernel.copy_tile_init(%x_0) : (!ttkernel.cb<memref<1x!ttcore.tile<32x32, f32>, #l1>>) -> ()
-        ttkernel.copy_tile(%x_0, %c0, %c0) : (!ttkernel.cb<memref<1x!ttcore.tile<32x32, f32>, #l1>>, index, index) -> ()
-        ttkernel.copy_tile_init(%y_1) : (!ttkernel.cb<memref<1x!ttcore.tile<32x32, f32>, #l1>>) -> ()
-        ttkernel.copy_tile(%y_1, %c0, %c1) : (!ttkernel.cb<memref<1x!ttcore.tile<32x32, f32>, #l1>>, index, index) -> ()
-        ttkernel.add_tiles_init(%x_0, %y_1) : (!ttkernel.cb<memref<1x!ttcore.tile<32x32, f32>, #l1>>, !ttkernel.cb<memref<1x!ttcore.tile<32x32, f32>, #l1>>) -> ()
-        ttkernel.add_tiles(%x_0, %y_1, %c0, %c1, %c2) : (!ttkernel.cb<memref<1x!ttcore.tile<32x32, f32>, #l1>>, !ttkernel.cb<memref<1x!ttcore.tile<32x32, f32>, #l1>>, index, index, index) -> ()
-        ttkernel.pack_tile(%c2, %1, %c0, true) : (index, !ttkernel.cb<memref<1x!ttcore.tile<32x32, f32>, #l1>>, index) -> ()
+        ttkernel.copy_tile_init(%x) : (!ttkernel.cb<1, !ttcore.tile<32x32, f32>>) -> ()
+        ttkernel.copy_tile(%x, %c0, %c0) : (!ttkernel.cb<1, !ttcore.tile<32x32, f32>>, index, index) -> ()
+        ttkernel.copy_tile_init(%y) : (!ttkernel.cb<1, !ttcore.tile<32x32, f32>>) -> ()
+        ttkernel.copy_tile(%y, %c0, %c1) : (!ttkernel.cb<1, !ttcore.tile<32x32, f32>>, index, index) -> ()
+        ttkernel.add_tiles_init(%x, %y) : (!ttkernel.cb<1, !ttcore.tile<32x32, f32>>, !ttkernel.cb<1, !ttcore.tile<32x32, f32>>) -> ()
+        ttkernel.add_tiles(%x, %y, %c0, %c1, %c2) : (!ttkernel.cb<1, !ttcore.tile<32x32, f32>>, !ttkernel.cb<1, !ttcore.tile<32x32, f32>>, index, index, index) -> ()
+        ttkernel.pack_tile(%c2, %0, %c0, true) : (index, !ttkernel.cb<1, !ttcore.tile<32x32, f32>>, index) -> ()
         // CHECK-DAG: ttkernel.cb_pop_front(%[[X]], {{.*}})
         // CHECK-DAG: ttkernel.cb_pop_front(%[[Y]], {{.*}})
         // CHECK: ttkernel.cb_push_back(%[[OUTPUT]], {{.*}})
