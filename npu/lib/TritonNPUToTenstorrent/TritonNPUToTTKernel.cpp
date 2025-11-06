@@ -291,18 +291,7 @@ struct ConvertLocalStoreOp : public OpConversionPattern<gpu::LocalStoreOp> {
     auto srcOp = op.getSrc().getDefiningOp();
 
     if (!isa<triton::LoadOp>(srcOp)) {
-      // COMPUTE KERNEL
-      auto cbType = cast<ttkernel::CBType>(dst.getType());
-      MemRefType cbTileMemref = cbType.getMemref();
-
-      // add the one-D reinterpret cast at the compile time arg site for now
       rewriter.setInsertionPointAfter(dst.getDefiningOp());
-      MemRefType oneDTileType = MemRefType::get(
-          {1}, cbTileMemref.getElementType(), MemRefLayoutAttrInterface{},
-          cbTileMemref.getMemorySpace());
-      auto oneDTile = rewriter.create<ttkernel::CBReinterpretShapeOp>(
-          loc, ttkernel::CBType::get(rewriter.getContext(), oneDTileType), dst);
-
       // reserve back the cb for the store
       Value numPages = getI32Const(rewriter, loc, 1);
       rewriter.create<ttkernel::CBReserveBackOp>(loc, dst, numPages);
@@ -310,7 +299,7 @@ struct ConvertLocalStoreOp : public OpConversionPattern<gpu::LocalStoreOp> {
       rewriter.setInsertionPoint(op);
       Value destRegisterIndex = getIConst(rewriter, loc, 2);
       Value outIndex = getIConst(rewriter, loc, 0);
-      rewriter.create<ttkernel::PackTileOp>(loc, destRegisterIndex, oneDTile,
+      rewriter.create<ttkernel::PackTileOp>(loc, destRegisterIndex, dst,
                                             outIndex,
                                             /*outOfOrder=*/true);
 
@@ -347,24 +336,46 @@ struct ConvertLocalLoadOp : public OpConversionPattern<gpu::LocalLoadOp> {
     LDBG("Converted load src type = " << adaptor.getSrc().getType() << "\n");
     assert(isa<ttkernel::CBType>(adaptor.getSrc().getType()) &&
            "expected memref type for type converted load src");
-    auto cbType = cast<ttkernel::CBType>(adaptor.getSrc().getType());
-    MemRefType cbTileMemref = cbType.getMemref();
 
-    // 1.5 reinterpret the cb from 2D to 1D tile shape
-    // TODO: materialize this as a reshape op?
-    MemRefType oneDTileType = MemRefType::get(
-        {1}, cbTileMemref.getElementType(), MemRefLayoutAttrInterface{},
-        cbTileMemref.getMemorySpace());
-    auto oneDTile =
-        rewriter
-            .create<ttkernel::CBReinterpretShapeOp>(
-                loc, ttkernel::CBType::get(rewriter.getContext(), oneDTileType),
-                adaptor.getSrc())
-            .getResult();
+    auto user = *dst.getUsers().begin();
 
+    if (dst.hasOneUse() && isa<triton::StoreOp>(user)) {
+      // FOR PATTERN: ttg.local_load -> tt.store
+      auto storeOp = cast<triton::StoreOp>(user);
+
+      // Compute page size in bytes
+      auto dataFormat = rewriter.create<ttkernel::GetDataFormatOp>(loc, src);
+      auto pageSize = rewriter.create<ttkernel::GetTileSizeOp>(loc, src);
+
+      Value baseAddr = traceToScalar(storeOp.getPtr(), true);
+      Value offset = traceToScalar(storeOp.getPtr(), false);
+      Value tile_id = rewriter.create<arith::DivUIOp>(loc, offset, pageSize);
+
+      // 0. Create tensor accessor
+      // TODO: move to top scope
+      Value c1bit = rewriter.create<arith::ConstantOp>(
+          loc, rewriter.getI1Type(),
+          rewriter.getIntegerAttr(rewriter.getI1Type(), 1));
+      Value const0 = rewriter.create<arith::ConstantOp>(
+          loc, rewriter.getI32Type(),
+          rewriter.getIntegerAttr(rewriter.getI32Type(), 0));
+      Value addrGen = rewriter.create<ttkernel::GetInterleavedAddrGenFastOp>(
+          loc, c1bit, baseAddr, pageSize, dataFormat);
+      Value nocAddr =
+          rewriter.create<ttkernel::InterleavedAddrGenFastGetNocAddrOp>(
+              loc, addrGen, tile_id, const0, Value());
+
+      Value l1Addr =
+          rewriter.create<ttkernel::GetWritePtrOp>(loc, adaptor.getSrc());
+      rewriter.create<ttkernel::NocAsyncWriteOp>(loc, l1Addr, nocAddr,
+                                                 pageSize);
+      rewriter.create<ttkernel::NocAsyncWriteBarrierOp>(loc);
+      rewriter.create<ttkernel::CBPopFrontOp>(loc, adaptor.getSrc(), c1);
+      rewriter.eraseOp(user);
+    }
     // TODO: this should come from the cb root eventually,
     // but replaceOp is probably not appropriate here
-    rewriter.replaceOp(op, oneDTile);
+    rewriter.replaceOp(op, adaptor.getSrc());
     return success();
   }
 };
@@ -497,7 +508,7 @@ static bool isCBOp(Operation *op) {
   if (auto compileTimeArg = dyn_cast<ttkernel::GetCompileArgValOp>(op)) {
     return isa<ttkernel::CBType>(compileTimeArg.getType());
   }
-  return isa<ttkernel::CBReinterpretShapeOp>(op);
+  return false;
 }
 
 class InitializationHelper {
@@ -622,7 +633,7 @@ struct ConvertTritonNPUToTTKernelPass
           shape, ttcoreTileType, MemRefLayoutAttrInterface{},
           ttcore::MemorySpaceAttr::get(memdesc.getContext(),
                                        ttcore::MemorySpace::DeviceL1));
-      return ttkernel::CBType::get(memdesc.getContext(), cbMemRefType);
+      return ttkernel::CBType::get(cbMemRefType);
     });
     typeConverter.addConversion([](RankedTensorType type) -> Type {
       auto etype = type.getElementType();
@@ -640,7 +651,7 @@ struct ConvertTritonNPUToTTKernelPass
             shape, ttcoreTileType, MemRefLayoutAttrInterface{},
             ttcore::MemorySpaceAttr::get(type.getContext(),
                                          ttcore::MemorySpace::DeviceL1));
-        return ttkernel::CBType::get(type.getContext(), cbMemRefType);
+        return ttkernel::CBType::get(cbMemRefType);
       }
       return type;
     });

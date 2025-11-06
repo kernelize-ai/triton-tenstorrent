@@ -9,7 +9,7 @@ else()
 endif()
 
 # detect environment specific variables using python
-find_package(Python3 COMPONENTS Interpreter REQUIRED)
+find_package(Python3 COMPONENTS Interpreter Development REQUIRED)
 execute_process(
       COMMAND "${Python3_EXECUTABLE}" -c
        "import sys; sys.path.insert(0, '${CMAKE_CURRENT_SOURCE_DIR}'); \
