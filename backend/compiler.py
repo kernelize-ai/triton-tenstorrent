@@ -46,7 +46,7 @@ class CPUBackend(BaseBackend):
 
     @staticmethod
     def supports_target(target: GPUTarget):
-        return target.backend == "tenstorrent"
+        return target.backend == "tenstorrent" or target.backend == "cpu"
 
     def __init__(self, target: GPUTarget) -> None:
         super().__init__(target)
