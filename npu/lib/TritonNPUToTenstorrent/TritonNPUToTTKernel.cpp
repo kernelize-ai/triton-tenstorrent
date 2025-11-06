@@ -420,10 +420,6 @@ struct DropFunctionArguments : public OpConversionPattern<func::FuncOp> {
     BitVector erasedArgs(numArgs, true);
     (void)funcOp.eraseArguments(erasedArgs);
 
-    // Number of user args
-    // TODO: add launch params (grid size, block size, shared memory size, etc)
-    funcOp->setAttr("tt.num_args", rewriter.getI32IntegerAttr(numArgs));
-
     return success();
   }
 };
@@ -481,25 +477,17 @@ struct ConvertGetProgramIdOp : public OpConversionPattern<GetProgramIdOp> {
   matchAndRewrite(GetProgramIdOp op, OpAdaptor adaptor,
                   ConversionPatternRewriter &rewriter) const override {
     Location loc = op.getLoc();
+    auto axis = adaptor.getAxis() == ProgramIDDim::X   ? 0
+                : adaptor.getAxis() == ProgramIDDim::Y ? 1
+                                                       : 2;
 
-    // TODO: map from virtual grid to physical grid
-    // - this is a hack to get the program id from the my_x and my_y ops
-    Value programId;
-    if (adaptor.getAxis() == ProgramIDDim::X) {
-      programId =
-          rewriter.create<ttkernel::MyXOp>(loc, /*Optional noc=*/Value());
-    } else if (adaptor.getAxis() == ProgramIDDim::Y) {
-      programId =
-          rewriter.create<ttkernel::MyYOp>(loc, /*Optional noc=*/Value());
-    } else {
-      llvm_unreachable("unsupported program id dimension");
-    }
-    Value pidOffset = getIConst(rewriter, loc, 18);
-    programId = rewriter.create<arith::SubIOp>(loc, programId, pidOffset);
-
-    auto castOp = rewriter.create<arith::IndexCastOp>(
-        loc, rewriter.getI32Type(), programId);
-    rewriter.replaceOp(op, castOp.getResult());
+    auto funcOp = op->getParentOfType<func::FuncOp>();
+    auto launchParamIndex =
+        funcOp->getAttrOfType<IntegerAttr>("tt.num_args").getInt();
+    Value paramIndexValue = getIConst(rewriter, loc, launchParamIndex + axis);
+    auto launchParam = rewriter.create<ttkernel::GetArgValOp>(
+        loc, rewriter.getI32Type(), paramIndexValue);
+    rewriter.replaceOp(op, launchParam);
 
     return success();
   }
