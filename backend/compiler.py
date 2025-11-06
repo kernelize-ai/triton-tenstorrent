@@ -46,7 +46,7 @@ class CPUBackend(BaseBackend):
 
     @staticmethod
     def supports_target(target: GPUTarget):
-        return target.backend == "cpu"
+        return target.backend == "tenstorrent"
 
     def __init__(self, target: GPUTarget) -> None:
         super().__init__(target)
@@ -195,7 +195,7 @@ class CPUBackend(BaseBackend):
         # tt-mlir pipeline
         cpu.passes.tenstorrent.add_ttkernel_control_dst_selection(pm)
 
-        pm.run(mod, "make_tenstorrentir")
+        pm.run(mod, "make_ttmlir")
         return mod
 
     @staticmethod
@@ -217,15 +217,30 @@ class CPUBackend(BaseBackend):
 
         pm.run(mod, "make_ttmlir_cpp")
 
+        # find function names
+        src = str(mod)
+        names = re.findall(r"func.func public @(?!(?:barrier)\b)([a-zA-Z_][a-zA-Z0-9_]*)", src)
+        assert len(names) == 3
+        compute_kernel = next((name for name in names if name.endswith("__compute")), None)
+        reader_kernel = next((name for name in names if name.endswith("__reader")), None)
+        writer_kernel = next((name for name in names if name.endswith("__writer")), None)
+        assert compute_kernel is not None and reader_kernel is not None and writer_kernel is not None
+
+        metadata["name"] = compute_kernel[:-9]  # remove __compute suffix
+        metadata["shared"] = 0  # TODO: store cb sizes in module attributes?
+        metadata["profile_scratch_size"] = 0
+        metadata["profile_scratch_align"] = 1
+
         cpp_file = "#ifdef COMPUTE_KERNEL\n"
-        cpp_file += cpu.translate_to_cpp(mod, "add_kernel__compute")
+        cpp_file += cpu.translate_to_cpp(mod, compute_kernel)
         cpp_file += "\n#endif  // COMPUTE_KERNEL\n\n"
         cpp_file += "\n#ifdef READER_KERNEL\n"
-        cpp_file += cpu.translate_to_cpp(mod, "add_kernel__reader")
+        cpp_file += cpu.translate_to_cpp(mod, reader_kernel)
         cpp_file += "\n#endif  // READER_KERNEL\n\n"
         cpp_file += "\n#ifdef WRITER_KERNEL\n"
-        cpp_file += cpu.translate_to_cpp(mod, "add_kernel__writer")
+        cpp_file += cpu.translate_to_cpp(mod, writer_kernel)
         cpp_file += "\n#endif  // WRITER_KERNEL\n"
+
         return cpp_file
 
     @staticmethod

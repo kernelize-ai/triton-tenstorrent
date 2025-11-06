@@ -72,6 +72,9 @@ class CpuUtils(object):
         pass
 
     def load_binary(self, name, kernel, shared_mem, device):
+        print("Loading binary for Tenstorrent not yet supported")
+        exit(1)
+
         with tempfile.NamedTemporaryFile(mode="wb", suffix=".so") as f:
             f.write(kernel)
             f.flush()
