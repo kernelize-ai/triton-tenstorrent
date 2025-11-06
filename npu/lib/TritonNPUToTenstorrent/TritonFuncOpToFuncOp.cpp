@@ -87,6 +87,11 @@ struct ConvertTritonFunc : public OpConversionPattern<triton::FuncOp> {
     rewriter.inlineRegionBefore(funcOp.getBody(), newFunc.getBody(),
                                 newFunc.end());
 
+    // Number of user args
+    // TODO: add launch params (grid size, block size, shared memory size, etc)
+    auto numArgs = funcOp.getNumArguments();
+    newFunc->setAttr("tt.num_args", rewriter.getI32IntegerAttr(numArgs));
+
     rewriter.eraseOp(funcOp);
     return success();
   }
