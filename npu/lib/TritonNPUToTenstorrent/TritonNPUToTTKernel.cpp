@@ -173,6 +173,21 @@ struct ConvertLoadOp : public OpConversionPattern<triton::LoadOp> {
     Value baseAddr = traceToScalar(op.getPtr(), true);
     Value offset = traceToScalar(op.getPtr(), false);
     assert(isScalar(offset) && "expected scalar offset");
+
+    // Convert offset to bytes
+    triton::PointerType ptrType;
+    if (isScalar(op.getPtr())) {
+      ptrType = cast<triton::PointerType>(op.getPtr().getType());
+    } else {
+      auto tensorType = cast<RankedTensorType>(op.getPtr().getType());
+      auto elemType = tensorType.getElementType();
+      ptrType = cast<triton::PointerType>(elemType);
+    }
+    auto elemType = ptrType.getPointeeType();
+    Value elemSizeValue =
+        getI32Const(rewriter, loc, elemType.getIntOrFloatBitWidth() / 8);
+    offset = rewriter.create<arith::MulIOp>(loc, offset, elemSizeValue);
+
     Value tile_id = rewriter.create<arith::DivUIOp>(loc, offset, pageSize);
 
     Value const1 = getI32Const(rewriter, loc, 1);
@@ -226,6 +241,21 @@ struct ConvertStoreOp : public OpConversionPattern<triton::StoreOp> {
     Value baseAddr = traceToScalar(op.getPtr(), true);
     Value offset = traceToScalar(op.getPtr(), false);
     assert(isScalar(offset) && "expected scalar offset");
+
+    // Convert offset to bytes
+    triton::PointerType ptrType;
+    if (isScalar(op.getPtr())) {
+      ptrType = cast<triton::PointerType>(op.getPtr().getType());
+    } else {
+      auto tensorType = cast<RankedTensorType>(op.getPtr().getType());
+      auto elemType = tensorType.getElementType();
+      ptrType = cast<triton::PointerType>(elemType);
+    }
+    auto elemType = ptrType.getPointeeType();
+    Value elemSizeValue =
+        getI32Const(rewriter, loc, elemType.getIntOrFloatBitWidth() / 8);
+    offset = rewriter.create<arith::MulIOp>(loc, offset, elemSizeValue);
+
     Value tile_id = rewriter.create<arith::DivUIOp>(loc, offset, pageSize);
 
     // 0. Create tensor accessor
@@ -417,6 +447,11 @@ struct ConvertAddPtrOp : public OpConversionPattern<AddPtrOp> {
         !isa<IntegerType>(offset.getType())) {
       return failure();
     }
+    auto type = cast<triton::PointerType>(op.getPtr().getType());
+    auto elemType = type.getPointeeType();
+    auto elemSize = elemType.getIntOrFloatBitWidth() / 8;
+    Value elemSizeValue = getI32Const(rewriter, loc, elemSize);
+    offset = rewriter.create<arith::MulIOp>(loc, offset, elemSizeValue);
     auto newAddPtrOp = rewriter.create<arith::AddIOp>(loc, baseAddr, offset);
     rewriter.replaceOp(op, newAddPtrOp.getResult());
 
