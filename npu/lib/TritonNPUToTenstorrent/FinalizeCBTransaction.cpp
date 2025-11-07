@@ -26,23 +26,18 @@ struct TTKernelCBPopInputs : public OpRewritePattern<ttkernel::CBWaitFrontOp> {
 
   LogicalResult matchAndRewrite(ttkernel::CBWaitFrontOp op,
                                 PatternRewriter &rewriter) const final {
-    auto funcOp = op->getParentOfType<func::FuncOp>();
-    assert(funcOp && "expected func::FuncOp as a parent of CBWaitFrontOp");
-    if (std::distance(
-            funcOp.getBody().getOps<ttkernel::CBPopFrontOp>().begin(),
-            funcOp.getBody().getOps<ttkernel::CBPopFrontOp>().end()) ==
-        std::distance(
-            funcOp.getBody().getOps<ttkernel::CBWaitFrontOp>().begin(),
-            funcOp.getBody().getOps<ttkernel::CBWaitFrontOp>().end())) {
+    auto block = op->getBlock();
+    if (std::distance(block->getOps<ttkernel::CBPopFrontOp>().begin(),
+                      block->getOps<ttkernel::CBPopFrontOp>().end()) ==
+        std::distance(block->getOps<ttkernel::CBWaitFrontOp>().begin(),
+                      block->getOps<ttkernel::CBWaitFrontOp>().end())) {
       // is this a good heuristic for pass termination? do we always have a pop
       // front for every wait front?
       return failure();
     }
 
-    auto packTileOpItr =
-        funcOp.getBody().getOps<ttkernel::PackTileOp>().begin();
-    assert(packTileOpItr !=
-               funcOp.getBody().getOps<ttkernel::PackTileOp>().end() &&
+    auto packTileOpItr = block->getOps<ttkernel::PackTileOp>().begin();
+    assert(packTileOpItr != block->getOps<ttkernel::PackTileOp>().end() &&
            "expected at least one PackTileOp in the function body");
 
     rewriter.setInsertionPointAfter(*packTileOpItr);
@@ -58,13 +53,11 @@ struct TTKernelCBPushOutputs : public OpRewritePattern<ttkernel::PackTileOp> {
 
   LogicalResult matchAndRewrite(ttkernel::PackTileOp packTileOp,
                                 PatternRewriter &rewriter) const final {
-    auto funcOp = packTileOp->getParentOfType<func::FuncOp>();
-    assert(funcOp && "expected func::FuncOp as a parent of CBWaitFrontOp");
-    if (std::distance(
-            funcOp.getBody().getOps<ttkernel::CBPushBackOp>().begin(),
-            funcOp.getBody().getOps<ttkernel::CBPushBackOp>().end()) ==
-        std::distance(funcOp.getBody().getOps<ttkernel::PackTileOp>().begin(),
-                      funcOp.getBody().getOps<ttkernel::PackTileOp>().end())) {
+    auto block = packTileOp->getBlock();
+    if (std::distance(block->getOps<ttkernel::CBPushBackOp>().begin(),
+                      block->getOps<ttkernel::CBPushBackOp>().end()) ==
+        std::distance(block->getOps<ttkernel::PackTileOp>().begin(),
+                      block->getOps<ttkernel::PackTileOp>().end())) {
       // is this a good heuristic for pass termination?
       return failure();
     }
