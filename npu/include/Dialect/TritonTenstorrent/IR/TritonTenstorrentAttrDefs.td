@@ -11,7 +11,7 @@ def TileEncodingAttr : AttrDef<TritonTenstorrent_Dialect, "TileEncoding", [Distr
   let mnemonic = "tile_encoding";
 
   let description = [{
-    An encoding to represent the register index of tiles.
+    A wrapper distributed encoding to hold the desired tile register index for tiled tensors in L1/SRAM.
   }];
 
   let parameters = (

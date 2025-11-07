@@ -22,7 +22,11 @@ def TTTS_BinaryComputeOp : TTTS_Op<"binary_compute", [Pure, NoMemoryEffect, Same
   let results = (outs Variadic<AnyType>:$result);
 
   let description = [{
-    Coming soon...
+    Wrapper operation for binary compute ops in Tenstorrent compute kernels. `BinaryComputeOp` allows for easy
+    identification of candidate compute ops prior to splitting the Triton kernel into data movement/compute functions
+    and lowering to TTKernel. The existing operation on tensors will be replaced with this generic compute op prior
+    to lowering to TTKernel. In TTKernel, BinaryComputeOp is lowered to the appropriate Tenstorrent tiled compute
+    instruction using the `opcode` attribute.
   }];
 
   let assemblyFormat = [{

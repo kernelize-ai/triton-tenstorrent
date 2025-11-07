@@ -9,7 +9,7 @@ def TritonTenstorrent_Dialect : Dialect {
   let cppNamespace = "::mlir::triton::npu::tt";
 
   let description = [{
-    Triton Tenstorrent Dialect.
+    Triton Tenstorrent Dialect. Helpers ops for progressive lowering from TritonGPU IR to Tenstorrent TTKernel IR.
   }];
 
   let dependentDialects = [
