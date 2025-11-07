@@ -7,7 +7,7 @@ def TritonTenstorrentPropagateRegisterIndices : Pass<"tritontenstorrent-propagat
     let summary = "Propagate register indices from compute ops to local loads";
 
     let description = [{
-        coming soon
+        Local loads from SRAM to registers need to know which tile register index to load into. This pass propagates the register index information from the compute ops (which are users of the tile registers and dicatate placement based on use pattern) to local loads, which generically copy data from SRAM into registers. The register index is stored in the TileEncodingAttr attached to the tensor type.
     }];
 
     let dependentDialects = ["mlir::triton::npu::tt::TritonTenstorrentDialect",
@@ -19,7 +19,7 @@ def TritonTenstorrentConvertComputeOps : Pass<"tritontenstorrent-convert-compute
     let summary = "Convert Triton compute ops to Tenstorrent compute ops";
 
     let description = [{
-        coming soon
+        Converts compute ops on Tensors to Triton Tenstorrent compute ops (e.g. arith.addf to BinaryComputeOp with opcode "addf"). This allows for easy identification of candidate ops for compute kernel lowering in later passes.
     }];
 
     let dependentDialects = ["mlir::triton::npu::tt::TritonTenstorrentDialect",
@@ -32,7 +32,7 @@ def TritonTenstorrentPtrRotate : Pass<"tritontenstorrent-ptr-rotate", "mlir::Mod
     let summary = "Move all pointer offsetting to base pointer instead of array of pointers";
 
     let description = [{
-        coming soon
+        is this still used?
     }];
 
     let dependentDialects = ["mlir::triton::npu::tt::TritonTenstorrentDialect",
