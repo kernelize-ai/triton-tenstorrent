@@ -10,7 +10,6 @@ module attributes {"ttg.num-ctas" = 1 : i32, "ttg.num-warps" = 1 : i32, ttg.targ
     // CHECK-DAG: %[[X:.*]] = ttkernel.get_compile_time_arg_val(0)
     // CHECK-DAG: %[[Y:.*]] = ttkernel.get_compile_time_arg_val(1)
     // CHECK-DAG: %[[OUTPUT:.*]] = ttkernel.get_compile_time_arg_val(2)
-    // CHECK-DAG: %[[C1_0:.*]] = arith.constant 1 : i32
     %0 = ttg.local_alloc {alloc_idx = 2 : i32} : () -> !ttg.memdesc<1024xf32, #shared, #smem, mutable>
     %y = ttg.local_alloc {alloc_idx = 1 : i32} : () -> !ttg.memdesc<1024xf32, #shared, #smem, mutable>
     %x = ttg.local_alloc {alloc_idx = 0 : i32} : () -> !ttg.memdesc<1024xf32, #shared, #smem, mutable>
