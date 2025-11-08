@@ -143,6 +143,43 @@ static int64_t findAllocIdx(Operation *op) {
   return -1;
 }
 
+static Value computeNocAddr(ConversionPatternRewriter &rewriter, Location loc,
+                            Value ptr, Value pageSize, Value cb) {
+  // Trace to base address and offset
+  Value baseAddr = traceToScalar(ptr, true);
+  Value offset = traceToScalar(ptr, false);
+  assert(isScalar(offset) && "expected scalar offset");
+
+  // Convert offset to bytes
+  triton::PointerType ptrType;
+  if (isScalar(ptr)) {
+    ptrType = cast<triton::PointerType>(ptr.getType());
+  } else {
+    auto tensorType = cast<RankedTensorType>(ptr.getType());
+    auto elemType = tensorType.getElementType();
+    ptrType = cast<triton::PointerType>(elemType);
+  }
+  auto elemType = ptrType.getPointeeType();
+  Value elemSizeValue =
+      getI32Const(rewriter, loc, elemType.getIntOrFloatBitWidth() / 8);
+  offset = rewriter.create<arith::MulIOp>(loc, offset, elemSizeValue);
+
+  Value tile_id = rewriter.create<arith::DivUIOp>(loc, offset, pageSize);
+
+  Value const1 = getI32Const(rewriter, loc, 1);
+  Value const0 = getI32Const(rewriter, loc, 0);
+
+  // Create interleaved address generator and get noc address
+  auto dataFormat = rewriter.create<ttkernel::GetDataFormatOp>(loc, cb);
+  Value c1bit = getI1Const(rewriter, loc, 1);
+  Value addrGen = rewriter.create<ttkernel::GetInterleavedAddrGenFastOp>(
+      loc, c1bit, baseAddr, pageSize, dataFormat);
+  Value nocAddr = rewriter.create<ttkernel::InterleavedAddrGenFastGetNocAddrOp>(
+      loc, addrGen, tile_id, const0, Value());
+
+  return nocAddr;
+}
+
 struct ConvertLoadOp : public OpConversionPattern<triton::LoadOp> {
   using OpConversionPattern<triton::LoadOp>::OpConversionPattern;
 
@@ -166,45 +203,15 @@ struct ConvertLoadOp : public OpConversionPattern<triton::LoadOp> {
                                                              allocIdx);
 
     // Compute page size in bytes
-    auto dataFormat = rewriter.create<ttkernel::GetDataFormatOp>(loc, cb);
     auto pageSize = rewriter.create<ttkernel::GetTileSizeOp>(loc, cb);
 
-    // ASSUME: tilize has padded to full tiles. Drop masking.
-    Value baseAddr = traceToScalar(op.getPtr(), true);
-    Value offset = traceToScalar(op.getPtr(), false);
-    assert(isScalar(offset) && "expected scalar offset");
-
-    // Convert offset to bytes
-    triton::PointerType ptrType;
-    if (isScalar(op.getPtr())) {
-      ptrType = cast<triton::PointerType>(op.getPtr().getType());
-    } else {
-      auto tensorType = cast<RankedTensorType>(op.getPtr().getType());
-      auto elemType = tensorType.getElementType();
-      ptrType = cast<triton::PointerType>(elemType);
-    }
-    auto elemType = ptrType.getPointeeType();
-    Value elemSizeValue =
-        getI32Const(rewriter, loc, elemType.getIntOrFloatBitWidth() / 8);
-    offset = rewriter.create<arith::MulIOp>(loc, offset, elemSizeValue);
-
-    Value tile_id = rewriter.create<arith::DivUIOp>(loc, offset, pageSize);
-
-    Value const1 = getI32Const(rewriter, loc, 1);
-    Value const0 = getI32Const(rewriter, loc, 0);
-
-    // 0. Create tensor accessor
-    // TODO: move to top scope
-    Value c1bit = getI1Const(rewriter, loc, 1);
-    Value addrGen = rewriter.create<ttkernel::GetInterleavedAddrGenFastOp>(
-        loc, c1bit, baseAddr, pageSize, dataFormat);
-    Value nocAddr =
-        rewriter.create<ttkernel::InterleavedAddrGenFastGetNocAddrOp>(
-            loc, addrGen, tile_id, const0, Value());
+    // Compute the noc address
+    Value nocAddr = computeNocAddr(rewriter, loc, op.getPtr(), pageSize, cb);
 
     // 1. reserve back on the cb to know data is ready to store to SRAM
     //       ttkernel.cb_reserve_back(%0, %c1_i32)
     // add later?
+    Value const1 = getI32Const(rewriter, loc, 1);
     rewriter.create<ttkernel::CBReserveBackOp>(loc, cb, const1);
 
     // 3. get L1 address
@@ -232,48 +239,20 @@ struct ConvertStoreOp : public OpConversionPattern<triton::StoreOp> {
                   ConversionPatternRewriter &rewriter) const override {
     Location loc = op.getLoc();
 
-    auto src = adaptor.getValue();
+    // Should always be a cb?
+    auto cb = adaptor.getValue();
+    assert(isa<ttkernel::CBType>(cb.getType()) && "expected cb type");
 
-    // Compute page size in bytes
-    auto dataFormat = rewriter.create<ttkernel::GetDataFormatOp>(loc, src);
-    auto pageSize = rewriter.create<ttkernel::GetTileSizeOp>(loc, src);
+    // Get tile size in bytes
+    auto pageSize = rewriter.create<ttkernel::GetTileSizeOp>(loc, cb);
 
-    Value baseAddr = traceToScalar(op.getPtr(), true);
-    Value offset = traceToScalar(op.getPtr(), false);
-    assert(isScalar(offset) && "expected scalar offset");
+    Value nocAddr = computeNocAddr(rewriter, loc, op.getPtr(), pageSize, cb);
 
-    // Convert offset to bytes
-    triton::PointerType ptrType;
-    if (isScalar(op.getPtr())) {
-      ptrType = cast<triton::PointerType>(op.getPtr().getType());
-    } else {
-      auto tensorType = cast<RankedTensorType>(op.getPtr().getType());
-      auto elemType = tensorType.getElementType();
-      ptrType = cast<triton::PointerType>(elemType);
-    }
-    auto elemType = ptrType.getPointeeType();
-    Value elemSizeValue =
-        getI32Const(rewriter, loc, elemType.getIntOrFloatBitWidth() / 8);
-    offset = rewriter.create<arith::MulIOp>(loc, offset, elemSizeValue);
-
-    Value tile_id = rewriter.create<arith::DivUIOp>(loc, offset, pageSize);
-
-    // 0. Create tensor accessor
-    // TODO: move to top scope
-    Value c1bit = getI1Const(rewriter, loc, 1);
-    Value const0 = getI32Const(rewriter, loc, 0);
-    Value const1 = getI32Const(rewriter, loc, 1);
-
-    Value addrGen = rewriter.create<ttkernel::GetInterleavedAddrGenFastOp>(
-        loc, c1bit, baseAddr, pageSize, dataFormat);
-    Value nocAddr =
-        rewriter.create<ttkernel::InterleavedAddrGenFastGetNocAddrOp>(
-            loc, addrGen, tile_id, const0, Value());
-
-    Value l1Addr = rewriter.create<ttkernel::GetWritePtrOp>(loc, src);
+    Value l1Addr = rewriter.create<ttkernel::GetReadPtrOp>(loc, cb);
     rewriter.create<ttkernel::NocAsyncWriteOp>(loc, l1Addr, nocAddr, pageSize);
     rewriter.create<ttkernel::NocAsyncWriteBarrierOp>(loc);
-    rewriter.create<ttkernel::CBPopFrontOp>(loc, src, const1);
+    Value numPages = getI32Const(rewriter, loc, 1);
+    rewriter.create<ttkernel::CBPopFrontOp>(loc, cb, numPages);
     rewriter.eraseOp(op);
     return success();
   }
@@ -291,12 +270,12 @@ struct ConvertLocalStoreOp : public OpConversionPattern<gpu::LocalStoreOp> {
     auto srcOp = op.getSrc().getDefiningOp();
 
     if (!isa<triton::LoadOp>(srcOp)) {
-      rewriter.setInsertionPointAfter(dst.getDefiningOp());
+      // COMPUTE KERNEL
       // reserve back the cb for the store
       Value numPages = getI32Const(rewriter, loc, 1);
       rewriter.create<ttkernel::CBReserveBackOp>(loc, dst, numPages);
 
-      rewriter.setInsertionPoint(op);
+      // Pack the tile into the cb
       Value destRegisterIndex = getIConst(rewriter, loc, 2);
       Value outIndex = getIConst(rewriter, loc, 0);
       rewriter.create<ttkernel::PackTileOp>(loc, destRegisterIndex, dst,
@@ -328,54 +307,16 @@ struct ConvertLocalLoadOp : public OpConversionPattern<gpu::LocalLoadOp> {
     auto src = adaptor.getSrc();
     auto dst = op.getResult();
     // 1. wait_front on the cb to know data is ready to load from SRAM
-    Value c0 = getIConst(rewriter, loc, 0);
     Value c1 = getI32Const(rewriter, loc, 1);
-    auto waitFrontOp =
-        rewriter.create<ttkernel::CBWaitFrontOp>(loc, adaptor.getSrc(), c1);
+    auto waitFrontOp = rewriter.create<ttkernel::CBWaitFrontOp>(loc, src, c1);
 
-    LDBG("Converted load src type = " << adaptor.getSrc().getType() << "\n");
-    assert(isa<ttkernel::CBType>(adaptor.getSrc().getType()) &&
+    LDBG("Converted load src type = " << src.getType() << "\n");
+    assert(isa<ttkernel::CBType>(src.getType()) &&
            "expected memref type for type converted load src");
 
-    auto user = *dst.getUsers().begin();
-
-    if (dst.hasOneUse() && isa<triton::StoreOp>(user)) {
-      // FOR PATTERN: ttg.local_load -> tt.store
-      auto storeOp = cast<triton::StoreOp>(user);
-
-      // Compute page size in bytes
-      auto dataFormat = rewriter.create<ttkernel::GetDataFormatOp>(loc, src);
-      auto pageSize = rewriter.create<ttkernel::GetTileSizeOp>(loc, src);
-
-      Value baseAddr = traceToScalar(storeOp.getPtr(), true);
-      Value offset = traceToScalar(storeOp.getPtr(), false);
-      Value tile_id = rewriter.create<arith::DivUIOp>(loc, offset, pageSize);
-
-      // 0. Create tensor accessor
-      // TODO: move to top scope
-      Value c1bit = rewriter.create<arith::ConstantOp>(
-          loc, rewriter.getI1Type(),
-          rewriter.getIntegerAttr(rewriter.getI1Type(), 1));
-      Value const0 = rewriter.create<arith::ConstantOp>(
-          loc, rewriter.getI32Type(),
-          rewriter.getIntegerAttr(rewriter.getI32Type(), 0));
-      Value addrGen = rewriter.create<ttkernel::GetInterleavedAddrGenFastOp>(
-          loc, c1bit, baseAddr, pageSize, dataFormat);
-      Value nocAddr =
-          rewriter.create<ttkernel::InterleavedAddrGenFastGetNocAddrOp>(
-              loc, addrGen, tile_id, const0, Value());
-
-      Value l1Addr =
-          rewriter.create<ttkernel::GetWritePtrOp>(loc, adaptor.getSrc());
-      rewriter.create<ttkernel::NocAsyncWriteOp>(loc, l1Addr, nocAddr,
-                                                 pageSize);
-      rewriter.create<ttkernel::NocAsyncWriteBarrierOp>(loc);
-      rewriter.create<ttkernel::CBPopFrontOp>(loc, adaptor.getSrc(), c1);
-      rewriter.eraseOp(user);
-    }
     // TODO: this should come from the cb root eventually,
     // but replaceOp is probably not appropriate here
-    rewriter.replaceOp(op, adaptor.getSrc());
+    rewriter.replaceOp(op, src);
     return success();
   }
 };
