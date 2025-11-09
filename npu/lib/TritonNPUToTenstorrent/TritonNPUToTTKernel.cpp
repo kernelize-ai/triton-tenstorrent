@@ -189,18 +189,18 @@ struct ConvertLoadOp : public OpConversionPattern<triton::LoadOp> {
     Location loc = op.getLoc();
     auto typeConverter = getTypeConverter();
 
-    int64_t allocIdx = -1;
-    for (auto user : op.getResult().getUsers()) {
-      allocIdx = std::max(allocIdx, findAllocIdx(user));
+    if (!op->hasOneUse()) {
+      LDBG("Load op has multiple uses, cannot convert\n");
+      return failure();
     }
-    if (allocIdx == -1) {
-      return rewriter.notifyMatchFailure(op, "dependent load not supported");
+    Operation *user = *op->getUsers().begin();
+    if (!isa<gpu::LocalStoreOp>(user)) {
+      LDBG("Load op user is not a local store op: " << *user << "\n");
+      return failure();
     }
 
-    auto cbMemRefType = cast<ttkernel::CBType>(
-        typeConverter->convertType(op.getResult().getType()));
-    Value cb = rewriter.create<ttkernel::GetCompileArgValOp>(loc, cbMemRefType,
-                                                             allocIdx);
+    Value cb =
+        rewriter.getRemappedValue(cast<gpu::LocalStoreOp>(user).getDst());
 
     // Compute page size in bytes
     auto pageSize = rewriter.create<ttkernel::GetTileSizeOp>(loc, cb);
