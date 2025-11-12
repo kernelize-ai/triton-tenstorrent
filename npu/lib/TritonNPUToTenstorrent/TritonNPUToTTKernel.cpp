@@ -224,14 +224,10 @@ struct ConvertStoreOp : public OpConversionPattern<triton::StoreOp> {
 
     Value nocAddr = computeNocAddr(rewriter, loc, op.getPtr(), pageSize, cb);
 
-    Value numPages = getI32Const(rewriter, loc, 1);
-    // wait front on the cb to know data is ready
-    auto waitFrontOp =
-        rewriter.create<ttkernel::CBWaitFrontOp>(loc, cb, numPages);
-
     Value l1Addr = rewriter.create<ttkernel::GetReadPtrOp>(loc, cb);
     rewriter.create<ttkernel::NocAsyncWriteOp>(loc, l1Addr, nocAddr, pageSize);
     rewriter.create<ttkernel::NocAsyncWriteBarrierOp>(loc);
+    Value numPages = getI32Const(rewriter, loc, 1);
     rewriter.create<ttkernel::CBPopFrontOp>(loc, cb, numPages);
     rewriter.eraseOp(op);
     return success();
@@ -285,15 +281,26 @@ struct ConvertLocalLoadOp : public OpConversionPattern<gpu::LocalLoadOp> {
     Location loc = op.getLoc();
 
     auto src = adaptor.getSrc();
-    auto dst = op.getResult();
 
     LDBG("Converted load src type = " << src.getType() << "\n");
     assert(isa<ttkernel::CBType>(src.getType()) &&
            "expected memref type for type converted load src");
 
+    assert(op->hasOneUse() &&
+           "expected local load with store user to have one use");
+    if (isa<StoreOp>(*op->getUsers().begin())) {
+      // wait front on the cb to know data is ready
+      Value numPages = getI32Const(rewriter, loc, 1);
+      auto waitFrontOp =
+          rewriter.create<ttkernel::CBWaitFrontOp>(loc, src, numPages);
+      rewriter.replaceOp(op, src);
+      return success();
+    }
+
     rewriter.create<ttkernel::CopyTileInitOp>(loc, src);
     Value c0 = getIConst(rewriter, loc, 0);
 
+    auto dst = op.getResult();
     auto dstType = cast<RankedTensorType>(dst.getType());
     npu::tt::TileEncodingAttr loadEncoding =
         cast<npu::tt::TileEncodingAttr>(dstType.getEncoding());
