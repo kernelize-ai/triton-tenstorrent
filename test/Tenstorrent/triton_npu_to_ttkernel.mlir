@@ -138,18 +138,17 @@ module attributes {"ttg.num-ctas" = 1 : i32, "ttg.num-warps" = 1 : i32, ttg.targ
     %mask_2 = arith.cmpi slt, %offsets_1, %mask : tensor<1024xi32, #triton_tenstorrent.tile_encoding<{index = 2, parent = #blocked}>>
     %1 = tt.splat %output_ptr : !tt.ptr<f32> -> tensor<1024x!tt.ptr<f32>, #triton_tenstorrent.tile_encoding<{index = 2, parent = #blocked}>>
     %2 = tt.addptr %1, %offsets_1 : tensor<1024x!tt.ptr<f32>, #triton_tenstorrent.tile_encoding<{index = 2, parent = #blocked}>>, tensor<1024xi32, #triton_tenstorrent.tile_encoding<{index = 2, parent = #blocked}>>
-    // CHECK: %[[c1_0:.*]] = arith.constant 1 : i32
-    // CHECK: ttkernel.cb_wait_front(%[[OUTPUT]], %[[c1_0]])
     // CHECK: %[[OUTPUT_TILE_SIZE:.*]] = ttkernel.get_tile_size(%[[OUTPUT]])
     // CHECK: %[[OUTPUT_DATA_FORMAT:.*]] = ttkernel.get_dataformat(%[[OUTPUT]])
     // CHECK: %[[OUTPUT_ADDR:.*]] = ttkernel.get_interleaved_addr_gen_fast({{.*}}, %[[OUTPUT_PTR]], %[[OUTPUT_TILE_SIZE]], %[[OUTPUT_DATA_FORMAT]])
     // CHECK: %[[OUTPUT_NOC_ADDR:.*]] = ttkernel.interleaved_addr_gen_fast.get_noc_addr(%[[OUTPUT_ADDR]], {{.*}})
+    // CHECK: %[[c1_1:.*]] = arith.constant 1 : i32
+    // CHECK: ttkernel.cb_wait_front(%[[OUTPUT]], %[[c1_1]])
     // CHECK: %[[OUTPUT_READ_PTR:.*]] = ttkernel.get_read_ptr(%[[OUTPUT]])
     // CHECK: ttkernel.noc_async_write(%[[OUTPUT_READ_PTR]], %[[OUTPUT_NOC_ADDR]], %[[OUTPUT_TILE_SIZE]])
     // CHECK: ttkernel.noc_async_write_barrier()
     %3 = ttg.local_load %0 : !ttg.memdesc<1024xf32, #shared, #smem, mutable> -> tensor<1024xf32, #triton_tenstorrent.tile_encoding<{index = 2, parent = #blocked}>>
     tt.store %2, %3, %mask_2 : tensor<1024x!tt.ptr<f32>, #triton_tenstorrent.tile_encoding<{index = 2, parent = #blocked}>>
-    // CHECK: %[[c1_1:.*]] = arith.constant 1 : i32
     // CHECK: ttkernel.cb_pop_front(%[[OUTPUT]], %[[c1_1]])
     // CHECK: return
     tt.return
