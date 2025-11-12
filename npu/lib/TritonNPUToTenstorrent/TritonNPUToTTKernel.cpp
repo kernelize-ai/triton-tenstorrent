@@ -3,6 +3,7 @@
 #include "mlir/Analysis/SliceAnalysis.h"
 #include "mlir/Transforms/DialectConversion.h"
 #include "llvm/Support/Debug.h"
+#include "llvm/ADT/MapVector.h"
 
 #include "triton/Dialect/Triton/IR/Dialect.h"
 #include "triton/Dialect/Triton/IR/Utility.h"
@@ -33,21 +34,21 @@ namespace npu {
 
 namespace {
 
-static Value getI32Const(ConversionPatternRewriter &rewriter, Location loc,
+static Value getI32Const(OpBuilder &rewriter, Location loc,
                          int64_t value) {
   return rewriter.create<arith::ConstantOp>(
       loc, rewriter.getI32Type(),
       rewriter.getIntegerAttr(rewriter.getI32Type(), value));
 }
 
-static Value getI1Const(ConversionPatternRewriter &rewriter, Location loc,
+static Value getI1Const(OpBuilder &rewriter, Location loc,
                         bool value) {
   return rewriter.create<arith::ConstantOp>(
       loc, rewriter.getI1Type(),
       rewriter.getIntegerAttr(rewriter.getI1Type(), value));
 }
 
-static Value getIConst(ConversionPatternRewriter &rewriter, Location loc,
+static Value getIConst(OpBuilder &rewriter, Location loc,
                        int64_t value) {
   return rewriter.create<arith::ConstantOp>(
       loc, rewriter.getIndexType(),
@@ -65,7 +66,7 @@ struct ConvertBinaryComputeOp
 
     if (op.getOpcode().str() != "arith.addf")
       return failure();
-
+#if 0
     auto lhs = adaptor.getLhs();
     auto rhs = adaptor.getRhs();
 
@@ -87,6 +88,7 @@ struct ConvertBinaryComputeOp
 
     copyAndInitializeRegister(op.getLhs(), lhs);
     copyAndInitializeRegister(op.getRhs(), rhs);
+#endif
 
     rewriter.create<ttkernel::AddBinaryTilesInitOp>(loc);
     Value lhsIndex = getIConst(rewriter, loc, 0);
@@ -306,16 +308,27 @@ struct ConvertLocalLoadOp : public OpConversionPattern<gpu::LocalLoadOp> {
 
     auto src = adaptor.getSrc();
     auto dst = op.getResult();
+#if 0
+    // TODO: maybe we should add these later? for each copy_tile_init add a
+    // wait_front before it?
     // 1. wait_front on the cb to know data is ready to load from SRAM
     Value c1 = getI32Const(rewriter, loc, 1);
     auto waitFrontOp = rewriter.create<ttkernel::CBWaitFrontOp>(loc, src, c1);
-
+#endif 
     LDBG("Converted load src type = " << src.getType() << "\n");
     assert(isa<ttkernel::CBType>(src.getType()) &&
            "expected memref type for type converted load src");
+#if 1
+    // 2. copy from the cb into compute registers
+    rewriter.create<ttkernel::CopyTileInitOp>(loc, src);
+    Value c0 = getIConst(rewriter, loc, 0);
 
-    // TODO: this should come from the cb root eventually,
-    // but replaceOp is probably not appropriate here
+    auto dstType = cast<RankedTensorType>(dst.getType());
+    npu::tt::TileEncodingAttr loadEncoding =
+        cast<npu::tt::TileEncodingAttr>(dstType.getEncoding());
+    Value destRegisterIndex = getIConst(rewriter, loc, loadEncoding.getIndex());
+    rewriter.create<ttkernel::CopyTileOp>(loc, src, c0, destRegisterIndex);
+#endif
     rewriter.replaceOp(op, src);
     return success();
   }
@@ -452,6 +465,17 @@ static bool isCBOp(Operation *op) {
   return false;
 }
 
+static bool requiresSFPUInit(func::FuncOp funcOp) {
+  bool requiresInit = false;
+  funcOp.walk([&](Operation* op) {
+    if (op->hasTrait<ttkernel::TTKernelBinaryOpTrait>()) {
+      requiresInit = true;
+      return;
+    }
+  });
+  return requiresInit;
+}
+
 class InitializationHelper {
 public:
   struct ComputeOpInfo {
@@ -462,19 +486,56 @@ public:
     Operation *op;
   };
 
-  InitializationHelper(func::FuncOp F) : funcOp(F) {}
+  InitializationHelper(func::FuncOp F) : funcOp(F), addSFPUInit(requiresSFPUInit(F)) {
+    // build maps of copy/pack ops to respective indices 
+    funcOp.walk([&](ttkernel::CopyTileOp copyTileOp) {
+      Value cbIndex = copyTileOp.getTileIndexCb();
+      Value dstIndex = copyTileOp.getTileIndexDst();
+      llvm::errs() << "copy tile op " << copyTileOp << "\n\tcopying from " << cbIndex << " to " << dstIndex << "\n";
+      // copyOpsToTileIndices[copyTileOp] = std::make_pair(cbIndex, dstIndex);
+      copyTileOps[copyTileOp]++;
+    });
 
+    funcOp.walk([&](ttkernel::CopyTileInitOp copyTileInitOp) {
+      copyTileInitOps.push_back(copyTileInitOp);
+    });
+
+    funcOp.walk([&](ttkernel::PackTileOp packTileOp) {
+      Value cbIndex = packTileOp.getDstIndex();
+      llvm::errs() << "pack tile op " << packTileOp << "\n\tpacking to " << cbIndex << "\n";
+      packOpsToTileIndices[packTileOp] = cbIndex;
+    });
+  }
+
+  // tile regs aquire ops must be inserted before any copy tiles ops 
   void insertTileRegsAcquireOps() {
     llvm::SetVector<Block *> visited;
-    // TODO: this now visits copy tiles since the compute op operates directly
-    // on the DST register. cleanup the naming (and possibly the algorithm)
-    // here. We probably want to record some info about the compute op so we put
-    // the right init in, but we might be able to do that elsewhere.
-    funcOp.walk([&](ttkernel::CopyTileOp copyTilesOp) {
-      Block *b = copyTilesOp->getBlock();
-      if (visited.insert(b))
-        insertTileRegsAcquireInBlock(b, ComputeOpInfo(copyTilesOp));
+    funcOp.walk([&](ttkernel::CopyTileOp copyTileOp) {
+      Block *b = copyTileOp->getBlock();
+      if (visited.insert(b)) {
+        insertTileRegsAcquireInBlock(b, ComputeOpInfo(copyTileOp));
+      }
     });
+  }
+
+  // coalesce copy tile waits before the firsts copy tile ops since tile registers may not be acquired yet
+  void insertCopyTileWaits() {
+    OpBuilder builder(copyTileInitOps.front());
+#if 1
+    for (auto copyTileOpItr : copyTileOps) {
+      ttkernel::CopyTileOp copyTileOp = copyTileOpItr.first;
+      Value numTiles = getI32Const(builder, copyTileOp->getLoc(), copyTileOpItr.second);
+      Value cb = copyTileOp.getCb0();
+      builder.create<ttkernel::CBWaitFrontOp>(
+          copyTileOp->getLoc(), cb, numTiles);
+    }
+#else
+    for (auto [copyTileOp, tileIndices] : copyOpsToTileIndices) {
+      Value dstRegisterIndex = tileIndices.second;
+       builder.create<ttkernel::CBWaitFrontOp>(
+          copyTileOp->getLoc(), copyTileOp->getCb0(), dstRegisterIndex); 
+    }
+#endif
   }
 
   void collectInputs() {
@@ -521,6 +582,8 @@ public:
   }
 
   void insertSFPUInitOps() {
+    if (!addSFPUInit) return;
+
     for (auto [acquireOp, computeOpInfo] : acquireRegistersToComputeOps) {
       OpBuilder builder(acquireOp);
       builder.setInsertionPoint(acquireOp);
@@ -533,7 +596,6 @@ public:
 private:
   void insertTileRegsAcquireInBlock(Block *block, ComputeOpInfo computeOpInfo) {
     for (Operation &op : *block) {
-      // acquire tile registers before the first copy tile
       if (isa<ttkernel::CopyTileInitOp>(op)) {
         OpBuilder builder(&op);
         builder.setInsertionPoint(&op);
@@ -545,8 +607,18 @@ private:
     }
   }
 
+  // map copy operations to (cb, dst register) tile indices
+  // llvm::MapVector<ttkernel::CopyTileOp, std::pair<Value, Value>> copyOpsToTileIndices;
+  SmallVector<ttkernel::CopyTileInitOp, 4> copyTileInitOps;
+  llvm::MapVector<ttkernel::CopyTileOp, unsigned> copyTileOps;
+  
+
+  // map pack operations to cb tile indices 
+  DenseMap<Operation*, Value> packOpsToTileIndices;
+  
   DenseMap<Operation *, ComputeOpInfo> acquireRegistersToComputeOps;
   func::FuncOp funcOp;
+  const bool addSFPUInit;
 };
 
 } // namespace
@@ -667,6 +739,7 @@ struct ConvertTritonNPUToTTKernelPass
         return;
 
       InitializationHelper initHelper(funcOp);
+      initHelper.insertCopyTileWaits();
       initHelper.insertTileRegsAcquireOps();
       initHelper.collectInputs();
       initHelper.collectOutputs();
