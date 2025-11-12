@@ -492,7 +492,6 @@ public:
       Value cbIndex = copyTileOp.getTileIndexCb();
       Value dstIndex = copyTileOp.getTileIndexDst();
       llvm::errs() << "copy tile op " << copyTileOp << "\n\tcopying from " << cbIndex << " to " << dstIndex << "\n";
-      // copyOpsToTileIndices[copyTileOp] = std::make_pair(cbIndex, dstIndex);
       copyTileOps[copyTileOp]++;
     });
 
@@ -503,7 +502,7 @@ public:
     funcOp.walk([&](ttkernel::PackTileOp packTileOp) {
       Value cbIndex = packTileOp.getDstIndex();
       llvm::errs() << "pack tile op " << packTileOp << "\n\tpacking to " << cbIndex << "\n";
-      packOpsToTileIndices[packTileOp] = cbIndex;
+      packTileOps[packTileOp]++;
     });
   }
 
@@ -584,6 +583,18 @@ public:
   void insertSFPUInitOps() {
     if (!addSFPUInit) return;
 
+    auto tileRegsAcquireOps = funcOp.getOps<ttkernel::TileRegsAcquireOp>();
+    assert(!tileRegsAcquireOps.empty() && "expecting tile regs acquire op");
+    Operation *acquireOp = *tileRegsAcquireOps.begin();
+
+    OpBuilder builder(acquireOp);
+    Value inCb = copyTileOps.begin()->first.getCb0();
+    Value outCb = packTileOps.begin()->first.getOutCb();
+
+    builder.create<ttkernel::InitSFPUOp>(
+          acquireOp->getLoc(), inCb, outCb);
+
+#if 0
     for (auto [acquireOp, computeOpInfo] : acquireRegistersToComputeOps) {
       OpBuilder builder(acquireOp);
       builder.setInsertionPoint(acquireOp);
@@ -591,6 +602,7 @@ public:
       builder.create<ttkernel::InitSFPUOp>(
           acquireOp->getLoc(), computeOpInfo.input, computeOpInfo.output);
     }
+#endif 
   }
 
 private:
@@ -614,7 +626,7 @@ private:
   
 
   // map pack operations to cb tile indices 
-  DenseMap<Operation*, Value> packOpsToTileIndices;
+  llvm::MapVector<ttkernel::PackTileOp, unsigned> packTileOps;
   
   DenseMap<Operation *, ComputeOpInfo> acquireRegistersToComputeOps;
   func::FuncOp funcOp;
