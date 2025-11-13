@@ -14,18 +14,18 @@ namespace mlir {
 namespace triton {
 namespace npu {
 
-#define GEN_PASS_DEF_TRITONTENSTORRENTPROPAGATEREGISTERINDICES
+#define GEN_PASS_DEF_TRITONTENSTORRENTPROPAGATETILEENCODING
 #include "npu/include/Dialect/TritonTenstorrent/Transforms/Passes.h.inc"
 
-#define DEBUG_TYPE "tritontenstorrent-propagate-register-indices"
+#define DEBUG_TYPE "tritontenstorrent-propagate-tile-encoding"
 #define DBGS() (llvm::dbgs() << "[" DEBUG_TYPE "]: ")
 #define LDBG(X) LLVM_DEBUG(DBGS() << X << "\n")
 
 namespace {
 
-class RegisterIndexPropagation {
+class TileEncodingPropagation {
 public:
-  RegisterIndexPropagation(FuncOp funcOp) : funcOp(funcOp) {}
+  TileEncodingPropagation(FuncOp funcOp) : funcOp(funcOp) {}
 
   // Find the compute ops and associate their register indices to operand values
   void initComputeRegisterIndices();
@@ -43,7 +43,7 @@ private:
   FuncOp funcOp;
 };
 
-void RegisterIndexPropagation::initComputeRegisterIndices() {
+void TileEncodingPropagation::initComputeRegisterIndices() {
   auto storeRegisterIndex = [&](Operation *op, unsigned index) {
     LDBG("Mapping " << op << " to register index " << index);
     layouts.insert({op, index});
@@ -63,7 +63,7 @@ void RegisterIndexPropagation::initComputeRegisterIndices() {
   });
 }
 
-void RegisterIndexPropagation::propagateToLocalLoads() {
+void TileEncodingPropagation::propagateToLocalLoads() {
   for (auto &[op, index] : layouts) {
     auto propagateToLoads = [](LoadOp loadOp, unsigned index) {
       auto loadTensorType = dyn_cast<RankedTensorType>(loadOp.getType());
@@ -80,8 +80,7 @@ void RegisterIndexPropagation::propagateToLocalLoads() {
                                        << loadOp);
       auto newLoadType = loadTensorType.cloneWithEncoding(newLoadEncoding);
 
-      OpBuilder rewriter(loadOp.getContext());
-      rewriter.setInsertionPoint(loadOp);
+      OpBuilder rewriter(loadOp);
 
       IRMapping mapping;
       for (auto operand : loadOp->getOperands()) {
@@ -122,8 +121,7 @@ void RegisterIndexPropagation::propagateToLocalLoads() {
                                        << storeOp);
       auto newStoreType = storeTensorType.cloneWithEncoding(newStoreEncoding);
 
-      OpBuilder rewriter(storeOp.getContext());
-      rewriter.setInsertionPoint(storeOp);
+      OpBuilder rewriter(storeOp);
 
       IRMapping mapping;
       for (auto operand : storeOp->getOperands()) {
@@ -165,7 +163,7 @@ void RegisterIndexPropagation::propagateToLocalLoads() {
   }
 }
 
-void RegisterIndexPropagation::updateComputeOpInputs() {
+void TileEncodingPropagation::updateComputeOpInputs() {
   for (auto *op : computeOps) {
     OpBuilder rewriter(op->getContext());
     rewriter.setInsertionPoint(op);
@@ -192,20 +190,16 @@ void RegisterIndexPropagation::updateComputeOpInputs() {
 
 } // namespace
 
-class TritonTenstorrentPropagateRegisterIndicesPass
-    : public triton::npu::impl::TritonTenstorrentPropagateRegisterIndicesBase<
-          TritonTenstorrentPropagateRegisterIndicesPass> {
+class TritonTenstorrentPropagateTileEncodingPass
+    : public triton::npu::impl::TritonTenstorrentPropagateTileEncodingBase<
+          TritonTenstorrentPropagateTileEncodingPass> {
 public:
   void runOnOperation() override {
     MLIRContext *context = &getContext();
     ModuleOp m = getOperation();
 
     m.walk([](FuncOp funcOp) {
-      StringRef funcName = funcOp.getSymName();
-      if (false && !funcName.ends_with("__compute"))
-        return;
-
-      RegisterIndexPropagation propagation(funcOp);
+      TileEncodingPropagation propagation(funcOp);
       propagation.initComputeRegisterIndices();
       propagation.propagateToLocalLoads();
       propagation.updateComputeOpInputs();

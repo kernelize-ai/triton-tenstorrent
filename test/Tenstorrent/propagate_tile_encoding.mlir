@@ -1,4 +1,4 @@
-// RUN: triton-opt %s -split-input-file --tritontenstorrent-propagate-register-indices | FileCheck %s
+// RUN: triton-opt %s -split-input-file --tritontenstorrent-propagate-tile-encoding | FileCheck %s
 
 #blocked = #ttg.blocked<{sizePerThread = [1024], threadsPerWarp = [1], warpsPerCTA = [1], order = [0]}>
 module attributes {"ttg.num-ctas" = 1 : i32, "ttg.num-warps" = 1 : i32, ttg.target = "cpu", "ttg.threads-per-warp" = 1 : i32} {
