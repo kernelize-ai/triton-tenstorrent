@@ -128,6 +128,8 @@ module attributes {"ttg.num-ctas" = 1 : i32, "ttg.num-warps" = 1 : i32, ttg.targ
     // CHECK-DAG: %[[c2_0:.*]] = arith.constant 2 : index
     // CHECK-DAG: %[[OUTPUT_PTR:.*]] = ttkernel.get_arg_val(%[[c2_0]])
     // CHECK-DAG: %[[OUTPUT:.*]] = ttkernel.get_compile_time_arg_val(2)
+    // CHECK-NOT: ttkernel.copy_tile_init
+    // CHECK-NOT: ttkernel.copy_tile
     %0 = ttg.local_alloc {alloc_idx = 2 : i32} : () -> !ttg.memdesc<1024xf32, #shared, #smem, mutable>
     %pid = tt.get_program_id x : i32
     %block_start = arith.muli %pid, %c1024_i32 : i32

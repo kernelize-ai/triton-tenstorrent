@@ -2,6 +2,7 @@
 
 #include "mlir/Analysis/SliceAnalysis.h"
 #include "mlir/Transforms/DialectConversion.h"
+#include "llvm/ADT/MapVector.h"
 #include "llvm/Support/Debug.h"
 
 #include "triton/Dialect/Triton/IR/Dialect.h"
@@ -33,22 +34,19 @@ namespace npu {
 
 namespace {
 
-static Value getI32Const(ConversionPatternRewriter &rewriter, Location loc,
-                         int64_t value) {
+static Value getI32Const(OpBuilder &rewriter, Location loc, int64_t value) {
   return rewriter.create<arith::ConstantOp>(
       loc, rewriter.getI32Type(),
       rewriter.getIntegerAttr(rewriter.getI32Type(), value));
 }
 
-static Value getI1Const(ConversionPatternRewriter &rewriter, Location loc,
-                        bool value) {
+static Value getI1Const(OpBuilder &rewriter, Location loc, bool value) {
   return rewriter.create<arith::ConstantOp>(
       loc, rewriter.getI1Type(),
       rewriter.getIntegerAttr(rewriter.getI1Type(), value));
 }
 
-static Value getIConst(ConversionPatternRewriter &rewriter, Location loc,
-                       int64_t value) {
+static Value getIConst(OpBuilder &rewriter, Location loc, int64_t value) {
   return rewriter.create<arith::ConstantOp>(
       loc, rewriter.getIndexType(),
       rewriter.getIntegerAttr(rewriter.getIndexType(), value));
@@ -65,28 +63,6 @@ struct ConvertBinaryComputeOp
 
     if (op.getOpcode().str() != "arith.addf")
       return failure();
-
-    auto lhs = adaptor.getLhs();
-    auto rhs = adaptor.getRhs();
-
-    // copy from cb into compute registers
-    auto copyAndInitializeRegister = [&](Value operand,
-                                         Value convertedOperand) {
-      rewriter.create<ttkernel::CopyTileInitOp>(loc, convertedOperand);
-      Value c0 = getIConst(rewriter, loc, 0);
-
-      RankedTensorType loadType = cast<RankedTensorType>(operand.getType());
-      // amusingly we could now deduce the load encoding from the operand index
-      npu::tt::TileEncodingAttr loadEncoding =
-          cast<npu::tt::TileEncodingAttr>(loadType.getEncoding());
-      Value destRegisterIndex =
-          getIConst(rewriter, loc, loadEncoding.getIndex());
-      rewriter.create<ttkernel::CopyTileOp>(loc, convertedOperand, c0,
-                                            destRegisterIndex);
-    };
-
-    copyAndInitializeRegister(op.getLhs(), lhs);
-    copyAndInitializeRegister(op.getRhs(), rhs);
 
     rewriter.create<ttkernel::AddBinaryTilesInitOp>(loc);
     Value lhsIndex = getIConst(rewriter, loc, 0);
@@ -305,17 +281,31 @@ struct ConvertLocalLoadOp : public OpConversionPattern<gpu::LocalLoadOp> {
     Location loc = op.getLoc();
 
     auto src = adaptor.getSrc();
-    auto dst = op.getResult();
-    // 1. wait_front on the cb to know data is ready to load from SRAM
-    Value c1 = getI32Const(rewriter, loc, 1);
-    auto waitFrontOp = rewriter.create<ttkernel::CBWaitFrontOp>(loc, src, c1);
 
     LDBG("Converted load src type = " << src.getType() << "\n");
     assert(isa<ttkernel::CBType>(src.getType()) &&
            "expected memref type for type converted load src");
 
-    // TODO: this should come from the cb root eventually,
-    // but replaceOp is probably not appropriate here
+    assert(op->hasOneUse() &&
+           "expected local load with store user to have one use");
+    if (isa<StoreOp>(*op->getUsers().begin())) {
+      // wait front on the cb to know data is ready
+      Value numPages = getI32Const(rewriter, loc, 1);
+      auto waitFrontOp =
+          rewriter.create<ttkernel::CBWaitFrontOp>(loc, src, numPages);
+      rewriter.replaceOp(op, src);
+      return success();
+    }
+
+    rewriter.create<ttkernel::CopyTileInitOp>(loc, src);
+    Value c0 = getIConst(rewriter, loc, 0);
+
+    auto dst = op.getResult();
+    auto dstType = cast<RankedTensorType>(dst.getType());
+    npu::tt::TileEncodingAttr loadEncoding =
+        cast<npu::tt::TileEncodingAttr>(dstType.getEncoding());
+    Value destRegisterIndex = getIConst(rewriter, loc, loadEncoding.getIndex());
+    rewriter.create<ttkernel::CopyTileOp>(loc, src, c0, destRegisterIndex);
     rewriter.replaceOp(op, src);
     return success();
   }
@@ -452,101 +442,83 @@ static bool isCBOp(Operation *op) {
   return false;
 }
 
+static bool requiresSFPUInit(func::FuncOp funcOp) {
+  bool requiresInit = false;
+  funcOp.walk([&](Operation *op) {
+    if (op->hasTrait<ttkernel::TTKernelBinaryOpTrait>()) {
+      requiresInit = true;
+      return;
+    }
+  });
+  return requiresInit;
+}
+
 class InitializationHelper {
 public:
-  struct ComputeOpInfo {
-    ComputeOpInfo() {}
-    ComputeOpInfo(Operation *op) : op(op) {}
-    Value input;
-    Value output;
-    Operation *op;
-  };
-
-  InitializationHelper(func::FuncOp F) : funcOp(F) {}
-
-  void insertTileRegsAcquireOps() {
-    llvm::SetVector<Block *> visited;
-    // TODO: this now visits copy tiles since the compute op operates directly
-    // on the DST register. cleanup the naming (and possibly the algorithm)
-    // here. We probably want to record some info about the compute op so we put
-    // the right init in, but we might be able to do that elsewhere.
-    funcOp.walk([&](ttkernel::CopyTileOp copyTilesOp) {
-      Block *b = copyTilesOp->getBlock();
-      if (visited.insert(b))
-        insertTileRegsAcquireInBlock(b, ComputeOpInfo(copyTilesOp));
+  InitializationHelper(func::FuncOp F)
+      : funcOp(F), addSFPUInit(requiresSFPUInit(F)) {
+    // build maps of copy/pack ops to respective indices
+    funcOp.walk([&](ttkernel::CopyTileOp copyTileOp) {
+      Value cbIndex = copyTileOp.getTileIndexCb();
+      Value dstIndex = copyTileOp.getTileIndexDst();
+      copyTileOps[copyTileOp]++;
     });
-  }
 
-  void collectInputs() {
-    for (auto &[_, computeOpInfo] : acquireRegistersToComputeOps) {
+    funcOp.walk([&](ttkernel::CopyTileInitOp copyTileInitOp) {
+      copyTileInitOps.push_back(copyTileInitOp);
+    });
 
-      auto firstComputeOperand = computeOpInfo.op->getOperand(0);
-      Operation *op = firstComputeOperand.getDefiningOp();
-      // TODO: I think should always have the cb feeding the compute op, but
-      // leaving this somewhat generic until we confirm
-      if (isCBOp(op)) {
-        assert(op->getNumResults() == 1 && "expected single result for cb op");
-        computeOpInfo.input = op->getResult(0);
-        continue;
-      }
-
-      assert(computeOpInfo.input && "expected to find input value");
-    }
-  }
-
-  void collectOutputs() {
     funcOp.walk([&](ttkernel::PackTileOp packTileOp) {
-      // Note: this is completely disassociated from the compute op, which seems
-      // wrong
-      assert(acquireRegistersToComputeOps.size() == 1 &&
-             "expecting single compute op");
-      ComputeOpInfo &computeOpInfo =
-          acquireRegistersToComputeOps.begin()->second;
-
-      SetVector<Operation *> backwardSlice;
-      BackwardSliceOptions opt;
-      (void)getBackwardSlice(packTileOp, &backwardSlice, opt);
-
-      for (auto op : llvm::reverse(backwardSlice)) {
-        if (isCBOp(op)) {
-          assert(op->getNumResults() == 1 &&
-                 "expected single result for cb op");
-          computeOpInfo.output = op->getResult(0);
-          break;
-        }
-      }
-
-      assert(computeOpInfo.output && "expected to find output value");
+      Value cbIndex = packTileOp.getDstIndex();
+      packTileOps[packTileOp]++;
     });
+  }
+
+  // tile regs aquire ops must be inserted before any copy tiles ops
+  void insertTileRegsAcquireOps() {
+    assert(!copyTileInitOps.empty() &&
+           "expecting at least one copy tile init op");
+    OpBuilder builder(copyTileInitOps.front());
+    builder.create<ttkernel::TileRegsAcquireOp>(
+        copyTileInitOps.front().getLoc());
+  }
+
+  // coalesce copy tile waits before the firsts copy tile ops since tile
+  // registers may not be acquired yet
+  void insertCopyTileWaits() {
+    OpBuilder builder(copyTileInitOps.front());
+    for (auto copyTileOpItr : copyTileOps) {
+      ttkernel::CopyTileOp copyTileOp = copyTileOpItr.first;
+      Value numTiles =
+          getI32Const(builder, copyTileOp->getLoc(), copyTileOpItr.second);
+      Value cb = copyTileOp.getCb0();
+      builder.create<ttkernel::CBWaitFrontOp>(copyTileOp->getLoc(), cb,
+                                              numTiles);
+    }
   }
 
   void insertSFPUInitOps() {
-    for (auto [acquireOp, computeOpInfo] : acquireRegistersToComputeOps) {
-      OpBuilder builder(acquireOp);
-      builder.setInsertionPoint(acquireOp);
+    if (!addSFPUInit)
+      return;
 
-      builder.create<ttkernel::InitSFPUOp>(
-          acquireOp->getLoc(), computeOpInfo.input, computeOpInfo.output);
-    }
+    auto tileRegsAcquireOps = funcOp.getOps<ttkernel::TileRegsAcquireOp>();
+    assert(!tileRegsAcquireOps.empty() && "expecting tile regs acquire op");
+    Operation *acquireOp = *tileRegsAcquireOps.begin();
+
+    OpBuilder builder(acquireOp);
+    Value inCb = copyTileOps.begin()->first.getCb0();
+    Value outCb = packTileOps.begin()->first.getOutCb();
+
+    builder.create<ttkernel::InitSFPUOp>(acquireOp->getLoc(), inCb, outCb);
   }
 
 private:
-  void insertTileRegsAcquireInBlock(Block *block, ComputeOpInfo computeOpInfo) {
-    for (Operation &op : *block) {
-      // acquire tile registers before the first copy tile
-      if (isa<ttkernel::CopyTileInitOp>(op)) {
-        OpBuilder builder(&op);
-        builder.setInsertionPoint(&op);
-        Operation *regsAcquireOp =
-            builder.create<ttkernel::TileRegsAcquireOp>(op.getLoc());
-        acquireRegistersToComputeOps[regsAcquireOp] = computeOpInfo;
-        return;
-      }
-    }
-  }
+  SmallVector<ttkernel::CopyTileInitOp, 4> copyTileInitOps;
+  llvm::MapVector<ttkernel::CopyTileOp, unsigned> copyTileOps;
+  llvm::MapVector<ttkernel::PackTileOp, unsigned> packTileOps;
 
-  DenseMap<Operation *, ComputeOpInfo> acquireRegistersToComputeOps;
   func::FuncOp funcOp;
+  const bool addSFPUInit;
 };
 
 } // namespace
@@ -667,9 +639,8 @@ struct ConvertTritonNPUToTTKernelPass
         return;
 
       InitializationHelper initHelper(funcOp);
+      initHelper.insertCopyTileWaits();
       initHelper.insertTileRegsAcquireOps();
-      initHelper.collectInputs();
-      initHelper.collectOutputs();
       initHelper.insertSFPUInitOps();
     });
   }
