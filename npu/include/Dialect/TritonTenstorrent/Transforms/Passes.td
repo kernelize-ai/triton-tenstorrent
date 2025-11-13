@@ -3,8 +3,8 @@
 
 include "mlir/Pass/PassBase.td"
 
-def TritonTenstorrentPropagateRegisterIndices : Pass<"tritontenstorrent-propagate-register-indices", "mlir::ModuleOp"> {
-    let summary = "Propagate register indices from compute ops to local loads";
+def TritonTenstorrentPropagateTileEncoding : Pass<"tritontenstorrent-propagate-tile-encoding", "mlir::ModuleOp"> {
+    let summary = "Propagate tile encoding from compute ops to local loads";
 
     let description = [{
         Local loads from SRAM to registers need to know which tile register index to load into. This pass propagates the

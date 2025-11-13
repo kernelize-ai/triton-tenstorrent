@@ -1,5 +1,5 @@
 diff --git a/bin/RegisterTritonDialects.h b/bin/RegisterTritonDialects.h
-index 48049f026..26c9422d2 100644
+index 48049f026..decf0dfe2 100644
 --- a/bin/RegisterTritonDialects.h
 +++ b/bin/RegisterTritonDialects.h
 @@ -39,6 +39,15 @@
@@ -29,7 +29,7 @@ index 48049f026..26c9422d2 100644
 +
 +  // Tenstorrent
 +  mlir::triton::npu::registerConvertTritonFuncToFunc();
-+  mlir::triton::npu::registerTritonTenstorrentPropagateRegisterIndices();
++  mlir::triton::npu::registerTritonTenstorrentPropagateTileEncoding();
 +  mlir::triton::npu::registerTritonTenstorrentConvertComputeOps();
 +  mlir::triton::npu::registerConvertTritonNPUToTTKernel();
 +  mlir::triton::npu::registerFinalizeCBTransaction();

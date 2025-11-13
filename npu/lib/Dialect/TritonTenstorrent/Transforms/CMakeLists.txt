@@ -1,7 +1,7 @@
 add_triton_library(TritonTenstorrentTransforms
     ConvertComputeOps.cpp
     PtrRotate.cpp
-    PropagateRegisterIndices.cpp
+    PropagateTileEncoding.cpp
 
     DEPENDS
     TritonTenstorrentTransformsIncGen
