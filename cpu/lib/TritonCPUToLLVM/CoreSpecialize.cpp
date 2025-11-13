@@ -90,7 +90,7 @@ public:
     auto memdesc = triton::gpu::MemDescType::get(
         shape, rtType.getElementType(), sharedEncoding,
         triton::gpu::SharedMemorySpaceAttr::get(ctx), true);
-    auto alloc = b.create<triton::gpu::LocalAllocOp>(op->getLoc(), memdesc);
+    auto alloc = triton::gpu::LocalAllocOp::create(b, op->getLoc(), memdesc);
     alloc->setAttr("alloc_idx", b.getI32IntegerAttr(idx));
 
     allocs.push_back(alloc);
@@ -115,13 +115,13 @@ public:
       auto b = OpBuilder(cload);
       auto loc = cload.getLoc();
       // replace uses with null value
-      auto nullValue = b.create<arith::ConstantOp>(
-          loc, cload.getType(), b.getZeroAttr(cload.getType()));
+      auto nullValue = arith::ConstantOp::create(
+          b, loc, cload.getType(), b.getZeroAttr(cload.getType()));
       cload.replaceAllUsesWith(nullValue.getResult());
       // Use local store until async copy is supported
       b.setInsertionPointAfter(cload);
       auto lstore =
-          b.create<triton::gpu::LocalStoreOp>(loc, cload.getResult(), calloc);
+          triton::gpu::LocalStoreOp::create(b, loc, cload.getResult(), calloc);
     }
     // Erase all stores
     for (auto store : stores) {
@@ -145,7 +145,7 @@ public:
       auto b = OpBuilder(cload);
       auto loc = cload.getLoc();
       auto lload =
-          b.create<triton::gpu::LocalLoadOp>(loc, cload.getType(), calloc);
+          triton::gpu::LocalLoadOp::create(b, loc, cload.getType(), calloc);
       cload.replaceAllUsesWith(lload.getResult());
     }
     // Erase all stores
@@ -157,7 +157,7 @@ public:
       auto b = OpBuilder(cstore);
       auto loc = cstore.getLoc();
       auto lstore =
-          b.create<triton::gpu::LocalStoreOp>(loc, cstore.getValue(), calloc);
+          triton::gpu::LocalStoreOp::create(b, loc, cstore.getValue(), calloc);
       cstore.erase();
     }
     return computeFunc;
@@ -177,8 +177,8 @@ public:
       auto b = OpBuilder(cstore);
       auto loc = cstore.getLoc();
       // Use local load until async store is supported
-      auto lload = b.create<triton::gpu::LocalLoadOp>(
-          loc, cstore.getValue().getType(), calloc);
+      auto lload = triton::gpu::LocalLoadOp::create(
+          b, loc, cstore.getValue().getType(), calloc);
       cstore.getValueMutable().assign(lload.getResult());
     }
     return writerFunc;

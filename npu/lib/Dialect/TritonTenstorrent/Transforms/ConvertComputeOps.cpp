@@ -49,8 +49,8 @@ struct RewriteBinaryComputeOp : OpRewritePattern<OpType> {
     auto lhs = op->getOperand(0);
     auto rhs = op->getOperand(1);
 
-    auto newOp = rewriter.create<npu::tt::BinaryComputeOp>(
-        op.getLoc(), resultTys, lhs, rhs, opcode);
+    auto newOp = npu::tt::BinaryComputeOp::create(rewriter, op.getLoc(),
+                                                  resultTys, lhs, rhs, opcode);
     rewriter.replaceOp(op, newOp.getResults());
 
     return success();

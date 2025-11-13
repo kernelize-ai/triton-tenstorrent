@@ -60,7 +60,7 @@ struct ConvertTritonFunc : public OpConversionPattern<triton::FuncOp> {
     // skip triton attributes
 
     auto newFunc =
-        rewriter.create<mlir::func::FuncOp>(loc, funcOp.getName(), newTy);
+        mlir::func::FuncOp::create(rewriter, loc, funcOp.getName(), newTy);
     if (auto vis = funcOp.getOperation()->getAttr(
             SymbolTable::getVisibilityAttrName()))
       newFunc->setAttr(SymbolTable::getVisibilityAttrName(), vis);

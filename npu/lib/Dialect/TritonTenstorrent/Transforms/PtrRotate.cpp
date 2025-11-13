@@ -86,8 +86,9 @@ Value TritonTenstorrentPtrRotate::rotateArith(Value basePtr,
         for (auto [idx, operand] : llvm::enumerate(addOp->getOpOperands())) {
           Value newOperand = rotateArith(basePtr, operand);
           if (newOperand != basePtr) {
-            basePtr = builder.create<triton::AddPtrOp>(
-                basePtr.getLoc(), basePtr.getType(), basePtr, newOperand);
+            basePtr = triton::AddPtrOp::create(builder, basePtr.getLoc(),
+                                               basePtr.getType(), basePtr,
+                                               newOperand);
             // replace offset with the other operand
             offset.set(addOp->getOperand(idx ^ 1));
             return basePtr;
