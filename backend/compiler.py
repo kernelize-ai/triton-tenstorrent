@@ -48,6 +48,9 @@ class CPUBackend(BaseBackend):
     def supports_target(target: GPUTarget):
         return target.backend == "tenstorrent" or target.backend == "cpu"
 
+    def get_target_name(self, options) -> str:
+        return "cpu"
+
     def __init__(self, target: GPUTarget) -> None:
         super().__init__(target)
         self.binary_ext = "so"
@@ -130,6 +133,22 @@ class CPUBackend(BaseBackend):
         passes.common.add_canonicalizer(pm)
         pm.run(mod, 'make_ttgir')
 
+        return mod
+
+    def gluon_to_ttgir(self, src, metadata, options):
+        mod = src
+        pm = ir.pass_manager(mod.context)
+        pm.enable_debug()
+
+        passes.gluon.add_inliner(pm)
+        passes.gluon.add_resolve_auto_encodings(pm)
+        passes.gluon.add_canonicalizer(pm)
+        passes.common.add_sccp(pm)
+        passes.ttir.add_loop_aware_cse(pm)
+        passes.gluon.add_canonicalizer(pm)
+        passes.ttgpuir.add_combine_tensor_select_and_if(pm)
+
+        pm.run(mod, 'gluon_to_ttgir')
         return mod
 
     @staticmethod
