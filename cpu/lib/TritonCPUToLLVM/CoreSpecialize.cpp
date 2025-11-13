@@ -80,10 +80,11 @@ public:
     auto ctx = func.getContext();
     OpBuilder b(func.getBody());
     auto shape = rtType.getShape();
-    int32_t size = shape[0]; // tile size?
+    auto encoding =
+        cast<triton::gpu::DistributedEncodingTrait>(rtType.getEncoding());
     SmallVector<std::pair<unsigned, unsigned>> intervalPads{{1, 1}};
-    SmallVector<unsigned, 4> order{0};
-    auto ctaLayout = triton::gpu::CTALayoutAttr::getDefault(ctx, 1);
+    auto order = encoding.getRepOrder();
+    auto ctaLayout = getCTALayout(encoding);
     auto sharedEncoding = triton::gpu::PaddedSharedEncodingAttr::get(
         ctx, intervalPads, order, shape, ctaLayout);
     auto memdesc = triton::gpu::MemDescType::get(
