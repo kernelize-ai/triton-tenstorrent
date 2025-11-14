@@ -35,30 +35,6 @@ namespace npu {
 
 namespace {
 
-struct ConvertBinaryComputeOp
-    : public OpConversionPattern<npu::tt::BinaryComputeOp> {
-  using OpConversionPattern<npu::tt::BinaryComputeOp>::OpConversionPattern;
-
-  LogicalResult
-  matchAndRewrite(npu::tt::BinaryComputeOp op, OpAdaptor adaptor,
-                  ConversionPatternRewriter &rewriter) const override {
-    Location loc = op.getLoc();
-
-    if (op.getOpcode().str() != "arith.addf")
-      return failure();
-
-    ttkernel::AddBinaryTilesInitOp::create(rewriter, loc);
-    Value lhsIndex = arith::createIndexConstant(loc, rewriter, 0);
-    Value rhsIndex = arith::createIndexConstant(loc, rewriter, 1);
-    Value destIndex = arith::createIndexConstant(loc, rewriter, 2);
-    ttkernel::AddBinaryTilesOp::create(rewriter, loc, lhsIndex, rhsIndex,
-                                       destIndex);
-
-    rewriter.eraseOp(op);
-    return success();
-  }
-};
-
 static bool isScalar(Value v) { return !isa<RankedTensorType>(v.getType()); }
 
 static Value traceToScalar(Value ptr, bool isPtr = true) {
@@ -592,8 +568,8 @@ struct ConvertTritonNPUToTTKernelPass
       patterns.add<ConvertLocalLoadOp>(typeConverter, patterns.getContext());
       patterns.add<ConvertLocalAllocOp>(typeConverter, patterns.getContext());
       // triton-tt ops
-      patterns.add<ConvertBinaryComputeOp>(typeConverter,
-                                           patterns.getContext());
+      populateComputeOpConversionPattern(typeConverter, patterns,
+                                         PatternBenefit(1));
       patterns.add<ConvertAddPtrOp>(typeConverter, patterns.getContext());
       patterns.add<ConvertGetProgramIdOp>(typeConverter, patterns.getContext());
       patterns.add<DropFunctionArguments>(typeConverter, patterns.getContext());
