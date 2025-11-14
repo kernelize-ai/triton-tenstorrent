@@ -73,6 +73,9 @@ else
         -DTT_RUNTIME_ENABLE_TTNN=OFF \
         -DTT_RUNTIME_ENABLE_TTMETAL=OFF \
         -DTTMLIR_ENABLE_RUNTIME_TESTS=OFF \
+        -DTTMLIR_ENABLE_OPMODEL_TESTS=OFF \
+        -DTTMLIR_ENABLE_ALCHEMIST=OFF \
+        -DTTMLIR_ENABLE_TESTS=OFF \
         -Dnanobind_DIR="$(python -c 'import os, nanobind; print(os.path.join(os.path.dirname(nanobind.__file__), "cmake"))')" \
         -Dpybind11_DIR="$(python -c 'import os, pybind11; print(os.path.join(os.path.dirname(pybind11.__file__), "share", "cmake", "pybind11"))')"
     cmake --build build
