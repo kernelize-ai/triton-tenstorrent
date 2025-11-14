@@ -41,12 +41,28 @@ struct ConvertAddPtrOp : public OpConversionPattern<AddPtrOp> {
   }
 };
 
+struct AddIOpConversion : public OpConversionPattern<arith::AddIOp> {
+  using OpConversionPattern<arith::AddIOp>::OpConversionPattern;
+
+  LogicalResult
+  matchAndRewrite(arith::AddIOp op, OpAdaptor adaptor,
+                  ConversionPatternRewriter &rewriter) const override {
+    if (isa<RankedTensorType>(op.getLhs().getType()) &&
+        isa<RankedTensorType>(op.getRhs().getType())) {
+      rewriter.eraseOp(op);
+      return success();
+    }
+    return failure();
+  }
+};
+
 } // namespace
 
 void populateElementwiseOpConversionPattern(TypeConverter &typeConverter,
                                             RewritePatternSet &patterns,
                                             PatternBenefit benefit) {
   patterns.add<ConvertAddPtrOp>(typeConverter, patterns.getContext());
+  patterns.add<AddIOpConversion>(typeConverter, patterns.getContext());
 }
 
 } // namespace npu

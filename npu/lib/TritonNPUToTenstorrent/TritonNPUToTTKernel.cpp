@@ -35,43 +35,6 @@ namespace npu {
 
 namespace {
 
-struct SplatOpConversion : public OpConversionPattern<triton::SplatOp> {
-  using OpConversionPattern<triton::SplatOp>::OpConversionPattern;
-
-  LogicalResult
-  matchAndRewrite(triton::SplatOp op, OpAdaptor adaptor,
-                  ConversionPatternRewriter &rewriter) const override {
-    rewriter.eraseOp(op);
-    return success();
-  }
-};
-
-struct AddIOpConversion : public OpConversionPattern<arith::AddIOp> {
-  using OpConversionPattern<arith::AddIOp>::OpConversionPattern;
-
-  LogicalResult
-  matchAndRewrite(arith::AddIOp op, OpAdaptor adaptor,
-                  ConversionPatternRewriter &rewriter) const override {
-    if (isa<RankedTensorType>(op.getLhs().getType()) &&
-        isa<RankedTensorType>(op.getRhs().getType())) {
-      rewriter.eraseOp(op);
-      return success();
-    }
-    return failure();
-  }
-};
-
-struct MakeRangeOpConversion : public OpConversionPattern<triton::MakeRangeOp> {
-  using OpConversionPattern<triton::MakeRangeOp>::OpConversionPattern;
-
-  LogicalResult
-  matchAndRewrite(triton::MakeRangeOp op, OpAdaptor adaptor,
-                  ConversionPatternRewriter &rewriter) const override {
-    rewriter.eraseOp(op);
-    return success();
-  }
-};
-
 struct DropFunctionArguments : public OpConversionPattern<func::FuncOp> {
   using OpConversionPattern<func::FuncOp>::OpConversionPattern;
 
@@ -276,12 +239,12 @@ struct ConvertTritonNPUToTTKernelPass
                                        PatternBenefit(1));
     populateElementwiseOpConversionPattern(typeConverter, patterns,
                                            PatternBenefit(1));
+    populateMakeRangeOpConversionPattern(typeConverter, patterns,
+                                         PatternBenefit(1));
     populateSPMDOpConversionPattern(typeConverter, patterns, PatternBenefit(1));
+    populateViewOpConversionPattern(typeConverter, patterns, PatternBenefit(1));
 
     patterns.add<DropFunctionArguments>(typeConverter, patterns.getContext());
-    patterns.add<SplatOpConversion>(typeConverter, patterns.getContext());
-    patterns.add<AddIOpConversion>(typeConverter, patterns.getContext());
-    patterns.add<MakeRangeOpConversion>(typeConverter, patterns.getContext());
 
     if (failed(applyPartialConversion(mod, target, std::move(patterns))))
       return signalPassFailure();
