@@ -8,6 +8,8 @@
 #include "mlir/Analysis/SliceAnalysis.h"
 #include "mlir/Transforms/GreedyPatternRewriteDriver.h"
 
+#include "Utility.h"
+
 using namespace mlir;
 using namespace mlir::triton;
 using namespace mlir::tt;
@@ -77,9 +79,7 @@ struct TTKernelCBPushOutputs : public OpRewritePattern<ttkernel::PackTileOp> {
         cast<ttkernel::GetCompileArgValOp>(*cbOpIt);
 
     rewriter.setInsertionPointAfter(packTileOp);
-    auto numPages = arith::ConstantOp::create(
-        rewriter, packTileOp.getLoc(), rewriter.getI32Type(),
-        rewriter.getIntegerAttr(rewriter.getI32Type(), 1));
+    auto numPages = arith::createConstantI32(packTileOp.getLoc(), rewriter, 1);
     ttkernel::CBPushBackOp::create(rewriter, packTileOp.getLoc(), cbOp,
                                    numPages);
 
