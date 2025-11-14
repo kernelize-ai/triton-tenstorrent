@@ -41,8 +41,8 @@ struct TTKernelCBPopInputs : public OpRewritePattern<ttkernel::CBWaitFrontOp> {
            "expected at least one PackTileOp in the function body");
 
     rewriter.setInsertionPointAfter(*packTileOpItr);
-    rewriter.create<ttkernel::CBPopFrontOp>(op.getLoc(), op.getCb(),
-                                            op.getNumPages());
+    ttkernel::CBPopFrontOp::create(rewriter, op.getLoc(), op.getCb(),
+                                   op.getNumPages());
 
     return success();
   }
@@ -77,11 +77,11 @@ struct TTKernelCBPushOutputs : public OpRewritePattern<ttkernel::PackTileOp> {
         cast<ttkernel::GetCompileArgValOp>(*cbOpIt);
 
     rewriter.setInsertionPointAfter(packTileOp);
-    auto numPages = rewriter.create<arith::ConstantOp>(
-        packTileOp.getLoc(), rewriter.getI32Type(),
+    auto numPages = arith::ConstantOp::create(
+        rewriter, packTileOp.getLoc(), rewriter.getI32Type(),
         rewriter.getIntegerAttr(rewriter.getI32Type(), 1));
-    rewriter.create<ttkernel::CBPushBackOp>(packTileOp.getLoc(), cbOp,
-                                            numPages);
+    ttkernel::CBPushBackOp::create(rewriter, packTileOp.getLoc(), cbOp,
+                                   numPages);
 
     return success();
   }

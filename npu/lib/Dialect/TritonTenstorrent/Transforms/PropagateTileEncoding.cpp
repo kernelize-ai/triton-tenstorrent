@@ -88,8 +88,8 @@ void TileEncodingPropagation::propagateToLocalLoads() {
             dyn_cast<RankedTensorType>(operand.getType());
         if (!operandTensorType)
           continue;
-        auto cvt = rewriter.create<gpu::ConvertLayoutOp>(
-            loadOp.getLoc(),
+        auto cvt = gpu::ConvertLayoutOp::create(
+            rewriter, loadOp.getLoc(),
             operandTensorType.cloneWithEncoding(newLoadEncoding), operand);
         mapping.map(operand, cvt);
       }
@@ -99,8 +99,8 @@ void TileEncodingPropagation::propagateToLocalLoads() {
       newLoadOp->getResult(0).setType(newLoadType);
       LDBG("Created new LoadOp: " << *newLoadOp);
 
-      auto cvt = rewriter.create<gpu::ConvertLayoutOp>(
-          loadOp.getLoc(), loadTensorType, newLoadOp->getResult(0));
+      auto cvt = gpu::ConvertLayoutOp::create(
+          rewriter, loadOp.getLoc(), loadTensorType, newLoadOp->getResult(0));
       loadOp.replaceAllUsesWith(cvt.getResult());
       loadOp.erase();
     };
@@ -133,8 +133,8 @@ void TileEncodingPropagation::propagateToLocalLoads() {
           operand.getDefiningOp()->getResult(0).setType(
               operandTensorType.cloneWithEncoding(newStoreEncoding));
         } else {
-          auto cvt = rewriter.create<gpu::ConvertLayoutOp>(
-              storeOp.getLoc(),
+          auto cvt = gpu::ConvertLayoutOp::create(
+              rewriter, storeOp.getLoc(),
               operandTensorType.cloneWithEncoding(newStoreEncoding), operand);
           mapping.map(operand, cvt);
         }

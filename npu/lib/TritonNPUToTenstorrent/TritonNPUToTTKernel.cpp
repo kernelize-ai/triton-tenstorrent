@@ -35,20 +35,20 @@ namespace npu {
 namespace {
 
 static Value getI32Const(OpBuilder &rewriter, Location loc, int64_t value) {
-  return rewriter.create<arith::ConstantOp>(
-      loc, rewriter.getI32Type(),
+  return arith::ConstantOp::create(
+      rewriter, loc, rewriter.getI32Type(),
       rewriter.getIntegerAttr(rewriter.getI32Type(), value));
 }
 
 static Value getI1Const(OpBuilder &rewriter, Location loc, bool value) {
-  return rewriter.create<arith::ConstantOp>(
-      loc, rewriter.getI1Type(),
+  return arith::ConstantOp::create(
+      rewriter, loc, rewriter.getI1Type(),
       rewriter.getIntegerAttr(rewriter.getI1Type(), value));
 }
 
 static Value getIConst(OpBuilder &rewriter, Location loc, int64_t value) {
-  return rewriter.create<arith::ConstantOp>(
-      loc, rewriter.getIndexType(),
+  return arith::ConstantOp::create(
+      rewriter, loc, rewriter.getIndexType(),
       rewriter.getIntegerAttr(rewriter.getIndexType(), value));
 }
 
@@ -64,12 +64,12 @@ struct ConvertBinaryComputeOp
     if (op.getOpcode().str() != "arith.addf")
       return failure();
 
-    rewriter.create<ttkernel::AddBinaryTilesInitOp>(loc);
+    ttkernel::AddBinaryTilesInitOp::create(rewriter, loc);
     Value lhsIndex = getIConst(rewriter, loc, 0);
     Value rhsIndex = getIConst(rewriter, loc, 1);
     Value destIndex = getIConst(rewriter, loc, 2);
-    rewriter.create<ttkernel::AddBinaryTilesOp>(loc, lhsIndex, rhsIndex,
-                                                destIndex);
+    ttkernel::AddBinaryTilesOp::create(rewriter, loc, lhsIndex, rhsIndex,
+                                       destIndex);
 
     rewriter.eraseOp(op);
     return success();
@@ -138,20 +138,20 @@ static Value computeNocAddr(ConversionPatternRewriter &rewriter, Location loc,
   auto elemType = ptrType.getPointeeType();
   Value elemSizeValue =
       getI32Const(rewriter, loc, elemType.getIntOrFloatBitWidth() / 8);
-  offset = rewriter.create<arith::MulIOp>(loc, offset, elemSizeValue);
+  offset = arith::MulIOp::create(rewriter, loc, offset, elemSizeValue);
 
-  Value tile_id = rewriter.create<arith::DivUIOp>(loc, offset, pageSize);
+  Value tile_id = arith::DivUIOp::create(rewriter, loc, offset, pageSize);
 
   Value const1 = getI32Const(rewriter, loc, 1);
   Value const0 = getI32Const(rewriter, loc, 0);
 
   // Create interleaved address generator and get noc address
-  auto dataFormat = rewriter.create<ttkernel::GetDataFormatOp>(loc, cb);
+  auto dataFormat = ttkernel::GetDataFormatOp::create(rewriter, loc, cb);
   Value c1bit = getI1Const(rewriter, loc, 1);
-  Value addrGen = rewriter.create<ttkernel::GetInterleavedAddrGenFastOp>(
-      loc, c1bit, baseAddr, pageSize, dataFormat);
-  Value nocAddr = rewriter.create<ttkernel::InterleavedAddrGenFastGetNocAddrOp>(
-      loc, addrGen, tile_id, const0, Value());
+  Value addrGen = ttkernel::GetInterleavedAddrGenFastOp::create(
+      rewriter, loc, c1bit, baseAddr, pageSize, dataFormat);
+  Value nocAddr = ttkernel::InterleavedAddrGenFastGetNocAddrOp::create(
+      rewriter, loc, addrGen, tile_id, const0, Value());
 
   return nocAddr;
 }
@@ -179,7 +179,7 @@ struct ConvertLoadOp : public OpConversionPattern<triton::LoadOp> {
         rewriter.getRemappedValue(cast<gpu::LocalStoreOp>(user).getDst());
 
     // Compute page size in bytes
-    auto pageSize = rewriter.create<ttkernel::GetTileSizeOp>(loc, cb);
+    auto pageSize = ttkernel::GetTileSizeOp::create(rewriter, loc, cb);
 
     // Compute the noc address
     Value nocAddr = computeNocAddr(rewriter, loc, op.getPtr(), pageSize, cb);
@@ -188,19 +188,19 @@ struct ConvertLoadOp : public OpConversionPattern<triton::LoadOp> {
     //       ttkernel.cb_reserve_back(%0, %c1_i32)
     // add later?
     Value const1 = getI32Const(rewriter, loc, 1);
-    rewriter.create<ttkernel::CBReserveBackOp>(loc, cb, const1);
+    ttkernel::CBReserveBackOp::create(rewriter, loc, cb, const1);
 
     // 3. get L1 address
     //       %11 = ttkernel.get_write_ptr(%0)
-    Value l1Addr = rewriter.create<ttkernel::GetWritePtrOp>(loc, cb);
+    Value l1Addr = ttkernel::GetWritePtrOp::create(rewriter, loc, cb);
 
     // 4. async read from noc to l1, size in bytes
     //       ttkernel.noc_async_read(%10, %13, %c4096_i32)
-    rewriter.create<ttkernel::NocAsyncReadOp>(loc, nocAddr, l1Addr, pageSize);
+    ttkernel::NocAsyncReadOp::create(rewriter, loc, nocAddr, l1Addr, pageSize);
 
     // 5. barrier to ensure data is read from noc to l1
     //       ttkernel.noc_async_read_barrier() : () -> ()
-    rewriter.create<ttkernel::NocAsyncReadBarrierOp>(loc);
+    ttkernel::NocAsyncReadBarrierOp::create(rewriter, loc);
 
     rewriter.eraseOp(op);
     return success();
@@ -220,15 +220,15 @@ struct ConvertStoreOp : public OpConversionPattern<triton::StoreOp> {
     assert(isa<ttkernel::CBType>(cb.getType()) && "expected cb type");
 
     // Get tile size in bytes
-    auto pageSize = rewriter.create<ttkernel::GetTileSizeOp>(loc, cb);
+    auto pageSize = ttkernel::GetTileSizeOp::create(rewriter, loc, cb);
 
     Value nocAddr = computeNocAddr(rewriter, loc, op.getPtr(), pageSize, cb);
 
-    Value l1Addr = rewriter.create<ttkernel::GetReadPtrOp>(loc, cb);
-    rewriter.create<ttkernel::NocAsyncWriteOp>(loc, l1Addr, nocAddr, pageSize);
-    rewriter.create<ttkernel::NocAsyncWriteBarrierOp>(loc);
+    Value l1Addr = ttkernel::GetReadPtrOp::create(rewriter, loc, cb);
+    ttkernel::NocAsyncWriteOp::create(rewriter, loc, l1Addr, nocAddr, pageSize);
+    ttkernel::NocAsyncWriteBarrierOp::create(rewriter, loc);
     Value numPages = getI32Const(rewriter, loc, 1);
-    rewriter.create<ttkernel::CBPopFrontOp>(loc, cb, numPages);
+    ttkernel::CBPopFrontOp::create(rewriter, loc, cb, numPages);
     rewriter.eraseOp(op);
     return success();
   }
@@ -249,14 +249,14 @@ struct ConvertLocalStoreOp : public OpConversionPattern<gpu::LocalStoreOp> {
       // COMPUTE KERNEL
       // reserve back the cb for the store
       Value numPages = getI32Const(rewriter, loc, 1);
-      rewriter.create<ttkernel::CBReserveBackOp>(loc, dst, numPages);
+      ttkernel::CBReserveBackOp::create(rewriter, loc, dst, numPages);
 
       // Pack the tile into the cb
       Value destRegisterIndex = getIConst(rewriter, loc, 2);
       Value outIndex = getIConst(rewriter, loc, 0);
-      rewriter.create<ttkernel::PackTileOp>(loc, destRegisterIndex, dst,
-                                            outIndex,
-                                            /*outOfOrder=*/true);
+      ttkernel::PackTileOp::create(rewriter, loc, destRegisterIndex, dst,
+                                   outIndex,
+                                   /*outOfOrder=*/true);
 
       rewriter.eraseOp(op);
       return success();
@@ -264,7 +264,7 @@ struct ConvertLocalStoreOp : public OpConversionPattern<gpu::LocalStoreOp> {
 
     Value const1 = getI32Const(rewriter, loc, 1);
     //       ttkernel.cb_push_back(%0, %c1_i32)
-    rewriter.create<ttkernel::CBPushBackOp>(loc, dst, const1);
+    ttkernel::CBPushBackOp::create(rewriter, loc, dst, const1);
 
     rewriter.eraseOp(op);
 
@@ -292,12 +292,12 @@ struct ConvertLocalLoadOp : public OpConversionPattern<gpu::LocalLoadOp> {
       // wait front on the cb to know data is ready
       Value numPages = getI32Const(rewriter, loc, 1);
       auto waitFrontOp =
-          rewriter.create<ttkernel::CBWaitFrontOp>(loc, src, numPages);
+          ttkernel::CBWaitFrontOp::create(rewriter, loc, src, numPages);
       rewriter.replaceOp(op, src);
       return success();
     }
 
-    rewriter.create<ttkernel::CopyTileInitOp>(loc, src);
+    ttkernel::CopyTileInitOp::create(rewriter, loc, src);
     Value c0 = getIConst(rewriter, loc, 0);
 
     auto dst = op.getResult();
@@ -305,7 +305,7 @@ struct ConvertLocalLoadOp : public OpConversionPattern<gpu::LocalLoadOp> {
     npu::tt::TileEncodingAttr loadEncoding =
         cast<npu::tt::TileEncodingAttr>(dstType.getEncoding());
     Value destRegisterIndex = getIConst(rewriter, loc, loadEncoding.getIndex());
-    rewriter.create<ttkernel::CopyTileOp>(loc, src, c0, destRegisterIndex);
+    ttkernel::CopyTileOp::create(rewriter, loc, src, c0, destRegisterIndex);
     rewriter.replaceOp(op, src);
     return success();
   }
@@ -356,7 +356,7 @@ struct DropFunctionArguments : public OpConversionPattern<func::FuncOp> {
       Type newType = typeConverter->convertType(arg.value().getType());
       Value argIndex = getIConst(rewriter, loc, arg.index());
       auto getArgValOp =
-          rewriter.create<ttkernel::GetArgValOp>(loc, newType, argIndex);
+          ttkernel::GetArgValOp::create(rewriter, loc, newType, argIndex);
       arg.value().replaceAllUsesWith(getArgValOp);
     }
     BitVector erasedArgs(numArgs, true);
@@ -389,8 +389,8 @@ struct ConvertAddPtrOp : public OpConversionPattern<AddPtrOp> {
     auto elemType = type.getPointeeType();
     auto elemSize = elemType.getIntOrFloatBitWidth() / 8;
     Value elemSizeValue = getI32Const(rewriter, loc, elemSize);
-    offset = rewriter.create<arith::MulIOp>(loc, offset, elemSizeValue);
-    auto newAddPtrOp = rewriter.create<arith::AddIOp>(loc, baseAddr, offset);
+    offset = arith::MulIOp::create(rewriter, loc, offset, elemSizeValue);
+    auto newAddPtrOp = arith::AddIOp::create(rewriter, loc, baseAddr, offset);
     rewriter.replaceOp(op, newAddPtrOp.getResult());
 
     return success();
@@ -427,8 +427,8 @@ struct ConvertGetProgramIdOp : public OpConversionPattern<GetProgramIdOp> {
     auto launchParamIndex =
         funcOp->getAttrOfType<IntegerAttr>("tt.num_args").getInt();
     Value paramIndexValue = getIConst(rewriter, loc, launchParamIndex + axis);
-    auto launchParam = rewriter.create<ttkernel::GetArgValOp>(
-        loc, rewriter.getI32Type(), paramIndexValue);
+    auto launchParam = ttkernel::GetArgValOp::create(
+        rewriter, loc, rewriter.getI32Type(), paramIndexValue);
     rewriter.replaceOp(op, launchParam);
 
     return success();
@@ -479,8 +479,8 @@ public:
     assert(!copyTileInitOps.empty() &&
            "expecting at least one copy tile init op");
     OpBuilder builder(copyTileInitOps.front());
-    builder.create<ttkernel::TileRegsAcquireOp>(
-        copyTileInitOps.front().getLoc());
+    ttkernel::TileRegsAcquireOp::create(builder,
+                                        copyTileInitOps.front().getLoc());
   }
 
   // coalesce copy tile waits before the firsts copy tile ops since tile
@@ -492,8 +492,8 @@ public:
       Value numTiles =
           getI32Const(builder, copyTileOp->getLoc(), copyTileOpItr.second);
       Value cb = copyTileOp.getCb0();
-      builder.create<ttkernel::CBWaitFrontOp>(copyTileOp->getLoc(), cb,
-                                              numTiles);
+      ttkernel::CBWaitFrontOp::create(builder, copyTileOp->getLoc(), cb,
+                                      numTiles);
     }
   }
 
@@ -509,7 +509,7 @@ public:
     Value inCb = copyTileOps.begin()->first.getCb0();
     Value outCb = packTileOps.begin()->first.getOutCb();
 
-    builder.create<ttkernel::InitSFPUOp>(acquireOp->getLoc(), inCb, outCb);
+    ttkernel::InitSFPUOp::create(builder, acquireOp->getLoc(), inCb, outCb);
   }
 
 private:
