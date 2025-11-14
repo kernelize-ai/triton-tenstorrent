@@ -11,7 +11,23 @@ void populateFuncOpConversionPattern(TypeConverter &typeConverter,
                                      RewritePatternSet &patterns,
                                      PatternBenefit benefit);
 
-}
+void populateComputeOpConversionPattern(TypeConverter &typeConverter,
+                                        RewritePatternSet &patterns,
+                                        PatternBenefit benefit);
+
+void populateElementwiseOpConversionPattern(TypeConverter &typeConverter,
+                                            RewritePatternSet &patterns,
+                                            PatternBenefit benefit);
+
+void populateMemoryOpConversionPattern(TypeConverter &typeConverter,
+                                       RewritePatternSet &patterns,
+                                       PatternBenefit benefit);
+
+void populateSPMDOpConversionPattern(TypeConverter &typeConverter,
+                                     RewritePatternSet &patterns,
+                                     PatternBenefit benefit);
+
+} // namespace npu
 } // namespace triton
 } // namespace mlir
 
