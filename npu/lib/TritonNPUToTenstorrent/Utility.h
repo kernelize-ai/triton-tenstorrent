@@ -5,8 +5,6 @@
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/IR/Dialect.h"
 
-using namespace mlir;
-
 namespace mlir::arith {
 
 Value createConstantI1(Location loc, OpBuilder &rewriter, bool v);
