@@ -100,29 +100,14 @@ struct DropFunctionArguments : public OpConversionPattern<func::FuncOp> {
   }
 };
 
-template <typename OpTy>
-struct DeadCodeEliminationOp : public OpConversionPattern<OpTy> {
-  using OpConversionPattern<OpTy>::OpConversionPattern;
-
-  LogicalResult
-  matchAndRewrite(OpTy op, typename OpTy::Adaptor adaptor,
-                  ConversionPatternRewriter &rewriter) const override {
-    if (op->use_empty()) {
-      rewriter.eraseOp(op);
-      return success();
-    }
-    return failure();
-  }
-};
-
-static bool isCBOp(Operation *op) {
+inline bool isCBOp(Operation *op) {
   if (auto compileTimeArg = dyn_cast<ttkernel::GetCompileArgValOp>(op)) {
     return isa<ttkernel::CBType>(compileTimeArg.getType());
   }
   return false;
 }
 
-static bool requiresSFPUInit(func::FuncOp funcOp) {
+inline bool requiresSFPUInit(func::FuncOp funcOp) {
   bool requiresInit = false;
   funcOp.walk([&](Operation *op) {
     if (op->hasTrait<ttkernel::TTKernelBinaryOpTrait>()) {
@@ -277,10 +262,11 @@ struct ConvertTritonNPUToTTKernelPass
     target.addLegalOp<UnrealizedConversionCastOp>();
     target.addDynamicallyLegalOp<func::FuncOp>(
         [](func::FuncOp funcOp) { return funcOp.getNumArguments() == 0; });
-    target.addDynamicallyLegalOp<arith::AddIOp>([&](arith::AddIOp op) {
+    target.addDynamicallyLegalDialect<arith::ArithDialect>([&](Operation *op) {
       // only legal if not operating on tensors
-      return !(isa<RankedTensorType>(op.getLhs().getType()) &&
-               isa<RankedTensorType>(op.getRhs().getType()));
+      return llvm::all_of(op->getOperands(), [](Value v) {
+        return !(isa<RankedTensorType>(v.getType()));
+      });
     });
 
     mlir::RewritePatternSet patterns(context);
