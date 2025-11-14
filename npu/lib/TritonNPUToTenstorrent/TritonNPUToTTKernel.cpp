@@ -61,6 +61,17 @@ struct AddIOpConversion : public OpConversionPattern<arith::AddIOp> {
   }
 };
 
+struct MakeRangeOpConversion : public OpConversionPattern<triton::MakeRangeOp> {
+  using OpConversionPattern<triton::MakeRangeOp>::OpConversionPattern;
+
+  LogicalResult
+  matchAndRewrite(triton::MakeRangeOp op, OpAdaptor adaptor,
+                  ConversionPatternRewriter &rewriter) const override {
+    rewriter.eraseOp(op);
+    return success();
+  }
+};
+
 struct DropFunctionArguments : public OpConversionPattern<func::FuncOp> {
   using OpConversionPattern<func::FuncOp>::OpConversionPattern;
 
@@ -252,7 +263,7 @@ struct ConvertTritonNPUToTTKernelPass
                                     PatternBenefit(1));
     if (failed(
             applyPartialConversion(mod, funcTarget, std::move(funcPatterns))))
-      signalPassFailure();
+      return signalPassFailure();
 
     mlir::ConversionTarget target{*context};
 
@@ -284,6 +295,7 @@ struct ConvertTritonNPUToTTKernelPass
     patterns.add<DropFunctionArguments>(typeConverter, patterns.getContext());
     patterns.add<SplatOpConversion>(typeConverter, patterns.getContext());
     patterns.add<AddIOpConversion>(typeConverter, patterns.getContext());
+    patterns.add<MakeRangeOpConversion>(typeConverter, patterns.getContext());
 
     if (failed(applyPartialConversion(mod, target, std::move(patterns))))
       return signalPassFailure();
