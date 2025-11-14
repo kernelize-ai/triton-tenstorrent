@@ -63,37 +63,6 @@ struct DropFunctionArguments : public OpConversionPattern<func::FuncOp> {
   }
 };
 
-struct ConvertAddPtrOp : public OpConversionPattern<AddPtrOp> {
-  using OpConversionPattern<AddPtrOp>::OpConversionPattern;
-
-  LogicalResult
-  matchAndRewrite(AddPtrOp op, OpAdaptor adaptor,
-                  ConversionPatternRewriter &rewriter) const override {
-    Location loc = op.getLoc();
-
-    auto baseAddr = adaptor.getPtr();
-    auto offset = adaptor.getOffset();
-
-    if (op->use_empty()) {
-      rewriter.eraseOp(op);
-      return success();
-    }
-    if (!isa<IntegerType>(baseAddr.getType()) ||
-        !isa<IntegerType>(offset.getType())) {
-      return failure();
-    }
-    auto type = cast<triton::PointerType>(op.getPtr().getType());
-    auto elemType = type.getPointeeType();
-    auto elemSize = elemType.getIntOrFloatBitWidth() / 8;
-    Value elemSizeValue = arith::createConstantI32(loc, rewriter, elemSize);
-    offset = arith::MulIOp::create(rewriter, loc, offset, elemSizeValue);
-    auto newAddPtrOp = arith::AddIOp::create(rewriter, loc, baseAddr, offset);
-    rewriter.replaceOp(op, newAddPtrOp.getResult());
-
-    return success();
-  }
-};
-
 template <typename OpTy>
 struct DeadCodeEliminationOp : public OpConversionPattern<OpTy> {
   using OpConversionPattern<OpTy>::OpConversionPattern;
@@ -274,13 +243,12 @@ struct ConvertTritonNPUToTTKernelPass
           [](func::FuncOp funcOp) { return funcOp.getNumArguments() == 0; });
 
       mlir::RewritePatternSet patterns(context);
-      // triton-gpu ops
       populateMemoryOpConversionPattern(typeConverter, patterns,
                                         PatternBenefit(1));
-      // triton-tt ops
       populateComputeOpConversionPattern(typeConverter, patterns,
                                          PatternBenefit(1));
-      patterns.add<ConvertAddPtrOp>(typeConverter, patterns.getContext());
+      populateElementwiseOpConversionPattern(typeConverter, patterns,
+                                             PatternBenefit(1));
       populateSPMDOpConversionPattern(typeConverter, patterns,
                                       PatternBenefit(1));
 

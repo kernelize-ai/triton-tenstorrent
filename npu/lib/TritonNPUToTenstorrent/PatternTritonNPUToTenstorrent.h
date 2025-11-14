@@ -15,6 +15,10 @@ void populateComputeOpConversionPattern(TypeConverter &typeConverter,
                                         RewritePatternSet &patterns,
                                         PatternBenefit benefit);
 
+void populateElementwiseOpConversionPattern(TypeConverter &typeConverter,
+                                            RewritePatternSet &patterns,
+                                            PatternBenefit benefit);
+
 void populateMemoryOpConversionPattern(TypeConverter &typeConverter,
                                        RewritePatternSet &patterns,
                                        PatternBenefit benefit);

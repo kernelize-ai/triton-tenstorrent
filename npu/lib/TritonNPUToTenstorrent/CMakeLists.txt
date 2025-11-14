@@ -1,6 +1,7 @@
 add_triton_library(TritonNPUToTenstorrent
     ComputeOpToTTKernel.cpp
     DropFunctionPass.cpp
+    ElementwiseOpsToTTKernel.cpp
     FinalizeCBTransaction.cpp
     MemoryOpToTTKernel.cpp
     SPMDOpToTTKernel.cpp
