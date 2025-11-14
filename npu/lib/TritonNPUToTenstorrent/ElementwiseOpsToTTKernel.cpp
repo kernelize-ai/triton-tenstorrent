@@ -23,14 +23,12 @@ struct ConvertAddPtrOp : public OpConversionPattern<AddPtrOp> {
     auto baseAddr = adaptor.getPtr();
     auto offset = adaptor.getOffset();
 
-    if (op->use_empty()) {
+    if (!isa<IntegerType>(baseAddr.getType()) ||
+        !isa<IntegerType>(offset.getType())) {
       rewriter.eraseOp(op);
       return success();
     }
-    if (!isa<IntegerType>(baseAddr.getType()) ||
-        !isa<IntegerType>(offset.getType())) {
-      return failure();
-    }
+
     auto type = cast<triton::PointerType>(op.getPtr().getType());
     auto elemType = type.getPointeeType();
     auto elemSize = elemType.getIntOrFloatBitWidth() / 8;
@@ -43,12 +41,28 @@ struct ConvertAddPtrOp : public OpConversionPattern<AddPtrOp> {
   }
 };
 
+struct AddIOpConversion : public OpConversionPattern<arith::AddIOp> {
+  using OpConversionPattern<arith::AddIOp>::OpConversionPattern;
+
+  LogicalResult
+  matchAndRewrite(arith::AddIOp op, OpAdaptor adaptor,
+                  ConversionPatternRewriter &rewriter) const override {
+    if (isa<RankedTensorType>(op.getLhs().getType()) &&
+        isa<RankedTensorType>(op.getRhs().getType())) {
+      rewriter.eraseOp(op);
+      return success();
+    }
+    return failure();
+  }
+};
+
 } // namespace
 
 void populateElementwiseOpConversionPattern(TypeConverter &typeConverter,
                                             RewritePatternSet &patterns,
                                             PatternBenefit benefit) {
   patterns.add<ConvertAddPtrOp>(typeConverter, patterns.getContext());
+  patterns.add<AddIOpConversion>(typeConverter, patterns.getContext());
 }
 
 } // namespace npu

@@ -3,11 +3,13 @@ add_triton_library(TritonNPUToTenstorrent
     DropFunctionPass.cpp
     ElementwiseOpsToTTKernel.cpp
     FinalizeCBTransaction.cpp
+    MakeRangeOpToTTKernel.cpp
     MemoryOpToTTKernel.cpp
     SPMDOpToTTKernel.cpp
     TritonFuncOpToFuncOp.cpp
     TritonNPUToTTKernel.cpp
     Utility.cpp
+    ViewOpToTTKernel.cpp
 
     DEPENDS
     TritonNPUTenstorrentConversionPassIncGen
