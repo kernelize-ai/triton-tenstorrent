@@ -15,6 +15,10 @@ void populateComputeOpConversionPattern(TypeConverter &typeConverter,
                                         RewritePatternSet &patterns,
                                         PatternBenefit benefit);
 
+void populateSPMDOpConversionPattern(TypeConverter &typeConverter,
+                                     RewritePatternSet &patterns,
+                                     PatternBenefit benefit);
+
 } // namespace npu
 } // namespace triton
 } // namespace mlir
