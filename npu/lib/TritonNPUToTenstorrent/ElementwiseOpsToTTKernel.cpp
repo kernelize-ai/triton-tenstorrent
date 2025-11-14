@@ -23,14 +23,12 @@ struct ConvertAddPtrOp : public OpConversionPattern<AddPtrOp> {
     auto baseAddr = adaptor.getPtr();
     auto offset = adaptor.getOffset();
 
-    if (op->use_empty()) {
+    if (!isa<IntegerType>(baseAddr.getType()) ||
+        !isa<IntegerType>(offset.getType())) {
       rewriter.eraseOp(op);
       return success();
     }
-    if (!isa<IntegerType>(baseAddr.getType()) ||
-        !isa<IntegerType>(offset.getType())) {
-      return failure();
-    }
+
     auto type = cast<triton::PointerType>(op.getPtr().getType());
     auto elemType = type.getPointeeType();
     auto elemSize = elemType.getIntOrFloatBitWidth() / 8;

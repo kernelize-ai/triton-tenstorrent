@@ -46,6 +46,21 @@ struct SplatOpConversion : public OpConversionPattern<triton::SplatOp> {
   }
 };
 
+struct AddIOpConversion : public OpConversionPattern<arith::AddIOp> {
+  using OpConversionPattern<arith::AddIOp>::OpConversionPattern;
+
+  LogicalResult
+  matchAndRewrite(arith::AddIOp op, OpAdaptor adaptor,
+                  ConversionPatternRewriter &rewriter) const override {
+    if (isa<RankedTensorType>(op.getLhs().getType()) &&
+        isa<RankedTensorType>(op.getRhs().getType())) {
+      rewriter.eraseOp(op);
+      return success();
+    }
+    return failure();
+  }
+};
+
 struct DropFunctionArguments : public OpConversionPattern<func::FuncOp> {
   using OpConversionPattern<func::FuncOp>::OpConversionPattern;
 
@@ -227,66 +242,51 @@ struct ConvertTritonNPUToTTKernelPass
       return IntegerType::get(type.getContext(), 32);
     });
 
-    {
-      mlir::ConversionTarget funcTarget(*context);
-      funcTarget.addLegalDialect<func::FuncDialect>();
-      funcTarget.addIllegalOp<triton::FuncOp>();
-      funcTarget.addIllegalOp<triton::ReturnOp>();
+    mlir::ConversionTarget funcTarget(*context);
+    funcTarget.addLegalDialect<func::FuncDialect>();
+    funcTarget.addIllegalOp<triton::FuncOp>();
+    funcTarget.addIllegalOp<triton::ReturnOp>();
 
-      mlir::RewritePatternSet funcPatterns(context);
-      populateFuncOpConversionPattern(typeConverter, funcPatterns,
+    mlir::RewritePatternSet funcPatterns(context);
+    populateFuncOpConversionPattern(typeConverter, funcPatterns,
+                                    PatternBenefit(1));
+    if (failed(
+            applyPartialConversion(mod, funcTarget, std::move(funcPatterns))))
+      signalPassFailure();
+
+    mlir::ConversionTarget target{*context};
+
+    target.addLegalDialect<ttkernel::TTKernelDialect>();
+    target.addLegalDialect<arith::ArithDialect>();
+    target.addLegalDialect<func::FuncDialect>();
+
+    target.addIllegalDialect<triton::TritonDialect>();
+    target.addIllegalDialect<triton::gpu::TritonGPUDialect>();
+
+    target.addLegalOp<UnrealizedConversionCastOp>();
+    target.addDynamicallyLegalOp<func::FuncOp>(
+        [](func::FuncOp funcOp) { return funcOp.getNumArguments() == 0; });
+    target.addDynamicallyLegalOp<arith::AddIOp>([&](arith::AddIOp op) {
+      // only legal if not operating on tensors
+      return !(isa<RankedTensorType>(op.getLhs().getType()) &&
+               isa<RankedTensorType>(op.getRhs().getType()));
+    });
+
+    mlir::RewritePatternSet patterns(context);
+    populateMemoryOpConversionPattern(typeConverter, patterns,
                                       PatternBenefit(1));
-      if (applyPartialConversion(mod, funcTarget, std::move(funcPatterns))
-              .failed())
-        signalPassFailure();
-    }
+    populateComputeOpConversionPattern(typeConverter, patterns,
+                                       PatternBenefit(1));
+    populateElementwiseOpConversionPattern(typeConverter, patterns,
+                                           PatternBenefit(1));
+    populateSPMDOpConversionPattern(typeConverter, patterns, PatternBenefit(1));
 
-    //  Pass 1: TritonGPU to TTKernel
-    {
-      mlir::ConversionTarget target{*context};
+    patterns.add<DropFunctionArguments>(typeConverter, patterns.getContext());
+    patterns.add<SplatOpConversion>(typeConverter, patterns.getContext());
+    patterns.add<AddIOpConversion>(typeConverter, patterns.getContext());
 
-      target.addLegalDialect<ttkernel::TTKernelDialect>();
-      target.addLegalDialect<arith::ArithDialect>();
-      target.addLegalDialect<func::FuncDialect>();
-
-      target.addLegalOp<UnrealizedConversionCastOp>();
-      target.addDynamicallyLegalOp<func::FuncOp>(
-          [](func::FuncOp funcOp) { return funcOp.getNumArguments() == 0; });
-
-      mlir::RewritePatternSet patterns(context);
-      populateMemoryOpConversionPattern(typeConverter, patterns,
-                                        PatternBenefit(1));
-      populateComputeOpConversionPattern(typeConverter, patterns,
-                                         PatternBenefit(1));
-      populateElementwiseOpConversionPattern(typeConverter, patterns,
-                                             PatternBenefit(1));
-      populateSPMDOpConversionPattern(typeConverter, patterns,
-                                      PatternBenefit(1));
-
-      patterns.add<DropFunctionArguments>(typeConverter, patterns.getContext());
-      patterns.add<SplatOpConversion>(typeConverter, patterns.getContext());
-
-      if (failed(applyPartialConversion(mod, target, std::move(patterns))))
-        return signalPassFailure();
-    }
-
-#if 0
-    //  Pass 2: Dead code elimination
-    {
-      // Expensive iterative DCE
-      // TODO: Walk once, then track inputs to recursively erase dead ops
-      int cnt = 1;
-      while (cnt > 0) {
-        cnt = 0;
-        mod.walk<WalkOrder::PreOrder>([&](Operation *op) {
-          if (op != mod.getOperation() && isOpTriviallyDead(op)) {
-            op->erase();
-            cnt++;
-          }
-        });
-      }
-    }
-#endif
+    if (failed(applyPartialConversion(mod, target, std::move(patterns))))
+      return signalPassFailure();
 
     // insert tile regs acquire before copy tile ops
     mod.walk([&](func::FuncOp funcOp) {
