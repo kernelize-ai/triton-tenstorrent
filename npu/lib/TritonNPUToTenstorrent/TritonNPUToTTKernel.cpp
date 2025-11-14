@@ -10,6 +10,7 @@
 #include "triton/Dialect/TritonGPU/IR/Dialect.h"
 
 #include "PatternTritonNPUToTenstorrent.h"
+#include "Utility.h"
 
 #include "npu/include/Dialect/TritonTenstorrent/IR/Attributes.h"
 #include "npu/include/Dialect/TritonTenstorrent/IR/Dialect.h"
@@ -34,24 +35,6 @@ namespace npu {
 
 namespace {
 
-static Value getI32Const(OpBuilder &rewriter, Location loc, int64_t value) {
-  return arith::ConstantOp::create(
-      rewriter, loc, rewriter.getI32Type(),
-      rewriter.getIntegerAttr(rewriter.getI32Type(), value));
-}
-
-static Value getI1Const(OpBuilder &rewriter, Location loc, bool value) {
-  return arith::ConstantOp::create(
-      rewriter, loc, rewriter.getI1Type(),
-      rewriter.getIntegerAttr(rewriter.getI1Type(), value));
-}
-
-static Value getIConst(OpBuilder &rewriter, Location loc, int64_t value) {
-  return arith::ConstantOp::create(
-      rewriter, loc, rewriter.getIndexType(),
-      rewriter.getIntegerAttr(rewriter.getIndexType(), value));
-}
-
 struct ConvertBinaryComputeOp
     : public OpConversionPattern<npu::tt::BinaryComputeOp> {
   using OpConversionPattern<npu::tt::BinaryComputeOp>::OpConversionPattern;
@@ -65,9 +48,9 @@ struct ConvertBinaryComputeOp
       return failure();
 
     ttkernel::AddBinaryTilesInitOp::create(rewriter, loc);
-    Value lhsIndex = getIConst(rewriter, loc, 0);
-    Value rhsIndex = getIConst(rewriter, loc, 1);
-    Value destIndex = getIConst(rewriter, loc, 2);
+    Value lhsIndex = arith::createIndexConstant(loc, rewriter, 0);
+    Value rhsIndex = arith::createIndexConstant(loc, rewriter, 1);
+    Value destIndex = arith::createIndexConstant(loc, rewriter, 2);
     ttkernel::AddBinaryTilesOp::create(rewriter, loc, lhsIndex, rhsIndex,
                                        destIndex);
 
@@ -136,18 +119,18 @@ static Value computeNocAddr(ConversionPatternRewriter &rewriter, Location loc,
     ptrType = cast<triton::PointerType>(elemType);
   }
   auto elemType = ptrType.getPointeeType();
-  Value elemSizeValue =
-      getI32Const(rewriter, loc, elemType.getIntOrFloatBitWidth() / 8);
+  Value elemSizeValue = arith::createConstantI32(
+      loc, rewriter, elemType.getIntOrFloatBitWidth() / 8);
   offset = arith::MulIOp::create(rewriter, loc, offset, elemSizeValue);
 
   Value tile_id = arith::DivUIOp::create(rewriter, loc, offset, pageSize);
 
-  Value const1 = getI32Const(rewriter, loc, 1);
-  Value const0 = getI32Const(rewriter, loc, 0);
+  Value const1 = arith::createConstantI32(loc, rewriter, 1);
+  Value const0 = arith::createConstantI32(loc, rewriter, 0);
 
   // Create interleaved address generator and get noc address
   auto dataFormat = ttkernel::GetDataFormatOp::create(rewriter, loc, cb);
-  Value c1bit = getI1Const(rewriter, loc, 1);
+  Value c1bit = arith::createConstantI1(loc, rewriter, 1);
   Value addrGen = ttkernel::GetInterleavedAddrGenFastOp::create(
       rewriter, loc, c1bit, baseAddr, pageSize, dataFormat);
   Value nocAddr = ttkernel::InterleavedAddrGenFastGetNocAddrOp::create(
@@ -187,7 +170,7 @@ struct ConvertLoadOp : public OpConversionPattern<triton::LoadOp> {
     // 1. reserve back on the cb to know data is ready to store to SRAM
     //       ttkernel.cb_reserve_back(%0, %c1_i32)
     // add later?
-    Value const1 = getI32Const(rewriter, loc, 1);
+    Value const1 = arith::createConstantI32(loc, rewriter, 1);
     ttkernel::CBReserveBackOp::create(rewriter, loc, cb, const1);
 
     // 3. get L1 address
@@ -227,7 +210,7 @@ struct ConvertStoreOp : public OpConversionPattern<triton::StoreOp> {
     Value l1Addr = ttkernel::GetReadPtrOp::create(rewriter, loc, cb);
     ttkernel::NocAsyncWriteOp::create(rewriter, loc, l1Addr, nocAddr, pageSize);
     ttkernel::NocAsyncWriteBarrierOp::create(rewriter, loc);
-    Value numPages = getI32Const(rewriter, loc, 1);
+    Value numPages = arith::createConstantI32(loc, rewriter, 1);
     ttkernel::CBPopFrontOp::create(rewriter, loc, cb, numPages);
     rewriter.eraseOp(op);
     return success();
@@ -248,12 +231,12 @@ struct ConvertLocalStoreOp : public OpConversionPattern<gpu::LocalStoreOp> {
     if (!isa<triton::LoadOp>(srcOp)) {
       // COMPUTE KERNEL
       // reserve back the cb for the store
-      Value numPages = getI32Const(rewriter, loc, 1);
+      Value numPages = arith::createConstantI32(loc, rewriter, 1);
       ttkernel::CBReserveBackOp::create(rewriter, loc, dst, numPages);
 
       // Pack the tile into the cb
-      Value destRegisterIndex = getIConst(rewriter, loc, 2);
-      Value outIndex = getIConst(rewriter, loc, 0);
+      Value destRegisterIndex = arith::createIndexConstant(loc, rewriter, 2);
+      Value outIndex = arith::createIndexConstant(loc, rewriter, 0);
       ttkernel::PackTileOp::create(rewriter, loc, destRegisterIndex, dst,
                                    outIndex,
                                    /*outOfOrder=*/true);
@@ -262,7 +245,7 @@ struct ConvertLocalStoreOp : public OpConversionPattern<gpu::LocalStoreOp> {
       return success();
     }
 
-    Value const1 = getI32Const(rewriter, loc, 1);
+    Value const1 = arith::createConstantI32(loc, rewriter, 1);
     //       ttkernel.cb_push_back(%0, %c1_i32)
     ttkernel::CBPushBackOp::create(rewriter, loc, dst, const1);
 
@@ -290,7 +273,7 @@ struct ConvertLocalLoadOp : public OpConversionPattern<gpu::LocalLoadOp> {
            "expected local load with store user to have one use");
     if (isa<StoreOp>(*op->getUsers().begin())) {
       // wait front on the cb to know data is ready
-      Value numPages = getI32Const(rewriter, loc, 1);
+      Value numPages = arith::createConstantI32(loc, rewriter, 1);
       auto waitFrontOp =
           ttkernel::CBWaitFrontOp::create(rewriter, loc, src, numPages);
       rewriter.replaceOp(op, src);
@@ -298,13 +281,14 @@ struct ConvertLocalLoadOp : public OpConversionPattern<gpu::LocalLoadOp> {
     }
 
     ttkernel::CopyTileInitOp::create(rewriter, loc, src);
-    Value c0 = getIConst(rewriter, loc, 0);
+    Value c0 = arith::createIndexConstant(loc, rewriter, 0);
 
     auto dst = op.getResult();
     auto dstType = cast<RankedTensorType>(dst.getType());
     npu::tt::TileEncodingAttr loadEncoding =
         cast<npu::tt::TileEncodingAttr>(dstType.getEncoding());
-    Value destRegisterIndex = getIConst(rewriter, loc, loadEncoding.getIndex());
+    Value destRegisterIndex =
+        arith::createIndexConstant(loc, rewriter, loadEncoding.getIndex());
     ttkernel::CopyTileOp::create(rewriter, loc, src, c0, destRegisterIndex);
     rewriter.replaceOp(op, src);
     return success();
@@ -354,7 +338,7 @@ struct DropFunctionArguments : public OpConversionPattern<func::FuncOp> {
 
     for (auto arg : llvm::enumerate(funcOp.getArguments())) {
       Type newType = typeConverter->convertType(arg.value().getType());
-      Value argIndex = getIConst(rewriter, loc, arg.index());
+      Value argIndex = arith::createIndexConstant(loc, rewriter, arg.index());
       auto getArgValOp =
           ttkernel::GetArgValOp::create(rewriter, loc, newType, argIndex);
       arg.value().replaceAllUsesWith(getArgValOp);
@@ -388,7 +372,7 @@ struct ConvertAddPtrOp : public OpConversionPattern<AddPtrOp> {
     auto type = cast<triton::PointerType>(op.getPtr().getType());
     auto elemType = type.getPointeeType();
     auto elemSize = elemType.getIntOrFloatBitWidth() / 8;
-    Value elemSizeValue = getI32Const(rewriter, loc, elemSize);
+    Value elemSizeValue = arith::createConstantI32(loc, rewriter, elemSize);
     offset = arith::MulIOp::create(rewriter, loc, offset, elemSizeValue);
     auto newAddPtrOp = arith::AddIOp::create(rewriter, loc, baseAddr, offset);
     rewriter.replaceOp(op, newAddPtrOp.getResult());
@@ -426,7 +410,8 @@ struct ConvertGetProgramIdOp : public OpConversionPattern<GetProgramIdOp> {
     auto funcOp = op->getParentOfType<func::FuncOp>();
     auto launchParamIndex =
         funcOp->getAttrOfType<IntegerAttr>("tt.num_args").getInt();
-    Value paramIndexValue = getIConst(rewriter, loc, launchParamIndex + axis);
+    Value paramIndexValue =
+        arith::createIndexConstant(loc, rewriter, launchParamIndex + axis);
     auto launchParam = ttkernel::GetArgValOp::create(
         rewriter, loc, rewriter.getI32Type(), paramIndexValue);
     rewriter.replaceOp(op, launchParam);
@@ -489,8 +474,8 @@ public:
     OpBuilder builder(copyTileInitOps.front());
     for (auto copyTileOpItr : copyTileOps) {
       ttkernel::CopyTileOp copyTileOp = copyTileOpItr.first;
-      Value numTiles =
-          getI32Const(builder, copyTileOp->getLoc(), copyTileOpItr.second);
+      Value numTiles = arith::createConstantI32(copyTileOp->getLoc(), builder,
+                                                copyTileOpItr.second);
       Value cb = copyTileOp.getCb0();
       ttkernel::CBWaitFrontOp::create(builder, copyTileOp->getLoc(), cb,
                                       numTiles);
