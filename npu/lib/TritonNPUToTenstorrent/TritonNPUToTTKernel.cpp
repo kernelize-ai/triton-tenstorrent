@@ -35,6 +35,17 @@ namespace npu {
 
 namespace {
 
+struct SplatOpConversion : public OpConversionPattern<triton::SplatOp> {
+  using OpConversionPattern<triton::SplatOp>::OpConversionPattern;
+
+  LogicalResult
+  matchAndRewrite(triton::SplatOp op, OpAdaptor adaptor,
+                  ConversionPatternRewriter &rewriter) const override {
+    rewriter.eraseOp(op);
+    return success();
+  }
+};
+
 struct DropFunctionArguments : public OpConversionPattern<func::FuncOp> {
   using OpConversionPattern<func::FuncOp>::OpConversionPattern;
 
@@ -253,11 +264,13 @@ struct ConvertTritonNPUToTTKernelPass
                                       PatternBenefit(1));
 
       patterns.add<DropFunctionArguments>(typeConverter, patterns.getContext());
+      patterns.add<SplatOpConversion>(typeConverter, patterns.getContext());
 
-      if (applyPartialConversion(mod, target, std::move(patterns)).failed())
-        llvm::errs() << "Failed to convert TritonNPU to TTKernel\n"; // message
+      if (failed(applyPartialConversion(mod, target, std::move(patterns))))
+        return signalPassFailure();
     }
 
+#if 0
     //  Pass 2: Dead code elimination
     {
       // Expensive iterative DCE
@@ -273,6 +286,7 @@ struct ConvertTritonNPUToTTKernelPass
         });
       }
     }
+#endif
 
     // insert tile regs acquire before copy tile ops
     mod.walk([&](func::FuncOp funcOp) {
