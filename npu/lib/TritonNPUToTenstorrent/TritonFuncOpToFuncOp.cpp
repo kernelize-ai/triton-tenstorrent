@@ -69,16 +69,16 @@ struct ConvertTritonFunc : public OpConversionPattern<triton::FuncOp> {
       }
     }
 
-    Block &entry = funcOp.getBody().front();
-    const unsigned numArgs = entry.getNumArguments();
+    Block &oldEntry = funcOp.getBody().front();
+    const unsigned numArgs = oldEntry.getNumArguments();
+
+#if 0
     {
       OpBuilder::InsertionGuard guard(rewriter);
       rewriter.setInsertionPointToStart(&entry);
 
       for (auto [idx, arg] : llvm::enumerate(entry.getArguments())) {
         Type newType = typeConverter->convertType(arg.getType());
-        if (!newType)
-          return funcOp->emitError() << "failed to convert arg type " << idx;
 
         LDBG("Replacing arg " << idx << " of type " << arg.getType()
                               << " with type " << newType);
@@ -86,10 +86,25 @@ struct ConvertTritonFunc : public OpConversionPattern<triton::FuncOp> {
         auto getArgVal =
             ttkernel::GetArgValOp::create(rewriter, loc, newType, indexVal);
 
+#if 0
+        Value replacement = arg.getType();
+        if (newType != oldType) {
+          auto castOr =
+            typeConverter->materializeTargetConversion(
+              rewriter, loc, oldType, ValueRange{replacement});
+          if (failed(castOr)) {
+              return funcOp->emitError()
+               << "failed to materialize conversion for arg " << idx;
+          }
+          replacement = *castOr;
+      }
+#endif
         // Replace all uses of the block argument by the GetArgVal result.
-        arg.replaceAllUsesWith(getArgVal.getResult());
+        // arg.replaceAllUsesWith(getArgVal.getResult());
+        rewriter.replaceAllUsesWith(arg, getArgVal);
       }
     }
+#endif
 
     // create a new function with no arguments
     mlir::FunctionType newTy = mlir::FunctionType::get(
@@ -112,12 +127,44 @@ struct ConvertTritonFunc : public OpConversionPattern<triton::FuncOp> {
         newFunc, rewriter.getAttr<ttkernel::ArgSpecAttr>(rtArgs, ctArgs));
 
     // copy the body
+    Region &newRegion = newFunc.getBody();
+
+#if 1
+    auto *newEntry = rewriter.createBlock(&newRegion);
+    // copy all the blocks first, then we'll fix up the arguments and merge the
+    // fix in
+    rewriter.inlineRegionBefore(funcOp.getBody(), newRegion, newRegion.end());
+
+    {
+      OpBuilder::InsertionGuard guard(rewriter);
+      rewriter.setInsertionPointToStart(newEntry);
+
+      SmallVector<Value> argReplacements;
+      argReplacements.reserve(oldEntry.getNumArguments());
+      for (auto [idx, arg] : llvm::enumerate(oldEntry.getArguments())) {
+        Type oldType = arg.getType();
+        Type newType = typeConverter->convertType(oldType);
+
+        LDBG("Replacing arg " << idx << " of type " << oldType << " with type "
+                              << newType);
+
+        Value indexVal = arith::createIndexConstant(loc, rewriter, idx);
+        Value getArgVal =
+            ttkernel::GetArgValOp::create(rewriter, loc, newType, indexVal);
+
+        argReplacements.push_back(getArgVal);
+      }
+      rewriter.mergeBlocks(&oldEntry, newEntry, argReplacements);
+    }
+
+#else
+
     rewriter.inlineRegionBefore(funcOp.getBody(), newFunc.getBody(),
                                 newFunc.end());
 
     Block &newEntry = newFunc.getBody().front();
     newEntry.eraseArguments(0, numArgs);
-
+#endif
     // Number of user args
     // TODO: add launch params (grid size, block size, shared memory size, etc)
     newFunc->setAttr("tt.num_args", rewriter.getI32IntegerAttr(numArgs));

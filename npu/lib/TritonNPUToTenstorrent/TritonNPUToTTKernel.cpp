@@ -205,6 +205,12 @@ struct ConvertTritonNPUToTTKernelPass
       // convert pointer to i32
       return IntegerType::get(type.getContext(), 32);
     });
+    typeConverter.addSourceMaterialization(
+        [](OpBuilder &builder, PointerType type, ValueRange inputs,
+           Location loc) -> Value {
+          return UnrealizedConversionCastOp::create(builder, loc, type, inputs)
+              .getResult(0);
+        });
 
     mlir::ConversionTarget funcTarget(*context);
     funcTarget.addIllegalOp<triton::FuncOp>();
@@ -222,6 +228,10 @@ struct ConvertTritonNPUToTTKernelPass
             applyPartialConversion(mod, funcTarget, std::move(funcPatterns))))
       return signalPassFailure();
 
+    llvm::errs() << "post func target lowering:\n";
+    mod.dump();
+    llvm::errs() << "### \n";
+
     mlir::ConversionTarget target{*context};
 
     target.addLegalDialect<ttkernel::TTKernelDialect>();
@@ -231,7 +241,8 @@ struct ConvertTritonNPUToTTKernelPass
     target.addIllegalDialect<triton::TritonDialect>();
     target.addIllegalDialect<triton::gpu::TritonGPUDialect>();
 
-    target.addLegalOp<UnrealizedConversionCastOp>();
+    // target.addIllegalOp<UnrealizedConversionCastOp>(); // TODO: this just
+    // gets deleted when splatop gets deleted
     target.addDynamicallyLegalOp<func::FuncOp>(
         [](func::FuncOp funcOp) { return funcOp.getNumArguments() == 0; });
     target.addDynamicallyLegalDialect<arith::ArithDialect>([&](Operation *op) {
