@@ -41,11 +41,13 @@ struct ConvertAddPtrOp : public OpConversionPattern<AddPtrOp> {
   }
 };
 
-struct AddIOpConversion : public OpConversionPattern<arith::AddIOp> {
-  using OpConversionPattern<arith::AddIOp>::OpConversionPattern;
+template <typename OpTy>
+struct ArithBinaryOpOnTensorsConversion : public OpConversionPattern<OpTy> {
+  using OpConversionPattern<OpTy>::OpConversionPattern;
+  using OpAdaptor = typename OpTy::Adaptor;
 
   LogicalResult
-  matchAndRewrite(arith::AddIOp op, OpAdaptor adaptor,
+  matchAndRewrite(OpTy op, OpAdaptor adaptor,
                   ConversionPatternRewriter &rewriter) const override {
     if (isa<RankedTensorType>(op.getLhs().getType()) &&
         isa<RankedTensorType>(op.getRhs().getType())) {
@@ -62,7 +64,17 @@ void populateElementwiseOpConversionPattern(TypeConverter &typeConverter,
                                             RewritePatternSet &patterns,
                                             PatternBenefit benefit) {
   patterns.add<ConvertAddPtrOp>(typeConverter, patterns.getContext());
-  patterns.add<AddIOpConversion>(typeConverter, patterns.getContext());
+
+#define POPULATE_ARITH_BINARY_OP_ON_TENSORS(OP)                                \
+  patterns.add<ArithBinaryOpOnTensorsConversion<OP>>(typeConverter,            \
+                                                     patterns.getContext());
+
+  POPULATE_ARITH_BINARY_OP_ON_TENSORS(arith::AddIOp);
+  POPULATE_ARITH_BINARY_OP_ON_TENSORS(arith::MulIOp);
+  POPULATE_ARITH_BINARY_OP_ON_TENSORS(arith::RemSIOp);
+
+  // TODO: can this be handled by RemoveRedundantMasks instead?
+  POPULATE_ARITH_BINARY_OP_ON_TENSORS(arith::CmpIOp);
 }
 
 } // namespace npu
