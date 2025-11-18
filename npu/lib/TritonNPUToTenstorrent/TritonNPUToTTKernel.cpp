@@ -50,10 +50,12 @@ struct DropFunctionArguments : public OpConversionPattern<func::FuncOp> {
     rewriter.setInsertionPointToStart(&funcOp.getBody().front());
 
     for (auto arg : llvm::enumerate(funcOp.getArguments())) {
-      Type newType = typeConverter->convertType(arg.value().getType());
-      LDBG("Replacing arg " << arg.index() << " of type "
-                            << arg.value().getType() << " with type "
-                            << newType);
+      Type argType = arg.value().getType();
+      Type newType = isa<PointerType>(argType)
+                         ? IntegerType::get(argType.getContext(), 32)
+                         : typeConverter->convertType(argType);
+      LDBG("Replacing arg " << arg.index() << " of type " << argType
+                            << " with type " << newType);
       Value argIndex = arith::createIndexConstant(loc, rewriter, arg.index());
       auto getArgValOp =
           ttkernel::GetArgValOp::create(rewriter, loc, newType, argIndex);
@@ -198,10 +200,6 @@ struct ConvertTritonNPUToTTKernelPass
         return ttkernel::CBType::get(cbMemRefType);
       }
       return type;
-    });
-    typeConverter.addConversion([](triton::PointerType type) -> Type {
-      // convert pointer to i32
-      return IntegerType::get(type.getContext(), 32);
     });
 
     mlir::ConversionTarget funcTarget(*context);
