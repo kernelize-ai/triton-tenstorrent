@@ -51,6 +51,9 @@ struct DropFunctionArguments : public OpConversionPattern<func::FuncOp> {
 
     for (auto arg : llvm::enumerate(funcOp.getArguments())) {
       Type newType = typeConverter->convertType(arg.value().getType());
+      LDBG("Replacing arg " << arg.index() << " of type "
+                            << arg.value().getType() << " with type "
+                            << newType);
       Value argIndex = arith::createIndexConstant(loc, rewriter, arg.index());
       auto getArgValOp =
           ttkernel::GetArgValOp::create(rewriter, loc, newType, argIndex);
