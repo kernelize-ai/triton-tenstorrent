@@ -57,7 +57,9 @@ struct DropFunctionArguments : public OpConversionPattern<func::FuncOp> {
       Value argIndex = arith::createIndexConstant(loc, rewriter, arg.index());
       auto getArgValOp =
           ttkernel::GetArgValOp::create(rewriter, loc, newType, argIndex);
-      arg.value().replaceAllUsesWith(getArgValOp);
+      // TODO: can we move this to the func op lowering and just delete the
+      // arguments post-lowering?
+      rewriter.replaceAllUsesWith(arg.value(), getArgValOp);
     }
     BitVector erasedArgs(numArgs, true);
     (void)funcOp.eraseArguments(erasedArgs);
@@ -182,8 +184,8 @@ struct ConvertTritonNPUToTTKernelPass
     typeConverter.addConversion([](RankedTensorType type) -> Type {
       auto etype = type.getElementType();
       if (isa<triton::PointerType>(etype)) {
-        etype = IntegerType::get(type.getContext(), 32);
-        return RankedTensorType::get(type.getShape(), etype);
+        return RankedTensorType::get(type.getShape(),
+                                     IntegerType::get(type.getContext(), 32));
       }
       if (isa<npu::tt::TileEncodingAttr>(type.getEncoding())) {
         // TODO: same caveats as above re:ttts layout
@@ -205,9 +207,13 @@ struct ConvertTritonNPUToTTKernelPass
     });
 
     mlir::ConversionTarget funcTarget(*context);
-    funcTarget.addLegalDialect<func::FuncDialect>();
     funcTarget.addIllegalOp<triton::FuncOp>();
     funcTarget.addIllegalOp<triton::ReturnOp>();
+
+    funcTarget.addLegalDialect<arith::ArithDialect>();
+    funcTarget.addLegalDialect<func::FuncDialect>();
+    funcTarget.addLegalOp<UnrealizedConversionCastOp>();
+    funcTarget.addLegalOp<ttkernel::GetArgValOp>();
 
     mlir::RewritePatternSet funcPatterns(context);
     populateFuncOpConversionPattern(typeConverter, funcPatterns,
@@ -247,7 +253,8 @@ struct ConvertTritonNPUToTTKernelPass
     populateSPMDOpConversionPattern(typeConverter, patterns, PatternBenefit(1));
     populateViewOpConversionPattern(typeConverter, patterns, PatternBenefit(1));
 
-    patterns.add<DropFunctionArguments>(typeConverter, patterns.getContext());
+    // patterns.add<DropFunctionArguments>(typeConverter,
+    // patterns.getContext());
 
     if (failed(applyPartialConversion(mod, target, std::move(patterns))))
       return signalPassFailure();
