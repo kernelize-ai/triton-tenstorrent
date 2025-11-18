@@ -12,11 +12,13 @@ namespace npu {
 
 namespace {
 
-struct SplatOpConversion : public OpConversionPattern<triton::SplatOp> {
-  using OpConversionPattern<triton::SplatOp>::OpConversionPattern;
+template <typename OpTy>
+struct ViewOpEraser : public OpConversionPattern<OpTy> {
+  using OpConversionPattern<OpTy>::OpConversionPattern;
+  using OpAdaptor = typename OpTy::Adaptor;
 
   LogicalResult
-  matchAndRewrite(triton::SplatOp op, OpAdaptor adaptor,
+  matchAndRewrite(OpTy op, OpAdaptor adaptor,
                   ConversionPatternRewriter &rewriter) const override {
     auto srcOp = op.getSrc().getDefiningOp();
     if (isa<IntegerType>(adaptor.getSrc().getType())) {
@@ -34,7 +36,12 @@ struct SplatOpConversion : public OpConversionPattern<triton::SplatOp> {
 void populateViewOpConversionPattern(TypeConverter &typeConverter,
                                      RewritePatternSet &patterns,
                                      PatternBenefit benefit) {
-  patterns.add<SplatOpConversion>(typeConverter, patterns.getContext());
+  patterns.add<ViewOpEraser<triton::SplatOp>>(typeConverter,
+                                              patterns.getContext());
+  patterns.add<ViewOpEraser<triton::ExpandDimsOp>>(typeConverter,
+                                                   patterns.getContext());
+  patterns.add<ViewOpEraser<triton::BroadcastOp>>(typeConverter,
+                                                  patterns.getContext());
 }
 
 } // namespace npu
