@@ -195,6 +195,11 @@ struct ConvertTritonNPUToTTKernelPass
             applyPartialConversion(mod, funcTarget, std::move(funcPatterns))))
       return signalPassFailure();
 
+    LLVM_DEBUG({
+      DBGS() << "After FuncOp conversion:\n";
+      mod.dump();
+    });
+
     mlir::ConversionTarget target{*context};
 
     target.addLegalDialect<ttkernel::TTKernelDialect>();
