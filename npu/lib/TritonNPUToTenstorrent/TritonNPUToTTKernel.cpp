@@ -35,39 +35,6 @@ namespace npu {
 
 namespace {
 
-struct DropFunctionArguments : public OpConversionPattern<func::FuncOp> {
-  using OpConversionPattern<func::FuncOp>::OpConversionPattern;
-
-  LogicalResult
-  matchAndRewrite(func::FuncOp funcOp, OpAdaptor adaptor,
-                  ConversionPatternRewriter &rewriter) const override {
-    Location loc = funcOp.getLoc();
-    auto typeConverter = getTypeConverter();
-
-    auto numArgs = funcOp.getNumArguments();
-
-    OpBuilder::InsertionGuard guard(rewriter);
-    rewriter.setInsertionPointToStart(&funcOp.getBody().front());
-
-    for (auto arg : llvm::enumerate(funcOp.getArguments())) {
-      Type newType = typeConverter->convertType(arg.value().getType());
-      LDBG("Replacing arg " << arg.index() << " of type "
-                            << arg.value().getType() << " with type "
-                            << newType);
-      Value argIndex = arith::createIndexConstant(loc, rewriter, arg.index());
-      auto getArgValOp =
-          ttkernel::GetArgValOp::create(rewriter, loc, newType, argIndex);
-      // TODO: can we move this to the func op lowering and just delete the
-      // arguments post-lowering?
-      rewriter.replaceAllUsesWith(arg.value(), getArgValOp);
-    }
-    BitVector erasedArgs(numArgs, true);
-    (void)funcOp.eraseArguments(erasedArgs);
-
-    return success();
-  }
-};
-
 inline bool isCBOp(Operation *op) {
   if (auto compileTimeArg = dyn_cast<ttkernel::GetCompileArgValOp>(op)) {
     return isa<ttkernel::CBType>(compileTimeArg.getType());
@@ -228,10 +195,6 @@ struct ConvertTritonNPUToTTKernelPass
             applyPartialConversion(mod, funcTarget, std::move(funcPatterns))))
       return signalPassFailure();
 
-    llvm::errs() << "post func target lowering:\n";
-    mod.dump();
-    llvm::errs() << "### \n";
-
     mlir::ConversionTarget target{*context};
 
     target.addLegalDialect<ttkernel::TTKernelDialect>();
@@ -241,8 +204,6 @@ struct ConvertTritonNPUToTTKernelPass
     target.addIllegalDialect<triton::TritonDialect>();
     target.addIllegalDialect<triton::gpu::TritonGPUDialect>();
 
-    // target.addIllegalOp<UnrealizedConversionCastOp>(); // TODO: this just
-    // gets deleted when splatop gets deleted
     target.addDynamicallyLegalOp<func::FuncOp>(
         [](func::FuncOp funcOp) { return funcOp.getNumArguments() == 0; });
     target.addDynamicallyLegalDialect<arith::ArithDialect>([&](Operation *op) {
@@ -263,9 +224,6 @@ struct ConvertTritonNPUToTTKernelPass
                                          PatternBenefit(1));
     populateSPMDOpConversionPattern(typeConverter, patterns, PatternBenefit(1));
     populateViewOpConversionPattern(typeConverter, patterns, PatternBenefit(1));
-
-    // patterns.add<DropFunctionArguments>(typeConverter,
-    // patterns.getContext());
 
     if (failed(applyPartialConversion(mod, target, std::move(patterns))))
       return signalPassFailure();

@@ -72,40 +72,6 @@ struct ConvertTritonFunc : public OpConversionPattern<triton::FuncOp> {
     Block &oldEntry = funcOp.getBody().front();
     const unsigned numArgs = oldEntry.getNumArguments();
 
-#if 0
-    {
-      OpBuilder::InsertionGuard guard(rewriter);
-      rewriter.setInsertionPointToStart(&entry);
-
-      for (auto [idx, arg] : llvm::enumerate(entry.getArguments())) {
-        Type newType = typeConverter->convertType(arg.getType());
-
-        LDBG("Replacing arg " << idx << " of type " << arg.getType()
-                              << " with type " << newType);
-        Value indexVal = arith::createIndexConstant(loc, rewriter, idx);
-        auto getArgVal =
-            ttkernel::GetArgValOp::create(rewriter, loc, newType, indexVal);
-
-#if 0
-        Value replacement = arg.getType();
-        if (newType != oldType) {
-          auto castOr =
-            typeConverter->materializeTargetConversion(
-              rewriter, loc, oldType, ValueRange{replacement});
-          if (failed(castOr)) {
-              return funcOp->emitError()
-               << "failed to materialize conversion for arg " << idx;
-          }
-          replacement = *castOr;
-      }
-#endif
-        // Replace all uses of the block argument by the GetArgVal result.
-        // arg.replaceAllUsesWith(getArgVal.getResult());
-        rewriter.replaceAllUsesWith(arg, getArgVal);
-      }
-    }
-#endif
-
     // create a new function with no arguments
     mlir::FunctionType newTy = mlir::FunctionType::get(
         context, /*inputs=*/TypeRange{}, /*results=*/TypeRange{});
@@ -129,7 +95,6 @@ struct ConvertTritonFunc : public OpConversionPattern<triton::FuncOp> {
     // copy the body
     Region &newRegion = newFunc.getBody();
 
-#if 1
     auto *newEntry = rewriter.createBlock(&newRegion);
     // copy all the blocks first, then we'll fix up the arguments and merge the
     // fix in
@@ -157,14 +122,6 @@ struct ConvertTritonFunc : public OpConversionPattern<triton::FuncOp> {
       rewriter.mergeBlocks(&oldEntry, newEntry, argReplacements);
     }
 
-#else
-
-    rewriter.inlineRegionBefore(funcOp.getBody(), newFunc.getBody(),
-                                newFunc.end());
-
-    Block &newEntry = newFunc.getBody().front();
-    newEntry.eraseArguments(0, numArgs);
-#endif
     // Number of user args
     // TODO: add launch params (grid size, block size, shared memory size, etc)
     newFunc->setAttr("tt.num_args", rewriter.getI32IntegerAttr(numArgs));
