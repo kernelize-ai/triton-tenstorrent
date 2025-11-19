@@ -35,37 +35,6 @@ namespace npu {
 
 namespace {
 
-struct DropFunctionArguments : public OpConversionPattern<func::FuncOp> {
-  using OpConversionPattern<func::FuncOp>::OpConversionPattern;
-
-  LogicalResult
-  matchAndRewrite(func::FuncOp funcOp, OpAdaptor adaptor,
-                  ConversionPatternRewriter &rewriter) const override {
-    Location loc = funcOp.getLoc();
-    auto typeConverter = getTypeConverter();
-
-    auto numArgs = funcOp.getNumArguments();
-
-    OpBuilder::InsertionGuard guard(rewriter);
-    rewriter.setInsertionPointToStart(&funcOp.getBody().front());
-
-    for (auto arg : llvm::enumerate(funcOp.getArguments())) {
-      Type newType = typeConverter->convertType(arg.value().getType());
-      LDBG("Replacing arg " << arg.index() << " of type "
-                            << arg.value().getType() << " with type "
-                            << newType);
-      Value argIndex = arith::createIndexConstant(loc, rewriter, arg.index());
-      auto getArgValOp =
-          ttkernel::GetArgValOp::create(rewriter, loc, newType, argIndex);
-      arg.value().replaceAllUsesWith(getArgValOp);
-    }
-    BitVector erasedArgs(numArgs, true);
-    (void)funcOp.eraseArguments(erasedArgs);
-
-    return success();
-  }
-};
-
 inline bool isCBOp(Operation *op) {
   if (auto compileTimeArg = dyn_cast<ttkernel::GetCompileArgValOp>(op)) {
     return isa<ttkernel::CBType>(compileTimeArg.getType());
@@ -182,8 +151,8 @@ struct ConvertTritonNPUToTTKernelPass
     typeConverter.addConversion([](RankedTensorType type) -> Type {
       auto etype = type.getElementType();
       if (isa<triton::PointerType>(etype)) {
-        etype = IntegerType::get(type.getContext(), 32);
-        return RankedTensorType::get(type.getShape(), etype);
+        return RankedTensorType::get(type.getShape(),
+                                     IntegerType::get(type.getContext(), 32));
       }
       if (isa<npu::tt::TileEncodingAttr>(type.getEncoding())) {
         // TODO: same caveats as above re:ttts layout
@@ -203,11 +172,21 @@ struct ConvertTritonNPUToTTKernelPass
       // convert pointer to i32
       return IntegerType::get(type.getContext(), 32);
     });
+    typeConverter.addSourceMaterialization(
+        [](OpBuilder &builder, PointerType type, ValueRange inputs,
+           Location loc) -> Value {
+          return UnrealizedConversionCastOp::create(builder, loc, type, inputs)
+              .getResult(0);
+        });
 
     mlir::ConversionTarget funcTarget(*context);
-    funcTarget.addLegalDialect<func::FuncDialect>();
     funcTarget.addIllegalOp<triton::FuncOp>();
     funcTarget.addIllegalOp<triton::ReturnOp>();
+
+    funcTarget.addLegalDialect<arith::ArithDialect>();
+    funcTarget.addLegalDialect<func::FuncDialect>();
+    funcTarget.addLegalOp<UnrealizedConversionCastOp>();
+    funcTarget.addLegalOp<ttkernel::GetArgValOp>();
 
     mlir::RewritePatternSet funcPatterns(context);
     populateFuncOpConversionPattern(typeConverter, funcPatterns,
@@ -215,6 +194,11 @@ struct ConvertTritonNPUToTTKernelPass
     if (failed(
             applyPartialConversion(mod, funcTarget, std::move(funcPatterns))))
       return signalPassFailure();
+
+    LLVM_DEBUG({
+      DBGS() << "After FuncOp conversion:\n";
+      mod.dump();
+    });
 
     mlir::ConversionTarget target{*context};
 
@@ -225,7 +209,6 @@ struct ConvertTritonNPUToTTKernelPass
     target.addIllegalDialect<triton::TritonDialect>();
     target.addIllegalDialect<triton::gpu::TritonGPUDialect>();
 
-    target.addLegalOp<UnrealizedConversionCastOp>();
     target.addDynamicallyLegalOp<func::FuncOp>(
         [](func::FuncOp funcOp) { return funcOp.getNumArguments() == 0; });
     target.addDynamicallyLegalDialect<arith::ArithDialect>([&](Operation *op) {
@@ -246,8 +229,6 @@ struct ConvertTritonNPUToTTKernelPass
                                          PatternBenefit(1));
     populateSPMDOpConversionPattern(typeConverter, patterns, PatternBenefit(1));
     populateViewOpConversionPattern(typeConverter, patterns, PatternBenefit(1));
-
-    patterns.add<DropFunctionArguments>(typeConverter, patterns.getContext());
 
     if (failed(applyPartialConversion(mod, target, std::move(patterns))))
       return signalPassFailure();

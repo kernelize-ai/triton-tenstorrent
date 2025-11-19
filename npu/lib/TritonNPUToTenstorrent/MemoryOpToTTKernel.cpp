@@ -1,5 +1,6 @@
 #include "PatternTritonNPUToTenstorrent.h"
 
+#include "mlir/Analysis/SliceAnalysis.h"
 #include "mlir/Transforms/DialectConversion.h"
 
 #include "npu/include/Dialect/TritonTenstorrent/IR/Attributes.h"
@@ -26,34 +27,6 @@ namespace {
 
 inline bool isScalar(Value v) { return !isa<RankedTensorType>(v.getType()); }
 
-static Value traceToScalar(Value ptr, bool isPtr = true) {
-  auto op = ptr.getDefiningOp();
-  if (isScalar(ptr) || op == nullptr) {
-    return ptr;
-  }
-  if (auto addPtr = dyn_cast<triton::AddPtrOp>(op)) {
-    if (isPtr)
-      return traceToScalar(addPtr.getPtr(), isPtr);
-    return traceToScalar(addPtr.getOffset(), false);
-  } else if (auto splatOp = dyn_cast<triton::SplatOp>(op)) {
-    return splatOp.getSrc();
-  } else if (auto addOp = dyn_cast<arith::AddIOp>(op)) {
-    auto lhs = traceToScalar(addOp.getLhs(), isPtr);
-    auto rhs = traceToScalar(addOp.getRhs(), isPtr);
-    if (isScalar(lhs)) {
-      assert(!isScalar(rhs) && "expected non-scalar rhs");
-      return lhs;
-    }
-    if (isScalar(rhs))
-      return rhs;
-  } else if (auto makeRangeOp = dyn_cast<triton::MakeRangeOp>(op)) {
-    //
-  } else {
-    assert(0 && "unhandled op");
-  }
-  return ptr;
-}
-
 static int64_t findAllocIdx(Operation *op) {
   if (auto localLoadOp = dyn_cast<gpu::LocalLoadOp>(op)) {
     return findAllocIdx(localLoadOp.getSrc().getDefiningOp());
@@ -70,8 +43,39 @@ static int64_t findAllocIdx(Operation *op) {
 static Value computeNocAddr(ConversionPatternRewriter &rewriter, Location loc,
                             Value ptr, Value pageSize, Value cb) {
   // Trace to base address and offset
-  Value baseAddr = traceToScalar(ptr, true);
-  Value offset = traceToScalar(ptr, false);
+  LDBG("Computing NOC address for ptr: " << ptr);
+
+  SetVector<Operation *> baseAddrSlice;
+  mlir::BackwardSliceOptions opt;
+  opt.filter = [](Operation *op) {
+    return !isa<IntegerType>(op->getResult(0).getType());
+  };
+  (void)getBackwardSlice(ptr, &baseAddrSlice, opt);
+  LLVM_DEBUG(for (Operation *op : baseAddrSlice) {
+    DBGS() << "backward slice op: " << *op << "\n";
+  });
+
+  Value baseAddr, offset;
+  // Look for splat ops that populate tensors with integer values. These ops
+  // give us the base ptr (converted to integer) and the offset (integer).
+  // Because the slice frontier is an integer type we know that only one op with
+  // integer valued return can exist for both base addr and offset.
+  for (auto op : baseAddrSlice) {
+    if (op->getNumOperands() == 1 &&
+        isa<IntegerType>(op->getOperand(0).getType())) {
+      if (!baseAddr) {
+        baseAddr = op->getOperand(0);
+      } else {
+        offset = op->getOperand(0);
+        break;
+      }
+    }
+  }
+
+  assert(baseAddr && "could not find base address in backward slice");
+  assert(offset && "could not find offset in backward slice");
+  LDBG("Computing NOC address for base address: " << baseAddr
+                                                  << ", offset: " << offset);
   assert(isScalar(offset) && "expected scalar offset");
 
   // Convert offset to bytes
@@ -132,9 +136,6 @@ struct ConvertLoadOp : public OpConversionPattern<triton::LoadOp> {
     // Compute the noc address
     Value nocAddr = computeNocAddr(rewriter, loc, op.getPtr(), pageSize, cb);
 
-    // 1. reserve back on the cb to know data is ready to store to SRAM
-    //       ttkernel.cb_reserve_back(%0, %c1_i32)
-    // add later?
     Value const1 = arith::createConstantI32(loc, rewriter, 1);
     ttkernel::CBReserveBackOp::create(rewriter, loc, cb, const1);
 
