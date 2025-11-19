@@ -19,11 +19,6 @@ struct SplatOpConversion : public OpConversionPattern<triton::SplatOp> {
   matchAndRewrite(triton::SplatOp op, OpAdaptor adaptor,
                   ConversionPatternRewriter &rewriter) const override {
     auto srcOp = op.getSrc().getDefiningOp();
-    if (isa<UnrealizedConversionCastOp>(srcOp)) {
-      rewriter.eraseOp(op);
-      return success();
-    }
-
     rewriter.eraseOp(op);
     return success();
   }
