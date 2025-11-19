@@ -48,13 +48,7 @@ static Value computeNocAddr(ConversionPatternRewriter &rewriter, Location loc,
   SetVector<Operation *> baseAddrSlice;
   mlir::BackwardSliceOptions opt;
   opt.filter = [](Operation *op) {
-    llvm::errs() << "visiting op " << *op << "\n";
-    if (isa<scf::ForOp>(op))
-      return true;
-    auto resultTensorType =
-        dyn_cast<RankedTensorType>(op->getResult(0).getType());
-    return resultTensorType &&
-           isa<PointerType>(resultTensorType.getElementType());
+    return !isa<IntegerType>(op->getResult(0).getType());
   };
   (void)getBackwardSlice(ptr, &baseAddrSlice, opt);
   LLVM_DEBUG(for (Operation *op : baseAddrSlice) {
@@ -62,6 +56,10 @@ static Value computeNocAddr(ConversionPatternRewriter &rewriter, Location loc,
   });
 
   Value baseAddr, offset;
+  // Look for splat ops that populate tensors with integer values. These ops
+  // give us the base ptr (converted to integer) and the offset (integer).
+  // Because the slice frontier is an integer type we know that only one op with
+  // integer valued return can exist for both base addr and offset.
   for (auto op : baseAddrSlice) {
     if (op->getNumOperands() == 1 &&
         isa<IntegerType>(op->getOperand(0).getType())) {
@@ -76,8 +74,6 @@ static Value computeNocAddr(ConversionPatternRewriter &rewriter, Location loc,
 
   assert(baseAddr && "could not find base address in backward slice");
   assert(offset && "could not find offset in backward slice");
-  // TODO: is the block argument actually what we want? is it incrementing the
-  // offset each iteration?
   LDBG("Computing NOC address for base address: " << baseAddr
                                                   << ", offset: " << offset);
   assert(isScalar(offset) && "expected scalar offset");
