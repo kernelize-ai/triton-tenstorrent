@@ -217,9 +217,11 @@ struct ConvertStoreOp : public OpConversionPattern<triton::StoreOp> {
   matchAndRewrite(triton::StoreOp op, OpAdaptor adaptor,
                   ConversionPatternRewriter &rewriter) const override {
     Location loc = op.getLoc();
+    LDBG("Converting store op: " << *op << "\n");
 
     // Should always be a cb?
     auto cb = adaptor.getValue();
+    LDBG("Store op value: " << cb << "\nwith type: " << cb.getType());
     assert(isa<ttkernel::CBType>(cb.getType()) && "expected cb type");
 
     // Get tile size in bytes
@@ -300,11 +302,17 @@ struct ConvertLocalLoadOp : public OpConversionPattern<gpu::LocalLoadOp> {
       return success();
     }
 
-    ttkernel::CopyTileInitOp::create(rewriter, loc, src);
-    Value c0 = arith::createIndexConstant(loc, rewriter, 0);
-
     auto dst = op.getResult();
     auto dstType = cast<RankedTensorType>(dst.getType());
+    if (isa<gpu::DotOperandEncodingAttr>(dstType.getEncoding())) {
+      // Dot ops read directly from cbs, so skip the copy tile and just replace
+      // the load with its cb src
+      rewriter.replaceOp(op, src);
+      return success();
+    }
+
+    ttkernel::CopyTileInitOp::create(rewriter, loc, src);
+    Value c0 = arith::createIndexConstant(loc, rewriter, 0);
     npu::tt::TileEncodingAttr loadEncoding =
         cast<npu::tt::TileEncodingAttr>(dstType.getEncoding());
     Value destRegisterIndex =

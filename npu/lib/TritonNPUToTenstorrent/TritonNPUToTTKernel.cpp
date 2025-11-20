@@ -236,6 +236,7 @@ struct ConvertTritonNPUToTTKernelPass
                                       &pointerInfoAnalysis, PatternBenefit(1));
     populateComputeOpConversionPattern(typeConverter, patterns,
                                        PatternBenefit(1));
+    populateDotOpConversionPattern(typeConverter, patterns, PatternBenefit(1));
     populateElementwiseOpConversionPattern(typeConverter, patterns,
                                            PatternBenefit(1));
     populateMakeRangeOpConversionPattern(typeConverter, patterns,
