@@ -88,6 +88,22 @@ struct ArithBinaryOpOnTensorsConversion : public OpConversionPattern<OpTy> {
   }
 };
 
+template <typename OpTy>
+struct ArithUnaryOpOnTensorsConversion : public OpConversionPattern<OpTy> {
+  using OpConversionPattern<OpTy>::OpConversionPattern;
+  using OpAdaptor = typename OpTy::Adaptor;
+
+  LogicalResult
+  matchAndRewrite(OpTy op, OpAdaptor adaptor,
+                  ConversionPatternRewriter &rewriter) const override {
+    if (isa<RankedTensorType>(op.getOperand().getType())) {
+      rewriter.eraseOp(op);
+      return success();
+    }
+    return failure();
+  }
+};
+
 } // namespace
 
 void populateElementwiseOpConversionPattern(TypeConverter &typeConverter,
@@ -103,8 +119,16 @@ void populateElementwiseOpConversionPattern(TypeConverter &typeConverter,
   POPULATE_ARITH_BINARY_OP_ON_TENSORS(arith::MulIOp);
   POPULATE_ARITH_BINARY_OP_ON_TENSORS(arith::RemSIOp);
 
+  POPULATE_ARITH_BINARY_OP_ON_TENSORS(arith::AndIOp);
+
   // TODO: can this be handled by RemoveRedundantMasks instead?
   POPULATE_ARITH_BINARY_OP_ON_TENSORS(arith::CmpIOp);
+
+#define POPULATE_ARITH_UNARY_OP_ON_TENSORS(OP)                                 \
+  patterns.add<ArithUnaryOpOnTensorsConversion<OP>>(typeConverter,             \
+                                                    patterns.getContext());
+
+  POPULATE_ARITH_UNARY_OP_ON_TENSORS(arith::TruncFOp);
 }
 
 } // namespace npu
