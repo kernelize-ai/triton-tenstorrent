@@ -22,7 +22,7 @@ def TileEncodingAttr : AttrDef<TritonTenstorrent_Dialect, "TileEncoding", [Distr
   let hasCustomAssemblyFormat = 1;
 
   let extraClassDeclaration = [{
-    gpu::CTALayoutAttr getCTALayout() const {
+    gpu::CTAEncodingAttr getCTALayout() const {
         return gpu::getCTALayout(getParent());
     }
 
