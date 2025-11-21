@@ -1,5 +1,6 @@
 #include "npu/include/Dialect/TritonTenstorrent/Transforms/Passes.h"
 
+#include "mlir/Analysis/SliceAnalysis.h"
 #include "mlir/Pass/Pass.h"
 #include "mlir/Transforms/Passes.h"
 #include "llvm/Support/Debug.h"
@@ -36,6 +37,8 @@ public:
   // override the inputs of the compute op with the new layouts
   void updateComputeOpInputs();
 
+  // TODO: what about the dot operand outputs?
+
 private:
   // map from value to its index in the tile register buffer
   llvm::MapVector<Operation *, unsigned> layouts;
@@ -59,6 +62,46 @@ void TileEncodingPropagation::initComputeRegisterIndices() {
           storeRegisterIndex(user, 2);
         }
       }
+    }
+    if (auto dotOp = dyn_cast<triton::DotOp>(op)) {
+      auto findTerminatingOp = [](Operation *op) -> Operation * {
+        SetVector<Operation *> forwardSlice;
+        getForwardSlice(op, &forwardSlice);
+        return forwardSlice.empty() ? nullptr : forwardSlice.back();
+      };
+
+      auto terminatingOp = findTerminatingOp(dotOp);
+
+      // this is fairly messy - should we re-do it?
+      if (auto yieldOp = dyn_cast<scf::YieldOp>(terminatingOp)) {
+        // assumes the yield is a direct descendant of the dot op
+        auto forOp = yieldOp->getParentOfType<scf::ForOp>();
+        for (auto it : llvm::enumerate(yieldOp.getOperands())) {
+          if (it.value() == dotOp.getD()) {
+            Value loopResult = forOp.getResult(it.index());
+            LDBG("loop result for dot op: " << loopResult);
+            for (auto user : loopResult.getUsers()) {
+              auto candidate = findTerminatingOp(user);
+              LDBG("Found candidate terminating op: " << *candidate);
+              if (candidate && isa<StoreOp>(candidate)) {
+                terminatingOp = candidate;
+                break;
+              }
+            }
+            break;
+          }
+        }
+      }
+
+      assert(terminatingOp && "Expected dot op to have a user");
+      LDBG("DotOp terminating op: " << *terminatingOp);
+      if (!isa<StoreOp>(terminatingOp)) {
+        LDBG("DotOp terminating op is not a StoreOp, skipping register index "
+             "storage");
+        return;
+      }
+
+      storeRegisterIndex(terminatingOp, 0);
     }
   });
 }
