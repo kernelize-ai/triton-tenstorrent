@@ -1,5 +1,6 @@
 #include "npu/include/Dialect/TritonTenstorrent/Transforms/Passes.h"
 
+#include "mlir/Analysis/SliceAnalysis.h"
 #include "mlir/Pass/Pass.h"
 #include "mlir/Transforms/Passes.h"
 #include "llvm/Support/Debug.h"
@@ -59,6 +60,54 @@ void TileEncodingPropagation::initComputeRegisterIndices() {
           storeRegisterIndex(user, 2);
         }
       }
+    }
+    if (auto dotOp = dyn_cast<triton::DotOp>(op)) {
+      auto getLastInForwardSlice = [](Operation *op) -> Operation * {
+        SetVector<Operation *> forwardSlice;
+        getForwardSlice(op, &forwardSlice);
+        return forwardSlice.empty() ? nullptr : forwardSlice.back();
+      };
+
+      Operation *terminatingOp = getLastInForwardSlice(dotOp);
+
+      // Try to follow the dot through a loop-carried accumulator
+      if (auto yieldOp = dyn_cast<scf::YieldOp>(terminatingOp)) {
+        auto forOp = yieldOp->getParentOfType<scf::ForOp>();
+        if (forOp) {
+          Value loopResult;
+          for (auto [idx, operand] : llvm::enumerate(yieldOp.getOperands())) {
+            if (operand == dotOp.getD()) {
+              loopResult = forOp.getResult(idx);
+              LDBG("Loop result for dot op: " << loopResult);
+              break;
+            }
+          }
+
+          if (loopResult) {
+            for (Operation *user : loopResult.getUsers()) {
+              Operation *candidate = getLastInForwardSlice(user);
+              if (!candidate)
+                continue;
+
+              LDBG("Found candidate terminating op: " << *candidate);
+              if (isa<StoreOp>(candidate)) {
+                terminatingOp = candidate;
+                break;
+              }
+            }
+          }
+        }
+      }
+
+      assert(terminatingOp && "Expected dot op to have a user");
+      LDBG("DotOp terminating op: " << *terminatingOp);
+      if (!isa<StoreOp>(terminatingOp)) {
+        LDBG("DotOp terminating op is not a StoreOp, skipping register index "
+             "storage");
+        return;
+      }
+
+      storeRegisterIndex(terminatingOp, 0);
     }
   });
 }
