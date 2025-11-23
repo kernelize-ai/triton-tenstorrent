@@ -88,6 +88,7 @@ public:
 
   // tile regs aquire ops must be inserted before any copy tiles ops
   void insertTileRegsAcquireOps() {
+    // TODO: fix for matmul
     assert(!copyTileInitOps.empty() &&
            "expecting at least one copy tile init op");
     OpBuilder builder(copyTileInitOps.front());
@@ -98,6 +99,7 @@ public:
   // coalesce copy tile waits before the firsts copy tile ops since tile
   // registers may not be acquired yet
   void insertCopyTileWaits() {
+    // TODO: fix for matmul
     OpBuilder builder(copyTileInitOps.front());
     for (auto copyTileOpItr : copyTileOps) {
       ttkernel::CopyTileOp copyTileOp = copyTileOpItr.first;
@@ -166,6 +168,19 @@ struct ConvertTritonNPUToTTKernelPass
         return IntegerType::get(type.getContext(), 32);
       }
       if (isa<npu::tt::TileEncodingAttr>(type.getEncoding())) {
+        // TODO: same caveats as above re:ttts layout
+        auto shape = SmallVector<int64_t>(1, 1);
+        auto ttcoreTileType = ttcore::TileType::get(
+            type.getContext(), ttcore::TileType::getDefaultShape(),
+            ttcore::elementTypeToDataType(etype));
+        MemRefType cbMemRefType = MemRefType::get(
+            shape, ttcoreTileType, MemRefLayoutAttrInterface{},
+            ttcore::MemorySpaceAttr::get(type.getContext(),
+                                         ttcore::MemorySpace::DeviceL1));
+        return ttkernel::CBType::get(cbMemRefType);
+      }
+      if (isa<triton::gpu::DotOperandEncodingAttr>(type.getEncoding())) {
+        // dot operands read directly from cbs, so convert to cb type
         // TODO: same caveats as above re:ttts layout
         auto shape = SmallVector<int64_t>(1, 1);
         auto ttcoreTileType = ttcore::TileType::get(
