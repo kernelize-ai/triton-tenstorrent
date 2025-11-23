@@ -33,7 +33,8 @@ struct ConvertDotOp : public OpConversionPattern<triton::DotOp> {
     if (!func.getSymName().ends_with("__compute")) {
       // Hack until we can fix CoreSpecialize
       LDBG("Deleting dot op from non-compute kernel");
-      rewriter.eraseOp(op);
+      rewriter.replaceOp(op, adaptor.getC());
+      //   rewriter.eraseOp(op);
       return success();
     }
 
@@ -54,9 +55,9 @@ struct ConvertDotOp : public OpConversionPattern<triton::DotOp> {
     ttkernel::MatmulTilesOp::create(rewriter, loc, adaptor.getA(),
                                     adaptor.getB(), c0, c0, c0, transpose);
 
-    // don't replace the uses of the dot op since matmul tiles updates the
-    // accumulator in place
-    rewriter.eraseOp(op);
+    // foward the dot op c operand to the users of the dot op
+    rewriter.replaceOp(op, adaptor.getC());
+    // rewriter.eraseOp(op);
     return success();
   }
 };
