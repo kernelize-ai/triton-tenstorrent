@@ -4,11 +4,17 @@
 
 #include "triton/Dialect/Triton/IR/Dialect.h"
 
+#include "llvm/Support/Debug.h"
+
 #include "Utility.h"
 
 namespace mlir {
 namespace triton {
 namespace npu {
+
+#define DEBUG_TYPE "convert-triton-npu-to-ttkernel"
+#define DBGS() (llvm::dbgs() << "[" DEBUG_TYPE "]: ")
+#define LDBG(X) LLVM_DEBUG(DBGS() << X << "\n")
 
 namespace {
 
@@ -25,6 +31,7 @@ struct ConvertAddPtrOp : public OpConversionPattern<AddPtrOp> {
 
     if (!isa<IntegerType>(baseAddr.getType()) ||
         !isa<IntegerType>(offset.getType())) {
+      LDBG("Erasing AddPtrOp on non-integer type " << op);
       rewriter.eraseOp(op);
       return success();
     }
