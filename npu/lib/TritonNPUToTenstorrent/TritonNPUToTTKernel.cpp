@@ -270,9 +270,10 @@ struct ConvertTritonNPUToTTKernelPass
         return;
 
       InitializationHelper initHelper(funcOp);
-      initHelper.insertCopyTileWaits();
-      initHelper.insertTileRegsAcquireOps();
-      initHelper.insertSFPUInitOps();
+      // TODO: re-enable for matmul
+      // initHelper.insertCopyTileWaits();
+      // initHelper.insertTileRegsAcquireOps();
+      // initHelper.insertSFPUInitOps();
     });
   }
 };
