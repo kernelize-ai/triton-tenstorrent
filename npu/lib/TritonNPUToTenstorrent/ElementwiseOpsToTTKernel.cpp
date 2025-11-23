@@ -6,6 +6,8 @@
 
 #include "triton/Dialect/Triton/IR/Dialect.h"
 
+#include "llvm/Support/Debug.h"
+
 #include "Utility.h"
 
 namespace mlir {
