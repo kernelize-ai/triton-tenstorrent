@@ -96,8 +96,6 @@ struct RemoveUnusedPointerArgs : public OpRewritePattern<scf::ForOp> {
       Value oldIterArg = body.getArgument(ivCount + i);
 
       if (indicesToRemove.contains(i)) {
-        // remove the iter arg, forward any uses to parent so they can be
-        // removed
         mapping.map(oldIterArg, oldInitArgs[i]);
       } else {
         Value newIterArg = newBody->getArgument(ivCount + newIterArgPos);
@@ -119,10 +117,8 @@ struct RemoveUnusedPointerArgs : public OpRewritePattern<scf::ForOp> {
       newYieldOperands.push_back(mapping.lookupOrDefault(yield.getOperand(i)));
     }
 
-    // rewriter.setInsertionPointToEnd(newBody);
     scf::YieldOp::create(rewriter, newFor.getLoc(), newYieldOperands);
 
-#if 1
     for (unsigned i = 0; i < numIterArgs; i++) {
       if (indicesToRemove.contains(i)) {
         assert(forOp.getResult(i).use_empty() &&
@@ -136,13 +132,6 @@ struct RemoveUnusedPointerArgs : public OpRewritePattern<scf::ForOp> {
     }
 
     rewriter.eraseOp(forOp);
-#else
-    SmallVector<Value> replacementResults;
-    for (unsigned i = 0; i < newFor.getNumResults(); i++)
-      replacementResults.push_back(newFor.getResult(i));
-
-    rewriter.replaceOp(forOp, replacementResults);
-#endif
     return success();
   }
 };
