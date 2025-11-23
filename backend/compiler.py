@@ -208,6 +208,7 @@ class CPUBackend(BaseBackend):
         passes.common.add_cse(pm)
         passes.common.add_canonicalizer(pm)
 
+        cpu.passes.tenstorrent.add_canonicalize_matmul_loops(pm)
         cpu.passes.tenstorrent.add_to_ttkernel_dialect(pm)
         passes.common.add_canonicalizer(pm)
 

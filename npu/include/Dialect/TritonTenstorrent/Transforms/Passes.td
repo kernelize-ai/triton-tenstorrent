@@ -57,4 +57,17 @@ def TritonTenstorrentRemoveRedundantMasks : Pass<"tritontenstorrent-remove-redun
                             ];
 }
 
+def TritonTenstorrentCanonicalizeMatmulLoops : Pass<"tritontenstorrent-canonicalize-matmul-loops", "mlir::ModuleOp"> {
+    let summary = "Canonicalize matmul loops in Tenstorrent kernels";
+
+    let description = [{
+        Remove unnecessary pointer arithmetic and accumulator handling in matmul loops within Tenstorrent kernels.
+    }];
+
+    let dependentDialects = ["mlir::triton::npu::tt::TritonTenstorrentDialect",
+                             "mlir::triton::TritonDialect",
+                             "mlir::scf::SCFDialect"
+                            ];
+}
+
 #endif
