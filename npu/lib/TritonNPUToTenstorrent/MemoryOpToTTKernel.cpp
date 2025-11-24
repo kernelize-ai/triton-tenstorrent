@@ -40,6 +40,29 @@ static int64_t findAllocIdx(Operation *op) {
   return -1;
 }
 
+inline Value traceToBaseAddress(Value ptr) {
+  SetVector<Operation *> baseAddrSlice;
+  mlir::BackwardSliceOptions opt;
+  opt.filter = [](Operation *op) { return !isa<ttkernel::GetArgValOp>(op); };
+  (void)getBackwardSlice(ptr, &baseAddrSlice, opt);
+  LLVM_DEBUG(for (Operation *op : baseAddrSlice) {
+    DBGS() << "backward slice op: " << *op << "\n";
+  });
+
+  Value baseAddr;
+  for (auto op : baseAddrSlice) {
+    if (op->getNumOperands() == 1 &&
+        isa<IntegerType>(op->getOperand(0).getType())) {
+      baseAddr = op->getOperand(0);
+      break;
+    }
+  }
+
+  assert(baseAddr && "could not find base address in backward slice");
+  LDBG("Found base address: " << baseAddr << ", for ptr: " << ptr);
+  return baseAddr;
+}
+
 static Value computeNocAddr(ConversionPatternRewriter &rewriter, Location loc,
                             Value ptr, Value pageSize, Value cb) {
   // Trace to base address and offset
@@ -127,16 +150,45 @@ struct ConvertLoadOp : public OpConversionPattern<triton::LoadOp> {
       return failure();
     }
 
+    LDBG("Converting load op: " << *op << "\n");
+
     Value cb =
         rewriter.getRemappedValue(cast<gpu::LocalStoreOp>(user).getDst());
 
-    // Compute page size in bytes
+    Value baseAddr = traceToBaseAddress(op.getPtr());
+    LDBG("Ptr adaptor value: " << adaptor.getPtr());
+
+    // compute noc address
+    auto opInsertionPt = rewriter.saveInsertionPoint();
+    rewriter.setInsertionPointAfterValue(cb);
+
+    auto dataFormat = ttkernel::GetDataFormatOp::create(rewriter, loc, cb);
     auto pageSize = ttkernel::GetTileSizeOp::create(rewriter, loc, cb);
 
-    // Compute the noc address
-    Value nocAddr = computeNocAddr(rewriter, loc, op.getPtr(), pageSize, cb);
+    Value c1bit = arith::createConstantI1(loc, rewriter, 1);
+    Value addrGen = ttkernel::GetInterleavedAddrGenFastOp::create(
+        rewriter, loc, c1bit, baseAddr, pageSize, dataFormat);
+
+    rewriter.restoreInsertionPoint(opInsertionPt);
+
+    // convert ptr value to bytes offset
+    RankedTensorType tensorType = cast<RankedTensorType>(op.getPtr().getType());
+    PointerType ptrType =
+        cast<triton::PointerType>(tensorType.getElementType());
+    auto elemType = ptrType.getPointeeType();
+    Value elemSizeValue = arith::createConstantI32(
+        loc, rewriter, elemType.getIntOrFloatBitWidth() / 8);
+    Value offset =
+        arith::MulIOp::create(rewriter, loc, adaptor.getPtr(), elemSizeValue);
+
+    Value tile_id = arith::DivUIOp::create(rewriter, loc, offset, pageSize);
 
     Value const1 = arith::createConstantI32(loc, rewriter, 1);
+    Value const0 = arith::createConstantI32(loc, rewriter, 0);
+
+    Value nocAddr = ttkernel::InterleavedAddrGenFastGetNocAddrOp::create(
+        rewriter, loc, addrGen, tile_id, const0, Value());
+
     ttkernel::CBReserveBackOp::create(rewriter, loc, cb, const1);
 
     // 3. get L1 address

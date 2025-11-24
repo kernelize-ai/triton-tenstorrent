@@ -1,6 +1,8 @@
 #include "PatternTritonNPUToTenstorrent.h"
 
+#include "mlir/Analysis/SliceAnalysis.h"
 #include "mlir/Transforms/DialectConversion.h"
+#include "llvm/Support/Debug.h"
 
 #include "triton/Dialect/Triton/IR/Dialect.h"
 
@@ -9,6 +11,10 @@
 namespace mlir {
 namespace triton {
 namespace npu {
+
+#define DEBUG_TYPE "convert-triton-npu-to-ttkernel"
+#define DBGS() (llvm::dbgs() << "[" DEBUG_TYPE "]: ")
+#define LDBG(X) LLVM_DEBUG(DBGS() << X << "\n")
 
 namespace {
 
@@ -21,21 +27,34 @@ struct ConvertAddPtrOp : public OpConversionPattern<AddPtrOp> {
     Location loc = op.getLoc();
 
     auto baseAddr = adaptor.getPtr();
-    auto offset = adaptor.getOffset();
 
-    if (!isa<IntegerType>(baseAddr.getType()) ||
-        !isa<IntegerType>(offset.getType())) {
-      rewriter.eraseOp(op);
-      return success();
+    // Take a backward slice from the offset operand up to find the integer
+    // offset value for the block. The last op in the slice should be the offset
+    // value. Intermediate ops convert the offset to an appropriate tensor
+    // representation.
+    SetVector<Operation *> slice;
+    (void)getBackwardSlice(op.getOffset(), &slice);
+    LLVM_DEBUG(for (Operation *op : slice) {
+      DBGS() << "backward slice op: " << *op << "\n";
+    });
+
+    Value offset = slice.front()->getResult(0);
+    if (!isa<IntegerType>(offset.getType())) {
+      return rewriter.notifyMatchFailure(
+          op, "could not find integer offset in backward slice");
     }
 
-    auto type = cast<triton::PointerType>(op.getPtr().getType());
-    auto elemType = type.getPointeeType();
+    LDBG("Converting AddPtrOp baseAddr: " << baseAddr
+                                          << ", offset: " << offset);
+
+    auto tensorType = cast<RankedTensorType>(op.getPtr().getType());
+    auto ptrType = cast<triton::PointerType>(tensorType.getElementType());
+    auto elemType = ptrType.getPointeeType();
     auto elemSize = elemType.getIntOrFloatBitWidth() / 8;
     Value elemSizeValue = arith::createConstantI32(loc, rewriter, elemSize);
     offset = arith::MulIOp::create(rewriter, loc, offset, elemSizeValue);
     auto newAddPtrOp = arith::AddIOp::create(rewriter, loc, baseAddr, offset);
-    rewriter.replaceOp(op, newAddPtrOp.getResult());
+    rewriter.replaceOp(op, newAddPtrOp);
 
     return success();
   }
@@ -49,6 +68,16 @@ struct ArithBinaryOpOnTensorsConversion : public OpConversionPattern<OpTy> {
   LogicalResult
   matchAndRewrite(OpTy op, OpAdaptor adaptor,
                   ConversionPatternRewriter &rewriter) const override {
+    if constexpr (!std::is_same<OpTy, arith::CmpIOp>::value) {
+      if (isa<IntegerType>(adaptor.getLhs().getType()) &&
+          isa<IntegerType>(adaptor.getRhs().getType())) {
+        // probably can use replaceOpWithNewOp now that we've dropped CmpIOp
+        auto newOp = OpTy::create(rewriter, op.getLoc(), adaptor.getLhs(),
+                                  adaptor.getRhs());
+        rewriter.replaceOp(op, newOp);
+        return success();
+      }
+    }
     if (isa<RankedTensorType>(op.getLhs().getType()) &&
         isa<RankedTensorType>(op.getRhs().getType())) {
       rewriter.eraseOp(op);
