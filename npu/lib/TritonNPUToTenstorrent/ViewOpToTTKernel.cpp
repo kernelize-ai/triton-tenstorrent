@@ -20,7 +20,7 @@ struct ConvertSplatOp : public OpConversionPattern<triton::SplatOp> {
   matchAndRewrite(triton::SplatOp op, OpAdaptor adaptor,
                   ConversionPatternRewriter &rewriter) const override {
     auto srcOp = op.getSrc().getDefiningOp();
-    if (isa<IntegerType>(op.getSrc().getType())) {
+    if (isa<IntegerType>(adaptor.getSrc().getType())) {
       rewriter.replaceOp(op, adaptor.getSrc());
       return success();
     }
