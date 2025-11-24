@@ -63,6 +63,7 @@ struct ConvertAddPtrOp : public OpConversionPattern<AddPtrOp> {
   }
 };
 
+// TODO: try replacing both these patterns with versions that support forewarding integer values 
 template <typename OpTy>
 struct ArithBinaryOpOnTensorsConversion : public OpConversionPattern<OpTy> {
   using OpConversionPattern<OpTy>::OpConversionPattern;

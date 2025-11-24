@@ -102,15 +102,15 @@ static Value computeNocAddr(ConversionPatternRewriter &rewriter, Location loc,
                                                   << ", offset: " << offset);
   assert(isScalar(offset) && "expected scalar offset");
 
-  auto opInsertionPt = rewriter.saveInsertionPoint();
-  rewriter.setInsertionPointAfterValue(baseAddr);
+  // auto opInsertionPt = rewriter.saveInsertionPoint();
+  // rewriter.setInsertionPointAfterValue(baseAddr);
   // Create interleaved address generator and get noc address
   auto dataFormat = ttkernel::GetDataFormatOp::create(rewriter, loc, cb);
   Value c1bit = arith::createConstantI1(loc, rewriter, 1);
   Value addrGen = ttkernel::GetInterleavedAddrGenFastOp::create(
       rewriter, loc, c1bit, baseAddr, pageSize, dataFormat);
 
-  rewriter.restoreInsertionPoint(opInsertionPt);
+  // rewriter.restoreInsertionPoint(opInsertionPt);
 
   // Convert offset to bytes
   // TODO: can we do this conversion as part of the ptr lowering? so we take the backward slice to get the base ptr, but use splat and addptr to convert the ptr offset to bytes?

@@ -8,6 +8,7 @@
 #include "triton/Dialect/Triton/IR/Dialect.h"
 #include "triton/Dialect/Triton/IR/Utility.h"
 #include "triton/Dialect/TritonGPU/IR/Dialect.h"
+#include "mlir/Dialect/SCF/Transforms/Patterns.h"
 
 #include "PatternTritonNPUToTenstorrent.h"
 #include "PointerInfoAnalysis.h"
@@ -237,8 +238,16 @@ struct ConvertTritonNPUToTTKernelPass
     target.addIllegalDialect<triton::TritonDialect>();
     target.addIllegalDialect<triton::gpu::TritonGPUDialect>();
 
+    target.addLegalOp<UnrealizedConversionCastOp>();
     target.addDynamicallyLegalOp<func::FuncOp>(
         [](func::FuncOp funcOp) { return funcOp.getNumArguments() == 0; });
+#if 0
+    target.addDynamicallyLegalOp<scf::ForOp>([&](scf::ForOp forOp) {
+      return llvm::all_of(forOp.getInitArgs(), [&](Value v) {
+        return typeConverter.isLegal(v);
+      });
+    });
+#endif 
     target.addDynamicallyLegalDialect<arith::ArithDialect>([&](Operation *op) {
       // only legal if not operating on tensors
       return llvm::all_of(op->getOperands(), [](Value v) {
@@ -258,6 +267,7 @@ struct ConvertTritonNPUToTTKernelPass
                                          PatternBenefit(1));
     populateSPMDOpConversionPattern(typeConverter, patterns, PatternBenefit(1));
     populateViewOpConversionPattern(typeConverter, patterns, PatternBenefit(1));
+    // mlir::scf::populateSCFStructuralTypeConversions(typeConverter, patterns);
 
     patterns.add<RemoveLLVMAssume>(typeConverter, context);
 
