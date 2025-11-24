@@ -47,7 +47,6 @@ struct ConvertAddPtrOp : public OpConversionPattern<AddPtrOp> {
     }
 
     Value offset = (*it)->getResult(0);
-
     LDBG("Converting AddPtrOp offset: " << offset);
 
     // Drop the base addr and just return the offset in bytes
