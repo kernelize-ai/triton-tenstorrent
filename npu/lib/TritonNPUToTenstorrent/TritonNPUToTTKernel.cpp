@@ -267,7 +267,7 @@ struct ConvertTritonNPUToTTKernelPass
                                          PatternBenefit(1));
     populateSPMDOpConversionPattern(typeConverter, patterns, PatternBenefit(1));
     populateViewOpConversionPattern(typeConverter, patterns, PatternBenefit(1));
-    // mlir::scf::populateSCFStructuralTypeConversions(typeConverter, patterns);
+    mlir::scf::populateSCFStructuralTypeConversionsAndLegality(typeConverter, patterns, target);
 
     patterns.add<RemoveLLVMAssume>(typeConverter, context);
 
