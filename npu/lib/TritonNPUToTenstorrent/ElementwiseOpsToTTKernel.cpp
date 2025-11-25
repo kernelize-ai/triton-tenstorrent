@@ -32,22 +32,42 @@ struct ConvertAddPtrOp : public OpConversionPattern<AddPtrOp> {
     // offset value for the block. The last op in the slice should be the offset
     // value. Intermediate ops convert the offset to an appropriate tensor
     // representation.
-    SetVector<Operation *> slice;
-    (void)getBackwardSlice(op.getOffset(), &slice);
-    LLVM_DEBUG(for (Operation *op : slice) {
-      DBGS() << "backward slice op: " << *op << "\n";
-    });
+    Value offset;
+    if (auto constOp = dyn_cast<arith::ConstantOp>(op.getOffset().getDefiningOp())) {
+      auto value = constOp.getValue();
+      auto dense = mlir::dyn_cast<SplatElementsAttr>(value);
+      if (!dense) {
+        return rewriter.notifyMatchFailure(
+            op, "only splat constant offsets are supported when lowering addptr");
+      }
+      APInt v = dense.getSplatValue<APInt>();
+      auto valueAttr = IntegerAttr::get(rewriter.getIntegerType(32), v);
 
-    auto it = std::find_if(slice.rbegin(), slice.rend(), [](Operation *op) {
-      return isa<IntegerType>(op->getResult(0).getType());
-    });
-    if (it == slice.rend()) {
-      return rewriter.notifyMatchFailure(
-          op, "could not find integer offset in backward slice");
+      offset = arith::ConstantOp::create(rewriter, constOp.getLoc(), rewriter.getIntegerType(32), valueAttr);
+    } else {
+      LDBG("Taking backward slice for " << op.getOffset());
+      SetVector<Operation *> slice;
+      BackwardSliceOptions opt;
+      opt.omitUsesFromAbove = false;
+      (void)getBackwardSlice(op.getOffset(), &slice, opt);
+      LLVM_DEBUG(for (Operation *op : slice) {
+        DBGS() << "backward slice op: " << *op << "\n";
+      });
+
+      auto it = std::find_if(slice.rbegin(), slice.rend(), [](Operation *op) {
+        return isa<IntegerType>(op->getResult(0).getType()) || isa<arith::ConstantOp>(op);
+      });
+      if (it == slice.rend()) {
+        return rewriter.notifyMatchFailure(
+            op, "could not find integer offset in backward slice");
+      }
+
+      offset = (*it)->getResult(0);
     }
 
-    Value offset = (*it)->getResult(0);
-    LDBG("Converting AddPtrOp offset: " << offset);
+    assert(offset && "expected offset value");
+    LDBG("Converting AddPtrOp baseAddr: " << baseAddr
+                                          << ", offset: " << offset);
 
     // Drop the base addr and just return the offset in bytes
     auto tensorType = cast<RankedTensorType>(op.getPtr().getType());
