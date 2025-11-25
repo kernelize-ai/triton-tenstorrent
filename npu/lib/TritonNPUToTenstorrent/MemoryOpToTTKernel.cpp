@@ -161,9 +161,9 @@ struct ConvertLoadOp : public OpConversionPattern<triton::LoadOp> {
 
     Value cb =
         rewriter.getRemappedValue(cast<gpu::LocalStoreOp>(user).getDst());
-
-    Value baseAddr = traceToBaseAddress(op.getPtr());
+    
     LDBG("Ptr adaptor value: " << adaptor.getPtr());
+    Value baseAddr = traceToBaseAddress(adaptor.getPtr());
 
     // compute noc address
     auto opInsertionPt = rewriter.saveInsertionPoint();
