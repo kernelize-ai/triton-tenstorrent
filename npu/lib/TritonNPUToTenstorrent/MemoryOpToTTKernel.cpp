@@ -171,16 +171,8 @@ struct ConvertLoadOp : public OpConversionPattern<triton::LoadOp> {
 
     rewriter.restoreInsertionPoint(opInsertionPt);
 
-    // convert ptr value to bytes offset
-    RankedTensorType tensorType = cast<RankedTensorType>(op.getPtr().getType());
-    PointerType ptrType =
-        cast<triton::PointerType>(tensorType.getElementType());
-    auto elemType = ptrType.getPointeeType();
-    Value elemSizeValue = arith::createConstantI32(
-        loc, rewriter, elemType.getIntOrFloatBitWidth() / 8);
-    Value offset =
-        arith::MulIOp::create(rewriter, loc, adaptor.getPtr(), elemSizeValue);
-
+    // convert bytes offset to tile index
+    Value offset = adaptor.getPtr();
     Value tile_id = arith::DivUIOp::create(rewriter, loc, offset, pageSize);
 
     Value const1 = arith::createConstantI32(loc, rewriter, 1);
