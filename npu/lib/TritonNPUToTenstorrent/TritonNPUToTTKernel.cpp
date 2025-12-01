@@ -241,13 +241,6 @@ struct ConvertTritonNPUToTTKernelPass
     target.addLegalOp<UnrealizedConversionCastOp>();
     target.addDynamicallyLegalOp<func::FuncOp>(
         [](func::FuncOp funcOp) { return funcOp.getNumArguments() == 0; });
-#if 0
-    target.addDynamicallyLegalOp<scf::ForOp>([&](scf::ForOp forOp) {
-      return llvm::all_of(forOp.getInitArgs(), [&](Value v) {
-        return typeConverter.isLegal(v);
-      });
-    });
-#endif
     target.addDynamicallyLegalDialect<arith::ArithDialect>([&](Operation *op) {
       // only legal if not operating on tensors
       return llvm::all_of(op->getOperands(), [](Value v) {
@@ -281,10 +274,9 @@ struct ConvertTritonNPUToTTKernelPass
         return;
 
       InitializationHelper initHelper(funcOp);
-      // TODO: re-enable for matmul
-      // initHelper.insertCopyTileWaits();
-      // initHelper.insertTileRegsAcquireOps();
-      // initHelper.insertSFPUInitOps();
+      initHelper.insertCopyTileWaits();
+      initHelper.insertTileRegsAcquireOps();
+      initHelper.insertSFPUInitOps();
     });
   }
 };
