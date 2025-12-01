@@ -33,17 +33,20 @@ struct ConvertAddPtrOp : public OpConversionPattern<AddPtrOp> {
     // value. Intermediate ops convert the offset to an appropriate tensor
     // representation.
     Value offset;
-    if (auto constOp = dyn_cast<arith::ConstantOp>(op.getOffset().getDefiningOp())) {
+    if (auto constOp =
+            dyn_cast<arith::ConstantOp>(op.getOffset().getDefiningOp())) {
       auto value = constOp.getValue();
       auto dense = mlir::dyn_cast<SplatElementsAttr>(value);
       if (!dense) {
         return rewriter.notifyMatchFailure(
-            op, "only splat constant offsets are supported when lowering addptr");
+            op,
+            "only splat constant offsets are supported when lowering addptr");
       }
       APInt v = dense.getSplatValue<APInt>();
       auto valueAttr = IntegerAttr::get(rewriter.getIntegerType(32), v);
 
-      offset = arith::ConstantOp::create(rewriter, constOp.getLoc(), rewriter.getIntegerType(32), valueAttr);
+      offset = arith::ConstantOp::create(
+          rewriter, constOp.getLoc(), rewriter.getIntegerType(32), valueAttr);
     } else {
       LDBG("Taking backward slice for " << op.getOffset());
       SetVector<Operation *> slice;
@@ -55,7 +58,8 @@ struct ConvertAddPtrOp : public OpConversionPattern<AddPtrOp> {
       });
 
       auto it = std::find_if(slice.rbegin(), slice.rend(), [](Operation *op) {
-        return isa<IntegerType>(op->getResult(0).getType()) || isa<arith::ConstantOp>(op);
+        return isa<IntegerType>(op->getResult(0).getType()) ||
+               isa<arith::ConstantOp>(op);
       });
       if (it == slice.rend()) {
         return rewriter.notifyMatchFailure(
@@ -82,7 +86,8 @@ struct ConvertAddPtrOp : public OpConversionPattern<AddPtrOp> {
   }
 };
 
-// TODO: try replacing both these patterns with versions that support forewarding integer values 
+// TODO: try replacing both these patterns with versions that support
+// forewarding integer values
 template <typename OpTy>
 struct ArithBinaryOpOnTensorsConversion : public OpConversionPattern<OpTy> {
   using OpConversionPattern<OpTy>::OpConversionPattern;

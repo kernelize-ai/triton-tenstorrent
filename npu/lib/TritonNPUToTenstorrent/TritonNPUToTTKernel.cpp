@@ -5,10 +5,10 @@
 #include "llvm/ADT/MapVector.h"
 #include "llvm/Support/Debug.h"
 
+#include "mlir/Dialect/SCF/Transforms/Patterns.h"
 #include "triton/Dialect/Triton/IR/Dialect.h"
 #include "triton/Dialect/Triton/IR/Utility.h"
 #include "triton/Dialect/TritonGPU/IR/Dialect.h"
-#include "mlir/Dialect/SCF/Transforms/Patterns.h"
 
 #include "PatternTritonNPUToTenstorrent.h"
 #include "Utility.h"
@@ -233,7 +233,7 @@ struct ConvertTritonNPUToTTKernelPass
         return typeConverter.isLegal(v);
       });
     });
-#endif 
+#endif
     target.addDynamicallyLegalDialect<arith::ArithDialect>([&](Operation *op) {
       // only legal if not operating on tensors
       return llvm::all_of(op->getOperands(), [](Value v) {
@@ -253,7 +253,8 @@ struct ConvertTritonNPUToTTKernelPass
                                          PatternBenefit(1));
     populateSPMDOpConversionPattern(typeConverter, patterns, PatternBenefit(1));
     populateViewOpConversionPattern(typeConverter, patterns, PatternBenefit(1));
-    mlir::scf::populateSCFStructuralTypeConversionsAndLegality(typeConverter, patterns, target);
+    mlir::scf::populateSCFStructuralTypeConversionsAndLegality(
+        typeConverter, patterns, target);
 
     if (failed(applyPartialConversion(mod, target, std::move(patterns))))
       return signalPassFailure();
