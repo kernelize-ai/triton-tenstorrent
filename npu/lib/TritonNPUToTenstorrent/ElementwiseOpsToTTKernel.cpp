@@ -48,18 +48,14 @@ struct ConvertAddPtrOp : public OpConversionPattern<AddPtrOp> {
       offset = arith::ConstantOp::create(
           rewriter, constOp.getLoc(), rewriter.getIntegerType(32), valueAttr);
     } else {
-      LDBG("Taking backward slice for " << op.getOffset());
       SetVector<Operation *> slice;
-      BackwardSliceOptions opt;
-      opt.omitUsesFromAbove = false;
-      (void)getBackwardSlice(op.getOffset(), &slice, opt);
+      (void)getBackwardSlice(op.getOffset(), &slice);
       LLVM_DEBUG(for (Operation *op : slice) {
         DBGS() << "backward slice op: " << *op << "\n";
       });
 
       auto it = std::find_if(slice.rbegin(), slice.rend(), [](Operation *op) {
-        return isa<IntegerType>(op->getResult(0).getType()) ||
-               isa<arith::ConstantOp>(op);
+        return isa<IntegerType>(op->getResult(0).getType());
       });
       if (it == slice.rend()) {
         return rewriter.notifyMatchFailure(
@@ -70,8 +66,7 @@ struct ConvertAddPtrOp : public OpConversionPattern<AddPtrOp> {
     }
 
     assert(offset && "expected offset value");
-    LDBG("Converting AddPtrOp baseAddr: " << baseAddr
-                                          << ", offset: " << offset);
+    LDBG("Converting AddPtrOp offset: " << offset);
 
     // Drop the base addr and just return the offset in bytes
     auto tensorType = cast<RankedTensorType>(op.getPtr().getType());
