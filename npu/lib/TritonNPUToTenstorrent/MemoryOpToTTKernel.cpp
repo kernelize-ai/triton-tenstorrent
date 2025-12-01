@@ -113,7 +113,9 @@ static Value computeNocAddr(ConversionPatternRewriter &rewriter, Location loc,
   // rewriter.restoreInsertionPoint(opInsertionPt);
 
   // Convert offset to bytes
-  // TODO: can we do this conversion as part of the ptr lowering? so we take the backward slice to get the base ptr, but use splat and addptr to convert the ptr offset to bytes?
+  // TODO: can we do this conversion as part of the ptr lowering? so we take the
+  // backward slice to get the base ptr, but use splat and addptr to convert the
+  // ptr offset to bytes?
   triton::PointerType ptrType;
   if (isScalar(ptr)) {
     ptrType = cast<triton::PointerType>(ptr.getType());
@@ -131,8 +133,9 @@ static Value computeNocAddr(ConversionPatternRewriter &rewriter, Location loc,
 
   Value const1 = arith::createConstantI32(loc, rewriter, 1);
   Value const0 = arith::createConstantI32(loc, rewriter, 0);
-    
-  // TODO: this should go with the load, the other stuff should go with the ptr conversion
+
+  // TODO: this should go with the load, the other stuff should go with the ptr
+  // conversion
   Value nocAddr = ttkernel::InterleavedAddrGenFastGetNocAddrOp::create(
       rewriter, loc, addrGen, tile_id, const0, Value());
 
