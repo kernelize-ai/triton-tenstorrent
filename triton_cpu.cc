@@ -4,13 +4,13 @@
 #include "npu/include/Dialect/TritonTenstorrent/Transforms/Passes.h"
 #include "npu/include/TritonNPUToTenstorrent/Passes.h"
 
+#include "mlir/Dialect/Arith/Transforms/Passes.h"
+#include "mlir/Dialect/EmitC/Transforms/Passes.h"
 #include "mlir/Pass/PassManager.h"
+#include "mlir/Target/Cpp/CppEmitter.h"
 #include "llvm/ADT/ScopeExit.h"
 #include "llvm/IR/Module.h"
 #include "llvm/TargetParser/Host.h"
-
-#include "mlir/Dialect/EmitC/Transforms/Passes.h"
-#include "mlir/Target/Cpp/CppEmitter.h"
 
 // TODO: conditionally include based on if we're building with tenstorrent
 // support
@@ -18,8 +18,6 @@
 #include "ttmlir/Dialect/TTKernel/IR/TTKernel.h"
 #include "ttmlir/Dialect/TTKernel/Transforms/Passes.h"
 #include "ttmlir/Target/TTKernel/TTKernelToCpp.h"
-
-#include "mlir/Dialect/Arith/Transforms/Passes.h"
 
 #include <pybind11/pybind11.h>
 
@@ -109,6 +107,9 @@ void init_triton_npu_passes_tenstorrent(py::module &&m) {
 void init_triton_npu_passes_common(py::module &&m) {
   m.def("add_arith_int_range_opts", [](mlir::PassManager &pm) {
     pm.addPass(mlir::arith::createArithIntRangeOpts());
+  });
+  m.def("add_arith_expand", [](mlir::PassManager &pm) {
+    pm.addPass(mlir::arith::createArithExpandOpsPass());
   });
 }
 
