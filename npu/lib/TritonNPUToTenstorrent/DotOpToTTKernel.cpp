@@ -51,7 +51,7 @@ struct ConvertDotOp : public OpConversionPattern<triton::DotOp> {
     llvm::errs() << "converted c = " << adaptor.getC() << "\n";
 
     Value c0 = arith::createIndexConstant(loc, rewriter, 0);
-    Value transpose = arith::createConstantI1(loc, rewriter, false);
+    Value transpose = arith::createConstantI32(loc, rewriter, 0);
     ttkernel::MatmulTilesOp::create(rewriter, loc, adaptor.getA(),
                                     adaptor.getB(), c0, c0, c0, transpose);
 
