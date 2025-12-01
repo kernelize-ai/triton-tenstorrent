@@ -36,6 +36,17 @@ namespace npu {
 
 namespace {
 
+struct RemoveLLVMAssume : OpConversionPattern<LLVM::AssumeOp> {
+  using OpConversionPattern<LLVM::AssumeOp>::OpConversionPattern;
+
+  LogicalResult
+  matchAndRewrite(LLVM::AssumeOp op, OpAdaptor adaptor,
+                  ConversionPatternRewriter &rewriter) const override {
+    rewriter.eraseOp(op);
+    return success();
+  }
+};
+
 inline bool isCBOp(Operation *op) {
   if (auto compileTimeArg = dyn_cast<ttkernel::GetCompileArgValOp>(op)) {
     return isa<ttkernel::CBType>(compileTimeArg.getType());
@@ -255,6 +266,8 @@ struct ConvertTritonNPUToTTKernelPass
     populateViewOpConversionPattern(typeConverter, patterns, PatternBenefit(1));
     mlir::scf::populateSCFStructuralTypeConversionsAndLegality(
         typeConverter, patterns, target);
+
+    patterns.add<RemoveLLVMAssume>(typeConverter, context);
 
     if (failed(applyPartialConversion(mod, target, std::move(patterns))))
       return signalPassFailure();
