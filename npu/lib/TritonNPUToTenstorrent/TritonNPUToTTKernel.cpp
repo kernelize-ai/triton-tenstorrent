@@ -87,20 +87,37 @@ public:
     });
   }
 
-  // tile regs aquire ops must be inserted before any copy tiles ops
   void insertTileRegsAcquireOps() {
-    // TODO: fix for matmul
-    assert(!copyTileInitOps.empty() &&
-           "expecting at least one copy tile init op");
-    OpBuilder builder(copyTileInitOps.front());
-    ttkernel::TileRegsAcquireOp::create(builder,
-                                        copyTileInitOps.front().getLoc());
+    // if copy tile init ops are non-empty then we can insert before the first
+    // op. Otherwise, we need to find the block containing pack tile and move to
+    // the start of that block.
+    if (!copyTileInitOps.empty()) {
+      OpBuilder builder(copyTileInitOps.front());
+      ttkernel::TileRegsAcquireOp::create(builder,
+                                          copyTileInitOps.front().getLoc());
+    } else {
+      auto packTilesItr = funcOp.getOps<ttkernel::PackTileOp>();
+      assert(!packTilesItr.empty() && "expecting at least one pack tile op");
+      Operation *firstPackTileOp = *packTilesItr.begin();
+      Block *parentBlock = firstPackTileOp->getBlock();
+      OpBuilder builder(parentBlock, parentBlock->begin());
+      // put the tile regs acquire ops after any get arg val ops. This seems to
+      // be mostly cosmetic.
+      auto getArgValOpItr = parentBlock->getOps<ttkernel::GetArgValOp>();
+      if (!getArgValOpItr.empty()) {
+        auto argValOps = llvm::reverse(getArgValOpItr);
+        builder.setInsertionPointAfter(*argValOps.begin());
+      }
+      ttkernel::TileRegsAcquireOp::create(builder, firstPackTileOp->getLoc());
+    }
   }
 
   // coalesce copy tile waits before the firsts copy tile ops since tile
   // registers may not be acquired yet
   void insertCopyTileWaits() {
-    // TODO: fix for matmul
+    if (copyTileOps.empty())
+      return;
+
     OpBuilder builder(copyTileInitOps.front());
     for (auto copyTileOpItr : copyTileOps) {
       ttkernel::CopyTileOp copyTileOp = copyTileOpItr.first;
