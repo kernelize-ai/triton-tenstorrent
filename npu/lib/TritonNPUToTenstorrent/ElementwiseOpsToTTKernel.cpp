@@ -48,14 +48,18 @@ struct ConvertAddPtrOp : public OpConversionPattern<AddPtrOp> {
       offset = arith::ConstantOp::create(
           rewriter, constOp.getLoc(), rewriter.getIntegerType(32), valueAttr);
     } else {
+      LDBG("Taking backward slice for " << op.getOffset());
       SetVector<Operation *> slice;
-      (void)getBackwardSlice(op.getOffset(), &slice);
+      BackwardSliceOptions opt;
+      opt.omitUsesFromAbove = false;
+      (void)getBackwardSlice(op.getOffset(), &slice, opt);
       LLVM_DEBUG(for (Operation *op : slice) {
         DBGS() << "backward slice op: " << *op << "\n";
       });
 
       auto it = std::find_if(slice.rbegin(), slice.rend(), [](Operation *op) {
-        return isa<IntegerType>(op->getResult(0).getType());
+        return isa<IntegerType>(op->getResult(0).getType()) ||
+               isa<arith::ConstantOp>(op);
       });
       if (it == slice.rend()) {
         return rewriter.notifyMatchFailure(

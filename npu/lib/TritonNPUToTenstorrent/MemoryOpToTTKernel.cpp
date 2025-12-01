@@ -102,20 +102,7 @@ static Value computeNocAddr(ConversionPatternRewriter &rewriter, Location loc,
                                                   << ", offset: " << offset);
   assert(isScalar(offset) && "expected scalar offset");
 
-  // auto opInsertionPt = rewriter.saveInsertionPoint();
-  // rewriter.setInsertionPointAfterValue(baseAddr);
-  // Create interleaved address generator and get noc address
-  auto dataFormat = ttkernel::GetDataFormatOp::create(rewriter, loc, cb);
-  Value c1bit = arith::createConstantI1(loc, rewriter, 1);
-  Value addrGen = ttkernel::GetInterleavedAddrGenFastOp::create(
-      rewriter, loc, c1bit, baseAddr, pageSize, dataFormat);
-
-  // rewriter.restoreInsertionPoint(opInsertionPt);
-
   // Convert offset to bytes
-  // TODO: can we do this conversion as part of the ptr lowering? so we take the
-  // backward slice to get the base ptr, but use splat and addptr to convert the
-  // ptr offset to bytes?
   triton::PointerType ptrType;
   if (isScalar(ptr)) {
     ptrType = cast<triton::PointerType>(ptr.getType());
@@ -134,8 +121,11 @@ static Value computeNocAddr(ConversionPatternRewriter &rewriter, Location loc,
   Value const1 = arith::createConstantI32(loc, rewriter, 1);
   Value const0 = arith::createConstantI32(loc, rewriter, 0);
 
-  // TODO: this should go with the load, the other stuff should go with the ptr
-  // conversion
+  // Create interleaved address generator and get noc address
+  auto dataFormat = ttkernel::GetDataFormatOp::create(rewriter, loc, cb);
+  Value c1bit = arith::createConstantI1(loc, rewriter, 1);
+  Value addrGen = ttkernel::GetInterleavedAddrGenFastOp::create(
+      rewriter, loc, c1bit, baseAddr, pageSize, dataFormat);
   Value nocAddr = ttkernel::InterleavedAddrGenFastGetNocAddrOp::create(
       rewriter, loc, addrGen, tile_id, const0, Value());
 
