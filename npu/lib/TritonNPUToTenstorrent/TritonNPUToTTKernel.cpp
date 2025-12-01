@@ -151,8 +151,7 @@ struct ConvertTritonNPUToTTKernelPass
     typeConverter.addConversion([](RankedTensorType type) -> Type {
       auto etype = type.getElementType();
       if (isa<triton::PointerType>(etype)) {
-        return RankedTensorType::get(type.getShape(),
-                                     IntegerType::get(type.getContext(), 32));
+        return IntegerType::get(type.getContext(), 32);
       }
       if (isa<npu::tt::TileEncodingAttr>(type.getEncoding())) {
         // TODO: same caveats as above re:ttts layout
