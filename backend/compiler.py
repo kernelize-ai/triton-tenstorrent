@@ -233,6 +233,7 @@ class CPUBackend(BaseBackend):
         passes.common.add_cse(pm)
 
         cpu.passes.common.add_arith_int_range_opts(pm)
+        cpu.passes.common.add_arith_expand(pm)
         cpu.passes.tenstorrent.add_ttkernel_to_emitc(pm)
         passes.common.add_canonicalizer(pm)
         cpu.passes.tenstorrent.add_form_expressions_pass(pm)
