@@ -7,6 +7,8 @@ namespace mlir {
 namespace triton {
 namespace npu {
 
+class PointerInfoAnalysis;
+
 void populateFuncOpConversionPattern(TypeConverter &typeConverter,
                                      RewritePatternSet &patterns,
                                      PatternBenefit benefit);
@@ -25,6 +27,7 @@ void populateMakeRangeOpConversionPattern(TypeConverter &typeConverter,
 
 void populateMemoryOpConversionPattern(TypeConverter &typeConverter,
                                        RewritePatternSet &patterns,
+                                       PointerInfoAnalysis *pointerInfoAnalysis,
                                        PatternBenefit benefit);
 
 void populateSPMDOpConversionPattern(TypeConverter &typeConverter,

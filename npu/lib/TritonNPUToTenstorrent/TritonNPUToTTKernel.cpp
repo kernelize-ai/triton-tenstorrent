@@ -10,6 +10,7 @@
 #include "triton/Dialect/TritonGPU/IR/Dialect.h"
 
 #include "PatternTritonNPUToTenstorrent.h"
+#include "PointerInfoAnalysis.h"
 #include "Utility.h"
 
 #include "npu/include/Dialect/TritonTenstorrent/IR/Attributes.h"
@@ -199,6 +200,8 @@ struct ConvertTritonNPUToTTKernelPass
       mod.dump();
     });
 
+    npu::PointerInfoAnalysis pointerInfoAnalysis(mod);
+
     mlir::ConversionTarget target{*context};
 
     target.addLegalDialect<ttkernel::TTKernelDialect>();
@@ -219,7 +222,7 @@ struct ConvertTritonNPUToTTKernelPass
 
     mlir::RewritePatternSet patterns(context);
     populateMemoryOpConversionPattern(typeConverter, patterns,
-                                      PatternBenefit(1));
+                                      &pointerInfoAnalysis, PatternBenefit(1));
     populateComputeOpConversionPattern(typeConverter, patterns,
                                        PatternBenefit(1));
     populateElementwiseOpConversionPattern(typeConverter, patterns,

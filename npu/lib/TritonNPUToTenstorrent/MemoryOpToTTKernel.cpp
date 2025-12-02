@@ -11,6 +11,7 @@
 
 #include "llvm/Support/Debug.h"
 
+#include "PointerInfoAnalysis.h"
 #include "Utility.h"
 
 namespace mlir {
@@ -134,6 +135,12 @@ static Value computeNocAddr(ConversionPatternRewriter &rewriter, Location loc,
 struct ConvertLoadOp : public OpConversionPattern<triton::LoadOp> {
   using OpConversionPattern<triton::LoadOp>::OpConversionPattern;
 
+  explicit ConvertLoadOp(TypeConverter &typeConverter,
+                         npu::PointerInfoAnalysis *pointerInfoAnalysis,
+                         MLIRContext *context)
+      : OpConversionPattern<triton::LoadOp>(typeConverter, context),
+        pointerInfoAnalysis(pointerInfoAnalysis) {}
+
   LogicalResult
   matchAndRewrite(triton::LoadOp op, OpAdaptor adaptor,
                   ConversionPatternRewriter &rewriter) const override {
@@ -155,8 +162,9 @@ struct ConvertLoadOp : public OpConversionPattern<triton::LoadOp> {
     Value cb =
         rewriter.getRemappedValue(cast<gpu::LocalStoreOp>(user).getDst());
 
-    Value baseAddr = traceToBaseAddress(op.getPtr());
-    LDBG("Ptr adaptor value: " << adaptor.getPtr());
+    auto ptrInfo = pointerInfoAnalysis->getInfo(op);
+    assert(ptrInfo && "expected pointer info for load op");
+    Value baseAddr = ptrInfo->basePtr;
 
     // compute noc address
     auto opInsertionPt = rewriter.saveInsertionPoint();
@@ -198,6 +206,8 @@ struct ConvertLoadOp : public OpConversionPattern<triton::LoadOp> {
     rewriter.eraseOp(op);
     return success();
   }
+
+  npu::PointerInfoAnalysis *pointerInfoAnalysis;
 };
 
 struct ConvertStoreOp : public OpConversionPattern<triton::StoreOp> {
@@ -334,10 +344,11 @@ struct ConvertLocalAllocOp : public OpConversionPattern<gpu::LocalAllocOp> {
 
 } // namespace
 
-void populateMemoryOpConversionPattern(TypeConverter &typeConverter,
-                                       RewritePatternSet &patterns,
-                                       PatternBenefit benefit) {
-  patterns.add<ConvertLoadOp>(typeConverter, patterns.getContext());
+void populateMemoryOpConversionPattern(
+    TypeConverter &typeConverter, RewritePatternSet &patterns,
+    npu::PointerInfoAnalysis *pointerInfoAnalysis, PatternBenefit benefit) {
+  patterns.add<ConvertLoadOp>(typeConverter, pointerInfoAnalysis,
+                              patterns.getContext());
   patterns.add<ConvertStoreOp>(typeConverter, patterns.getContext());
   patterns.add<ConvertLocalStoreOp>(typeConverter, patterns.getContext());
   patterns.add<ConvertLocalLoadOp>(typeConverter, patterns.getContext());
