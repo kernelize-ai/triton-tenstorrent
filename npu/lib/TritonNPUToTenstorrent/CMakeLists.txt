@@ -5,6 +5,7 @@ add_triton_library(TritonNPUToTenstorrent
     FinalizeCBTransaction.cpp
     MakeRangeOpToTTKernel.cpp
     MemoryOpToTTKernel.cpp
+    PointerInfoAnalysis.cpp
     SPMDOpToTTKernel.cpp
     TritonFuncOpToFuncOp.cpp
     TritonNPUToTTKernel.cpp
