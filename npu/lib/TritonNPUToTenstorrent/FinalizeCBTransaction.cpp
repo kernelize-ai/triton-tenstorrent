@@ -38,14 +38,22 @@ struct TTKernelCBPopInputs : public OpRewritePattern<ttkernel::CBWaitFrontOp> {
       return failure();
     }
 
-    auto packTileOpItr = block->getOps<ttkernel::PackTileOp>().begin();
-    assert(packTileOpItr != block->getOps<ttkernel::PackTileOp>().end() &&
-           "expected at least one PackTileOp in the function body");
+    auto matmulOpItr = block->getOps<ttkernel::MatmulTilesOp>().begin();
+    if (matmulOpItr != block->getOps<ttkernel::MatmulTilesOp>().end()) {
+      // can there be more than one?
+      rewriter.setInsertionPointAfter(*matmulOpItr);
+      ttkernel::CBPopFrontOp::create(rewriter, op.getLoc(), op.getCb(),
+                                     op.getNumPages());
+    } else {
 
-    rewriter.setInsertionPointAfter(*packTileOpItr);
-    ttkernel::CBPopFrontOp::create(rewriter, op.getLoc(), op.getCb(),
-                                   op.getNumPages());
+      auto packTileOpItr = block->getOps<ttkernel::PackTileOp>().begin();
+      assert(packTileOpItr != block->getOps<ttkernel::PackTileOp>().end() &&
+             "expected at least one PackTileOp in the function body");
 
+      rewriter.setInsertionPointAfter(*packTileOpItr);
+      ttkernel::CBPopFrontOp::create(rewriter, op.getLoc(), op.getCb(),
+                                     op.getNumPages());
+    }
     return success();
   }
 };

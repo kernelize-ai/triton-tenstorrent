@@ -50,6 +50,11 @@ struct ConvertDotOp : public OpConversionPattern<triton::DotOp> {
     llvm::errs() << "converted b = " << adaptor.getB() << "\n";
     llvm::errs() << "converted c = " << adaptor.getC() << "\n";
 
+    // add wait fronts so we know the CBs are ready
+    Value numPages = arith::createConstantI32(loc, rewriter, 1);
+    ttkernel::CBWaitFrontOp::create(rewriter, loc, adaptor.getA(), numPages);
+    ttkernel::CBWaitFrontOp::create(rewriter, loc, adaptor.getB(), numPages);
+
     Value c0 = arith::createIndexConstant(loc, rewriter, 0);
     Value transpose = arith::createConstantI32(loc, rewriter, 0);
     ttkernel::MatmulTilesOp::create(rewriter, loc, adaptor.getA(),
