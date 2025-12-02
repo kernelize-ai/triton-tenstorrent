@@ -28,8 +28,6 @@ public:
 
 private:
   mlir::DenseMap<Operation *, PointerInfo> loadInfo;
-  mlir::DenseMap<Value, std::optional<PointerInfo>> cache;
-
 };
 
 } // namespace npu
