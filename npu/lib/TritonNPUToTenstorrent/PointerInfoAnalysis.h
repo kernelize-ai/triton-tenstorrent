@@ -30,10 +30,6 @@ private:
   mlir::DenseMap<Operation *, PointerInfo> loadInfo;
   mlir::DenseMap<Value, std::optional<PointerInfo>> cache;
 
-#if 0
-    std::optional<PointerInfo> traceValue(mlir::Value v);
-    std::optional<PointerInfo> traceBlockArgument(mlir::BlockArgument arg);
-#endif
 };
 
 } // namespace npu
