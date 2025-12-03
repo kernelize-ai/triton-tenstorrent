@@ -217,7 +217,6 @@ struct ConvertStoreOp : public OpConversionPattern<triton::StoreOp> {
   matchAndRewrite(triton::StoreOp op, OpAdaptor adaptor,
                   ConversionPatternRewriter &rewriter) const override {
     Location loc = op.getLoc();
-    LDBG("Converting store op: " << *op << "\n");
 
     // Should always be a cb?
     auto cb = adaptor.getValue();

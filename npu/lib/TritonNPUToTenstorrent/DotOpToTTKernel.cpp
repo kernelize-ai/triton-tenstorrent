@@ -34,21 +34,11 @@ struct ConvertDotOp : public OpConversionPattern<triton::DotOp> {
       // Hack until we can fix CoreSpecialize
       LDBG("Deleting dot op from non-compute kernel");
       rewriter.replaceOp(op, adaptor.getC());
-      //   rewriter.eraseOp(op);
       return success();
     }
 
     Location loc = op.getLoc();
     auto typeConverter = getTypeConverter();
-
-    // TODO: add the matmul inits during post-processing since they must only be
-    // run once per kernel
-
-    llvm::errs() << "Converting DotOp: " << *op << "\n";
-
-    llvm::errs() << "converted a = " << adaptor.getA() << "\n";
-    llvm::errs() << "converted b = " << adaptor.getB() << "\n";
-    llvm::errs() << "converted c = " << adaptor.getC() << "\n";
 
     // add wait fronts so we know the CBs are ready
     Value numPages = arith::createConstantI32(loc, rewriter, 1);
