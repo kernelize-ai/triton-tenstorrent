@@ -1,12 +1,13 @@
 #include "PatternTritonNPUToTenstorrent.h"
 
+#include <deque>
+
 #include "mlir/Analysis/SliceAnalysis.h"
 #include "mlir/Transforms/DialectConversion.h"
+#include "llvm/ADT/PriorityWorklist.h"
 #include "llvm/Support/Debug.h"
 
 #include "triton/Dialect/Triton/IR/Dialect.h"
-
-#include "llvm/Support/Debug.h"
 
 #include "Utility.h"
 
@@ -28,57 +29,84 @@ struct ConvertAddPtrOp : public OpConversionPattern<AddPtrOp> {
                   ConversionPatternRewriter &rewriter) const override {
     Location loc = op.getLoc();
 
-    // Take a backward slice from the offset operand up to find the integer
-    // offset value for the block. The last op in the slice should be the offset
-    // value. Intermediate ops convert the offset to an appropriate tensor
-    // representation.
-    Value offset;
-    if (auto constOp =
-            dyn_cast<arith::ConstantOp>(op.getOffset().getDefiningOp())) {
-      auto value = constOp.getValue();
-      auto dense = mlir::dyn_cast<SplatElementsAttr>(value);
-      if (!dense) {
-        return rewriter.notifyMatchFailure(
-            op,
-            "only splat constant offsets are supported when lowering addptr");
+    SetVector<Operation *> slice;
+    BackwardSliceOptions opt;
+    opt.filter = [](Operation *op) {
+      return !isa<IntegerType>(op->getResult(0).getType());
+    };
+    (void)getBackwardSlice(adaptor.getOffset(), &slice, opt);
+    slice.insert(adaptor.getOffset().getDefiningOp());
+
+    DenseMap<Value, Value> tensorToScalar;
+    SetVector<Value> offsetChain; // really, rewritten offset chain...
+    for (Operation *op : slice) {
+      LDBG("Visiting " << *op);
+
+      if (auto broadcastOp = dyn_cast<BroadcastOp>(op)) {
+        Value src = tensorToScalar.count(broadcastOp.getSrc())
+                        ? tensorToScalar[broadcastOp.getSrc()]
+                        : broadcastOp.getSrc();
+        tensorToScalar[broadcastOp.getResult()] = src;
+      } else if (auto expandDimsOp = dyn_cast<ExpandDimsOp>(op)) {
+        Value src = tensorToScalar.count(expandDimsOp.getSrc())
+                        ? tensorToScalar[expandDimsOp.getSrc()]
+                        : expandDimsOp.getSrc();
+        tensorToScalar[expandDimsOp.getResult()] = src;
+      } else if (auto makeRangeOp = dyn_cast<MakeRangeOp>(op)) {
+        rewriter.setInsertionPointAfter(makeRangeOp);
+        uint32_t start = makeRangeOp.getStart();
+        Value c = arith::createConstantI32(loc, rewriter, start);
+        tensorToScalar[makeRangeOp.getResult()] = c;
+        offsetChain.insert(c);
+      } else if (auto splatOp = dyn_cast<SplatOp>(op)) {
+        tensorToScalar[splatOp.getResult()] = splatOp.getSrc();
+        offsetChain.insert(splatOp.getSrc());
+      } else if (auto constOp = dyn_cast<arith::ConstantOp>(op)) {
+        auto value = constOp.getValue();
+        auto dense = dyn_cast<SplatElementsAttr>(value);
+        if (dense) {
+          APInt v = dense.getSplatValue<APInt>();
+          Value c = arith::createConstantI32(loc, rewriter, v.getSExtValue());
+          tensorToScalar[constOp.getResult()] = c;
+          offsetChain.insert(c);
+        }
+      } else {
+        Value result = op->getResult(0);
+
+        IRMapping mapping;
+        for (auto operand : op->getOperands()) {
+          auto replacementItr = tensorToScalar.find(operand);
+          if (replacementItr == tensorToScalar.end()) {
+            LDBG("No replacement found for operand: " << operand);
+            assert(!isa<RankedTensorType>(operand.getType()) &&
+                   "expected to find replacement for tensor operand");
+            continue;
+          }
+          LDBG("replace " << operand << " with " << replacementItr->second);
+          mapping.map(operand, replacementItr->second);
+        }
+        rewriter.setInsertionPointAfter(op);
+        auto newOp = rewriter.clone(*op, mapping);
+        Value newVal = newOp->getResult(0);
+        auto tensorType = dyn_cast<RankedTensorType>(newVal.getType());
+        if (tensorType)
+          newVal.setType(tensorType.getElementType());
+        LDBG("Rewritten op: " << *newOp);
+        tensorToScalar[result] = newVal;
+        offsetChain.insert(newVal);
       }
-      APInt v = dense.getSplatValue<APInt>();
-      auto valueAttr = IntegerAttr::get(rewriter.getIntegerType(32), v);
-
-      offset = arith::ConstantOp::create(
-          rewriter, constOp.getLoc(), rewriter.getIntegerType(32), valueAttr);
-    } else {
-      LDBG("Taking backward slice for " << op.getOffset());
-      SetVector<Operation *> slice;
-      BackwardSliceOptions opt;
-      opt.omitUsesFromAbove = false;
-      (void)getBackwardSlice(op.getOffset(), &slice, opt);
-      LLVM_DEBUG(for (Operation *op : slice) {
-        DBGS() << "backward slice op: " << *op << "\n";
-      });
-
-      auto it = std::find_if(slice.rbegin(), slice.rend(), [](Operation *op) {
-        return isa<IntegerType>(op->getResult(0).getType()) ||
-               isa<arith::ConstantOp>(op);
-      });
-      if (it == slice.rend()) {
-        return rewriter.notifyMatchFailure(
-            op, "could not find integer offset in backward slice");
-      }
-
-      offset = (*it)->getResult(0);
     }
+    Value offset = offsetChain.back();
+    LDBG("Computed scalar offset: " << offset);
 
-    assert(offset && "expected offset value");
-    LDBG("Converting AddPtrOp offset: " << offset);
-
-    // Drop the base addr and just return the offset in bytes
+    // Drop the base addr and just return the offset converted to bytes
     auto tensorType = cast<RankedTensorType>(op.getPtr().getType());
     auto ptrType = cast<triton::PointerType>(tensorType.getElementType());
     auto elemType = ptrType.getPointeeType();
     auto elemSize = elemType.getIntOrFloatBitWidth() / 8;
     Value elemSizeValue = arith::createConstantI32(loc, rewriter, elemSize);
     offset = arith::MulIOp::create(rewriter, loc, offset, elemSizeValue);
+    LDBG("Replace addptr with offset in bytes: " << offset);
     rewriter.replaceOp(op, offset);
 
     return success();
