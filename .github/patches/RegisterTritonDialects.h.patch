@@ -7,6 +7,7 @@ index 48049f026..bd3f8aee3 100644
  #include "mlir/InitAllPasses.h"
  
 +#include "cpu/include/Dialect/TritonCPU/IR/Dialect.h"
++#include "cpu/include/Dialect/TritonCPU/Transforms/Passes.h"
 +#include "cpu/include/TritonCPUToLLVM/Passes.h"
 +#include "npu/include/Dialect/TritonTenstorrent/IR/Dialect.h"
 +#include "npu/include/Dialect/TritonTenstorrent/Transforms/Passes.h"
@@ -21,11 +22,13 @@ index 48049f026..bd3f8aee3 100644
 @@ -136,6 +145,21 @@ inline void registerTritonDialects(mlir::DialectRegistry &registry) {
    mlir::triton::proton::gpu::registerScheduleBufferStorePass();
    mlir::triton::proton::gpu::registerAddSchedBarriersPass();
+
  
 +  // CPU
 +  mlir::triton::cpu::registerConvertTritonCPUToLLVM();
 +  mlir::triton::cpu::registerAllocateSharedMemoryCPU();
 +  mlir::triton::cpu::registerConvertMaskedOpsToLLVM();
++  mlir::triton::cpu::registerMakePersistentKernelPass();
 +
 +  // Tenstorrent
 +  mlir::triton::npu::registerTritonTenstorrentConvertTensorDescToLoadStore();
