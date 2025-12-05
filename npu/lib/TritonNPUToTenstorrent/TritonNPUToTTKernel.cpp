@@ -5,6 +5,7 @@
 #include "llvm/ADT/MapVector.h"
 #include "llvm/Support/Debug.h"
 
+#include "mlir/Dialect/SCF/Transforms/Patterns.h"
 #include "triton/Dialect/Triton/IR/Dialect.h"
 #include "triton/Dialect/Triton/IR/Utility.h"
 #include "triton/Dialect/TritonGPU/IR/Dialect.h"
@@ -65,39 +66,65 @@ inline bool requiresSFPUInit(func::FuncOp funcOp) {
   return requiresInit;
 }
 
+inline bool requiresMMInit(func::FuncOp funcOp) {
+  bool requiresInit = false;
+  funcOp.walk([&](ttkernel::MatmulTilesOp dotOp) {
+    requiresInit = true;
+    return;
+  });
+  return requiresInit;
+}
+
 class InitializationHelper {
 public:
   InitializationHelper(func::FuncOp F)
-      : funcOp(F), addSFPUInit(requiresSFPUInit(F)) {
+      : funcOp(F), addSFPUInit(requiresSFPUInit(F)),
+        addMMInit(requiresMMInit(F)) {
     // build maps of copy/pack ops to respective indices
-    funcOp.walk([&](ttkernel::CopyTileOp copyTileOp) {
-      Value cbIndex = copyTileOp.getTileIndexCb();
-      Value dstIndex = copyTileOp.getTileIndexDst();
-      copyTileOps[copyTileOp]++;
-    });
-
-    funcOp.walk([&](ttkernel::CopyTileInitOp copyTileInitOp) {
-      copyTileInitOps.push_back(copyTileInitOp);
-    });
-
-    funcOp.walk([&](ttkernel::PackTileOp packTileOp) {
-      Value cbIndex = packTileOp.getDstIndex();
-      packTileOps[packTileOp]++;
+    funcOp.walk([&](Operation *op) {
+      if (auto copyTileOp = dyn_cast<ttkernel::CopyTileOp>(op)) {
+        copyTileOps[copyTileOp]++;
+      } else if (auto copyTileInitOp = dyn_cast<ttkernel::CopyTileInitOp>(op)) {
+        copyTileInitOps.push_back(copyTileInitOp);
+      } else if (auto packTileOp = dyn_cast<ttkernel::PackTileOp>(op)) {
+        packTileOps.insert(packTileOp);
+      } else if (auto matmulTilesOp = dyn_cast<ttkernel::MatmulTilesOp>(op)) {
+        matmulTilesOps.insert(matmulTilesOp);
+      }
     });
   }
 
-  // tile regs aquire ops must be inserted before any copy tiles ops
   void insertTileRegsAcquireOps() {
-    assert(!copyTileInitOps.empty() &&
-           "expecting at least one copy tile init op");
-    OpBuilder builder(copyTileInitOps.front());
-    ttkernel::TileRegsAcquireOp::create(builder,
-                                        copyTileInitOps.front().getLoc());
+    // if copy tile init ops are non-empty then we can insert before the first
+    // op. Otherwise, we need to find the block containing pack tile and move to
+    // the start of that block.
+    if (!copyTileInitOps.empty()) {
+      OpBuilder builder(copyTileInitOps.front());
+      ttkernel::TileRegsAcquireOp::create(builder,
+                                          copyTileInitOps.front().getLoc());
+    } else {
+      auto packTilesItr = funcOp.getOps<ttkernel::PackTileOp>();
+      assert(!packTilesItr.empty() && "expecting at least one pack tile op");
+      Operation *firstPackTileOp = *packTilesItr.begin();
+      Block *parentBlock = firstPackTileOp->getBlock();
+      OpBuilder builder(parentBlock, parentBlock->begin());
+      // put the tile regs acquire ops after any get arg val ops. This seems to
+      // be mostly cosmetic.
+      auto getArgValOpItr = parentBlock->getOps<ttkernel::GetArgValOp>();
+      if (!getArgValOpItr.empty()) {
+        auto argValOps = llvm::reverse(getArgValOpItr);
+        builder.setInsertionPointAfter(*argValOps.begin());
+      }
+      ttkernel::TileRegsAcquireOp::create(builder, firstPackTileOp->getLoc());
+    }
   }
 
   // coalesce copy tile waits before the firsts copy tile ops since tile
   // registers may not be acquired yet
   void insertCopyTileWaits() {
+    if (copyTileOps.empty())
+      return;
+
     OpBuilder builder(copyTileInitOps.front());
     for (auto copyTileOpItr : copyTileOps) {
       ttkernel::CopyTileOp copyTileOp = copyTileOpItr.first;
@@ -109,28 +136,71 @@ public:
     }
   }
 
-  void insertSFPUInitOps() {
-    if (!addSFPUInit)
-      return;
+  void insertComputeInitializationOps() {
+    if (addMMInit) {
+      // mm_init goes after cb initialization ops. but we need to collect the
+      // circular buffers first
+      assert(matmulTilesOps.size() == 1 &&
+             "only single matmul supported currently");
+      auto matmulTilesOp = *matmulTilesOps.begin();
 
-    auto tileRegsAcquireOps = funcOp.getOps<ttkernel::TileRegsAcquireOp>();
-    assert(!tileRegsAcquireOps.empty() && "expecting tile regs acquire op");
-    Operation *acquireOp = *tileRegsAcquireOps.begin();
+      Location loc = matmulTilesOp.getLoc();
+      OpBuilder builder(matmulTilesOp);
 
-    OpBuilder builder(acquireOp);
-    Value inCb = copyTileOps.begin()->first.getCb0();
-    Value outCb = packTileOps.begin()->first.getOutCb();
+      Value aCb = matmulTilesOp.getIn0CbId();
+      Value bCb = matmulTilesOp.getIn1CbId();
+      ttkernel::PackTileOp packTileOp = *packTileOps.begin();
+      Value outCb = packTileOp.getOutCb();
 
-    ttkernel::InitSFPUOp::create(builder, acquireOp->getLoc(), inCb, outCb);
+      auto getLatestValue = [](ArrayRef<Value> values) -> Value {
+        Operation *latestOp = nullptr;
+        Value latestValue;
+
+        for (Value val : values) {
+          Operation *defOp = val.getDefiningOp();
+          if (!defOp)
+            continue; // Skip block arguments
+
+          if (!latestOp || latestOp->isBeforeInBlock(defOp)) {
+            latestOp = defOp;
+            latestValue = val;
+          }
+        }
+
+        return latestValue;
+      };
+
+      Value latest = getLatestValue({aCb, bCb, outCb});
+      builder.setInsertionPointAfterValue(latest);
+
+      // TODO: support transpose. we cannot grab the transpose from the matmul
+      // op as transpose could be defined inside the matmul loop
+      Value transpose = arith::createConstantI32(loc, builder, 0);
+      ttkernel::MatmulInitOp::create(builder, loc, aCb, bCb, outCb, transpose);
+    }
+    if (addSFPUInit) {
+      auto tileRegsAcquireOps = funcOp.getOps<ttkernel::TileRegsAcquireOp>();
+      assert(!tileRegsAcquireOps.empty() && "expecting tile regs acquire op");
+      Operation *acquireOp = *tileRegsAcquireOps.begin();
+
+      OpBuilder builder(acquireOp);
+      ttkernel::PackTileOp packTileOp = *packTileOps.begin();
+      Value inCb = copyTileOps.begin()->first.getCb0();
+      Value outCb = packTileOp.getOutCb();
+
+      ttkernel::InitSFPUOp::create(builder, acquireOp->getLoc(), inCb, outCb);
+    }
   }
 
 private:
   SmallVector<ttkernel::CopyTileInitOp, 4> copyTileInitOps;
   llvm::MapVector<ttkernel::CopyTileOp, unsigned> copyTileOps;
-  llvm::MapVector<ttkernel::PackTileOp, unsigned> packTileOps;
+  SetVector<ttkernel::PackTileOp> packTileOps;
+  SetVector<ttkernel::MatmulTilesOp> matmulTilesOps;
 
   func::FuncOp funcOp;
   const bool addSFPUInit;
+  const bool addMMInit;
 };
 
 } // namespace
@@ -166,6 +236,19 @@ struct ConvertTritonNPUToTTKernelPass
         return IntegerType::get(type.getContext(), 32);
       }
       if (isa<npu::tt::TileEncodingAttr>(type.getEncoding())) {
+        // TODO: same caveats as above re:ttts layout
+        auto shape = SmallVector<int64_t>(1, 1);
+        auto ttcoreTileType = ttcore::TileType::get(
+            type.getContext(), ttcore::TileType::getDefaultShape(),
+            ttcore::elementTypeToDataType(etype));
+        MemRefType cbMemRefType = MemRefType::get(
+            shape, ttcoreTileType, MemRefLayoutAttrInterface{},
+            ttcore::MemorySpaceAttr::get(type.getContext(),
+                                         ttcore::MemorySpace::DeviceL1));
+        return ttkernel::CBType::get(cbMemRefType);
+      }
+      if (isa<triton::gpu::DotOperandEncodingAttr>(type.getEncoding())) {
+        // dot operands read directly from cbs, so convert to cb type
         // TODO: same caveats as above re:ttts layout
         auto shape = SmallVector<int64_t>(1, 1);
         auto ttcoreTileType = ttcore::TileType::get(
@@ -222,6 +305,7 @@ struct ConvertTritonNPUToTTKernelPass
     target.addIllegalDialect<triton::TritonDialect>();
     target.addIllegalDialect<triton::gpu::TritonGPUDialect>();
 
+    target.addLegalOp<UnrealizedConversionCastOp>();
     target.addDynamicallyLegalOp<func::FuncOp>(
         [](func::FuncOp funcOp) { return funcOp.getNumArguments() == 0; });
     target.addDynamicallyLegalDialect<arith::ArithDialect>([&](Operation *op) {
@@ -236,12 +320,15 @@ struct ConvertTritonNPUToTTKernelPass
                                       &pointerInfoAnalysis, PatternBenefit(1));
     populateComputeOpConversionPattern(typeConverter, patterns,
                                        PatternBenefit(1));
+    populateDotOpConversionPattern(typeConverter, patterns, PatternBenefit(1));
     populateElementwiseOpConversionPattern(typeConverter, patterns,
                                            PatternBenefit(1));
     populateMakeRangeOpConversionPattern(typeConverter, patterns,
                                          PatternBenefit(1));
     populateSPMDOpConversionPattern(typeConverter, patterns, PatternBenefit(1));
     populateViewOpConversionPattern(typeConverter, patterns, PatternBenefit(1));
+    mlir::scf::populateSCFStructuralTypeConversionsAndLegality(
+        typeConverter, patterns, target);
 
     patterns.add<RemoveLLVMAssume>(typeConverter, context);
 
@@ -256,7 +343,7 @@ struct ConvertTritonNPUToTTKernelPass
       InitializationHelper initHelper(funcOp);
       initHelper.insertCopyTileWaits();
       initHelper.insertTileRegsAcquireOps();
-      initHelper.insertSFPUInitOps();
+      initHelper.insertComputeInitializationOps();
     });
   }
 };

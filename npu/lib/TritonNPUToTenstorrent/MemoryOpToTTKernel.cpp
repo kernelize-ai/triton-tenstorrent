@@ -220,6 +220,7 @@ struct ConvertStoreOp : public OpConversionPattern<triton::StoreOp> {
 
     // Should always be a cb?
     auto cb = adaptor.getValue();
+    LDBG("Store op value: " << cb << "\nwith type: " << cb.getType());
     assert(isa<ttkernel::CBType>(cb.getType()) && "expected cb type");
 
     // Get tile size in bytes
@@ -249,12 +250,13 @@ struct ConvertLocalStoreOp : public OpConversionPattern<gpu::LocalStoreOp> {
     auto srcOp = op.getSrc().getDefiningOp();
 
     if (!isa<triton::LoadOp>(srcOp)) {
-      // COMPUTE KERNEL
       // reserve back the cb for the store
       Value numPages = arith::createConstantI32(loc, rewriter, 1);
       ttkernel::CBReserveBackOp::create(rewriter, loc, dst, numPages);
 
       // Pack the tile into the cb
+      // TODO: hard code the dest register index as 2 for now, but we should set
+      // this more explicitly based on all the ops in the kernel
       Value destRegisterIndex = arith::createIndexConstant(loc, rewriter, 2);
       Value outIndex = arith::createIndexConstant(loc, rewriter, 0);
       ttkernel::PackTileOp::create(rewriter, loc, destRegisterIndex, dst,
@@ -300,11 +302,17 @@ struct ConvertLocalLoadOp : public OpConversionPattern<gpu::LocalLoadOp> {
       return success();
     }
 
-    ttkernel::CopyTileInitOp::create(rewriter, loc, src);
-    Value c0 = arith::createIndexConstant(loc, rewriter, 0);
-
     auto dst = op.getResult();
     auto dstType = cast<RankedTensorType>(dst.getType());
+    if (isa<gpu::DotOperandEncodingAttr>(dstType.getEncoding())) {
+      // Dot ops read directly from cbs, so skip the copy tile and just replace
+      // the load with its cb src
+      rewriter.replaceOp(op, src);
+      return success();
+    }
+
+    ttkernel::CopyTileInitOp::create(rewriter, loc, src);
+    Value c0 = arith::createIndexConstant(loc, rewriter, 0);
     npu::tt::TileEncodingAttr loadEncoding =
         cast<npu::tt::TileEncodingAttr>(dstType.getEncoding());
     Value destRegisterIndex =

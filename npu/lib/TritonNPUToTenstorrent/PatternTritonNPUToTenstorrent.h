@@ -13,6 +13,10 @@ void populateFuncOpConversionPattern(TypeConverter &typeConverter,
                                      RewritePatternSet &patterns,
                                      PatternBenefit benefit);
 
+void populateDotOpConversionPattern(TypeConverter &typeConverter,
+                                    RewritePatternSet &patterns,
+                                    PatternBenefit benefit);
+
 void populateComputeOpConversionPattern(TypeConverter &typeConverter,
                                         RewritePatternSet &patterns,
                                         PatternBenefit benefit);
