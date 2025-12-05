@@ -1,10 +1,7 @@
 #include "PatternTritonNPUToTenstorrent.h"
 
-#include <deque>
-
 #include "mlir/Analysis/SliceAnalysis.h"
 #include "mlir/Transforms/DialectConversion.h"
-#include "llvm/ADT/PriorityWorklist.h"
 #include "llvm/Support/Debug.h"
 
 #include "triton/Dialect/Triton/IR/Dialect.h"
