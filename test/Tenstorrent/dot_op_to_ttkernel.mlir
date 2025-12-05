@@ -18,8 +18,10 @@ module attributes {"ttg.num-ctas" = 1 : i32, "ttg.num-warps" = 1 : i32, ttg.targ
     %c0_i32 = arith.constant 0 : i32
     %true = arith.constant true
     %c32_i32 = arith.constant 32 : i32
+    // CHECK-DAG: %[[c0_i32:.*]] = arith.constant 0 : i32
     // CHECK-DAG: %[[c1_i32:.*]] = arith.constant 1 : i32
     // CHECK-DAG: %[[c2_i32:.*]] = arith.constant 2 : i32
+    // CHECK-DAG: %[[c64_i32:.*]] = arith.constant 64 : i32
 
     // CHECK-DAG: %[[c0:.*]] = arith.constant 0 : index
     // CHECK-DAG: %[[c1:.*]] = arith.constant 1 : index
@@ -42,6 +44,16 @@ module attributes {"ttg.num-ctas" = 1 : i32, "ttg.num-warps" = 1 : i32, ttg.targ
     // CHECK-DAG: %[[B_BLOCK_STRIDE_K:.*]] = ttkernel.get_arg_val(%[[c7]])
     // CHECK-DAG: %[[C_BLOCK_STRIDE_M:.*]] = ttkernel.get_arg_val(%[[c8]])
     // CHECK-DAG: %[[BLOCK_INDEX:.*]] = ttkernel.get_arg_val(%[[c9]])
+
+    // CHECK-DAG: %[[B_CB:.*]] = ttkernel.get_compile_time_arg_val(1)
+    // CHECK-DAG: %[[B_DATA_FORMAT:.*]] = ttkernel.get_dataformat(%[[B_CB]])
+    // CHECK-DAG: %[[B_TILE_SIZE:.*]] = ttkernel.get_tile_size(%[[B_CB]])
+    // CHECK-DAG: %[[B_NOC_ADDR_BASE:.*]] = ttkernel.get_interleaved_addr_gen_fast({{.*}}, %[[B_PTR]], %[[B_TILE_SIZE]], %[[B_DATA_FORMAT]])
+
+    // CHECK-DAG: %[[A_CB:.*]] = ttkernel.get_compile_time_arg_val(0)
+    // CHECK-DAG: %[[A_DATA_FORMAT:.*]] = ttkernel.get_dataformat(%[[A_CB]])
+    // CHECK-DAG: %[[A_TILE_SIZE:.*]] = ttkernel.get_tile_size(%[[A_CB]])
+    // CHECK-DAG: %[[A_NOC_ADDR_BASE:.*]] = ttkernel.get_interleaved_addr_gen_fast({{.*}}, %[[A_PTR]], %[[A_TILE_SIZE]], %[[A_DATA_FORMAT]])
 
     %cst_4 = arith.constant dense<32> : tensor<32x32xi32, #blocked2>
     %b = ttg.local_alloc {alloc_idx = 1 : i32} : () -> !ttg.memdesc<32x32xf16, #shared, #smem, mutable>
@@ -138,6 +150,14 @@ module attributes {"ttg.num-ctas" = 1 : i32, "ttg.num-warps" = 1 : i32, ttg.targ
     %6 = arith.divsi %5, %c32_i32 : i32
     // CHECK: scf.for {{.*}} iter_args(%[[A_LOOP_OFFSET:.*]] = %[[A_ROW_OFFSET_BYTES]], %[[B_LOOP_OFFSET:.*]] = %[[B_COL_OFFSET_BYTES]]) -> (i32, i32) : i32
     %accumulator:3 = scf.for %accumulator_38 = %c0_i32 to %6 step %c1_i32 iter_args(%accumulator_39 = %cst_1, %a_ptrs_40 = %a_ptrs_28, %b_ptrs_41 = %b_ptrs_37) -> (tensor<32x32xf32, #blocked>, tensor<32x32x!tt.ptr<f16>, #blocked2>, tensor<32x32x!tt.ptr<f16>, #blocked1>)  : i32 {
+      // CHECK: %[[A_TILE_INDEX:.*]] = arith.divui %[[A_LOOP_OFFSET]], %[[A_TILE_SIZE]]
+      // CHECK: %[[A_NOC_ADDR:.*]] = ttkernel.interleaved_addr_gen_fast.get_noc_addr(%[[A_NOC_ADDR_BASE]], %[[A_TILE_INDEX]], %[[c0_i32]], )
+      // CHECK: ttkernel.cb_reserve_back(%[[A_CB]], %[[c1_i32]])
+      // CHECK: %[[A_CB_WRITE_PTR:.*]] = ttkernel.get_write_ptr(%[[A_CB]])
+      // CHECK: ttkernel.noc_async_read(%[[A_NOC_ADDR]], %[[A_CB_WRITE_PTR]], %[[A_TILE_SIZE]])
+      // CHECK: ttkernel.noc_async_read_barrier()
+      // CHECK: ttkernel.cb_push_back(%[[A_CB]], %[[c1_i32]])
+
       %a_42 = arith.muli %accumulator_38, %c32_i32 : i32
       %a_43 = arith.subi %K, %a_42 : i32
       %a_44 = tt.splat %a_43 : i32 -> tensor<1x32xi32, #blocked2>
@@ -145,6 +165,14 @@ module attributes {"ttg.num-ctas" = 1 : i32, "ttg.num-warps" = 1 : i32, ttg.targ
       %a_46 = tt.broadcast %a_45 : tensor<1x32xi1, #blocked2> -> tensor<32x32xi1, #blocked2>
       %a_47 = tt.load %a_ptrs_40, %a_46, %cst_3 : tensor<32x32x!tt.ptr<f16>, #blocked2>
       ttg.local_store %a_47, %a : tensor<32x32xf16, #blocked2> -> !ttg.memdesc<32x32xf16, #shared, #smem, mutable>
+      // CHECK: %[[B_TILE_INDEX:.*]] = arith.divui %[[B_LOOP_OFFSET]], %[[B_TILE_SIZE]]
+      // CHECK: %[[B_NOC_ADDR:.*]] = ttkernel.interleaved_addr_gen_fast.get_noc_addr(%[[B_NOC_ADDR_BASE]], %[[B_TILE_INDEX]], %[[c0_i32]], )
+      // CHECK: ttkernel.cb_reserve_back(%[[B_CB]], %[[c1_i32]])
+      // CHECK: %[[B_CB_WRITE_PTR:.*]] = ttkernel.get_write_ptr(%[[B_CB]])
+      // CHECK: ttkernel.noc_async_read(%[[B_NOC_ADDR]], %[[B_CB_WRITE_PTR]], %[[B_TILE_SIZE]])
+      // CHECK: ttkernel.noc_async_read_barrier()
+      // CHECK: ttkernel.cb_push_back(%[[B_CB]], %[[c1_i32]])
+
       %b_48 = tt.splat %a_43 : i32 -> tensor<32x1xi32, #blocked1>
       %b_49 = arith.cmpi slt, %b_ptrs_29, %b_48 : tensor<32x1xi32, #blocked1>
       %b_50 = tt.broadcast %b_49 : tensor<32x1xi1, #blocked1> -> tensor<32x32xi1, #blocked1>
@@ -155,6 +183,9 @@ module attributes {"ttg.num-ctas" = 1 : i32, "ttg.num-warps" = 1 : i32, ttg.targ
       %b_ptrs_54 = arith.muli %stride_bk, %c32_i32 : i32
       %b_ptrs_55 = tt.splat %b_ptrs_54 : i32 -> tensor<32x32xi32, #blocked1>
       %b_ptrs_56 = tt.addptr %b_ptrs_41, %b_ptrs_55 : tensor<32x32x!tt.ptr<f16>, #blocked1>, tensor<32x32xi32, #blocked1>
+      // CHECK: %[[B_LOOP_INCREMENT:.*]] = arith.muli %[[B_BLOCK_STRIDE_K]], %[[c64_i32]]
+      // COM: this is a bug, we should be adding these increments instead of overwriting
+      // CHECK: scf.yield %[[c64_i32]], %[[B_LOOP_INCREMENT]]
       scf.yield %accumulator_52, %a_ptrs_53, %b_ptrs_56 : tensor<32x32xf32, #blocked>, tensor<32x32x!tt.ptr<f16>, #blocked2>, tensor<32x32x!tt.ptr<f16>, #blocked1>
     }
     // CHECK: return
