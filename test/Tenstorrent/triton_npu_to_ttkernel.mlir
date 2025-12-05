@@ -87,8 +87,15 @@ module attributes {"ttg.num-ctas" = 1 : i32, "ttg.num-warps" = 1 : i32, ttg.targ
     %offsets_4 = arith.addi %offsets_2, %offsets_0 : tensor<1024xi32, #triton_tenstorrent.tile_encoding<{index = 1, parent = #blocked}>>
     %x_8 = tt.splat %x_ptr : !tt.ptr<f32> -> tensor<1024x!tt.ptr<f32>, #triton_tenstorrent.tile_encoding<{index = 0, parent = #blocked}>>
     %x_9 = tt.addptr %x_8, %offsets_3 : tensor<1024x!tt.ptr<f32>, #triton_tenstorrent.tile_encoding<{index = 0, parent = #blocked}>>, tensor<1024xi32, #triton_tenstorrent.tile_encoding<{index = 0, parent = #blocked}>>
-    // CHECK: %[[c4_i32:.*]] = arith.constant 4 : i32
-    // CHECK: %[[TILE_INDEX_X_BYTES:.*]] = arith.muli %[[BLOCK_START]], %[[c4_i32]]
+    // CHECK: %[[c0_i32_0:.*]] = arith.constant 0 : i32
+    // CHECK: %[[c0_i32_2:.*]] = arith.constant 0 : i32
+    // COM: these offsets are artifacts of converting the tensor representation to a scalar representation - they are removed during canonicalization
+    // CHECK: %[[BLOCK_START_X_OFFSET:.*]] = arith.addi %[[BLOCK_START]], %[[c0_i32_0]]
+    // CHECK-DAG: %[[c4_i32:.*]] = arith.constant 4 : i32
+    // CHECK: %[[TILE_INDEX_X_BYTES:.*]] = arith.muli %[[BLOCK_START_X_OFFSET]], %[[c4_i32]]
+    // CHECK: %[[BLOCK_START_Y_OFFSET:.*]] = arith.addi %[[BLOCK_START]], %[[c0_i32_2]]
+    // CHECK-DAG: %[[c4_i32:.*]] = arith.constant 4 : i32
+    // CHECK: %[[TILE_INDEX_Y_BYTES:.*]] = arith.muli %[[BLOCK_START_Y_OFFSET]], %[[c4_i32]]
     // CHECK: %[[TILE_INDEX_X:.*]] = arith.divui %[[TILE_INDEX_X_BYTES]], %[[X_TILE_SIZE]]
     // CHECK-DAG: %[[c1_1:.*]] = arith.constant 1 : i32
     // CHECK-DAG: %[[c0_i32:.*]] = arith.constant 0 : i32
@@ -103,8 +110,6 @@ module attributes {"ttg.num-ctas" = 1 : i32, "ttg.num-warps" = 1 : i32, ttg.targ
     ttg.local_store %x_10, %x : tensor<1024xf32, #triton_tenstorrent.tile_encoding<{index = 0, parent = #blocked}>> -> !ttg.memdesc<1024xf32, #shared, #smem, mutable>
     %y_11 = tt.splat %y_ptr : !tt.ptr<f32> -> tensor<1024x!tt.ptr<f32>, #triton_tenstorrent.tile_encoding<{index = 1, parent = #blocked}>>
     %y_12 = tt.addptr %y_11, %offsets_4 : tensor<1024x!tt.ptr<f32>, #triton_tenstorrent.tile_encoding<{index = 1, parent = #blocked}>>, tensor<1024xi32, #triton_tenstorrent.tile_encoding<{index = 1, parent = #blocked}>>
-    // CHECK: %[[c4_i32:.*]] = arith.constant 4 : i32
-    // CHECK: %[[TILE_INDEX_Y_BYTES:.*]] = arith.muli %[[BLOCK_START]], %[[c4_i32]]
     // CHECK: %[[TILE_INDEX_Y:.*]] = arith.divui %[[TILE_INDEX_Y_BYTES]], %[[Y_TILE_SIZE]]
     // CHECK-DAG: %[[c1_3:.*]] = arith.constant 1 : i32
     // CHECK-DAG: %[[c0_i32_1:.*]] = arith.constant 0 : i32

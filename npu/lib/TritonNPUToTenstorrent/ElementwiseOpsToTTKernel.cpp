@@ -61,6 +61,14 @@ struct ConvertAddPtrOp : public OpConversionPattern<AddPtrOp> {
       } else if (auto splatOp = dyn_cast<SplatOp>(op)) {
         tensorToScalar[splatOp.getResult()] = splatOp.getSrc();
         offsetChain.insert(splatOp.getSrc());
+      } else if (auto unrealizedConversionCast =
+                     dyn_cast<UnrealizedConversionCastOp>(op)) {
+        // TODO: this seems a little suspect?
+        Value src = tensorToScalar.count(unrealizedConversionCast.getOperand(0))
+                        ? tensorToScalar[unrealizedConversionCast.getOperand(0)]
+                        : unrealizedConversionCast.getOperand(0);
+        tensorToScalar[unrealizedConversionCast.getResult(0)] = src;
+        offsetChain.insert(src);
       } else if (auto constOp = dyn_cast<arith::ConstantOp>(op)) {
         auto value = constOp.getValue();
         auto dense = dyn_cast<SplatElementsAttr>(value);
