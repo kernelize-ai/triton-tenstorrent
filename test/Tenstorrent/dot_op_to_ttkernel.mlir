@@ -18,6 +18,9 @@ module attributes {"ttg.num-ctas" = 1 : i32, "ttg.num-warps" = 1 : i32, ttg.targ
     %c0_i32 = arith.constant 0 : i32
     %true = arith.constant true
     %c32_i32 = arith.constant 32 : i32
+    // CHECK-DAG: %[[c1_i32:.*]] = arith.constant 1 : i32
+    // CHECK-DAG: %[[c2_i32:.*]] = arith.constant 2 : i32
+
     // CHECK-DAG: %[[c0:.*]] = arith.constant 0 : index
     // CHECK-DAG: %[[c1:.*]] = arith.constant 1 : index
     // CHECK-DAG: %[[c2:.*]] = arith.constant 2 : index
@@ -72,9 +75,32 @@ module attributes {"ttg.num-ctas" = 1 : i32, "ttg.num-warps" = 1 : i32, ttg.targ
     // CHECK-DAG: %[[c31_i32:.*]] = arith.constant 31 : i32
     // CHECK-DAG: %[[c32_i32:.*]] = arith.constant 32 : i32
     // CHECK-DAG: %[[M_PLUS_31:.*]] = arith.addi %[[M_SIZE]], %[[c31_i32]] : i32
-    // CHECK-DAG: %[[NUM_TILES_M:.*]] = arith.divsi %[[M_PLUS_31]], %[[c32_i32]] : i32
+    // CHECK-DAG: %[[M_TILES_END:.*]] = arith.divsi %[[M_PLUS_31]], %[[c32_i32]] : i32
     // CHECK-DAG: %[[N_PLUS_31:.*]] = arith.addi %[[N_SIZE]], %[[c31_i32]] : i32
-    // CHECK-DAG: %[[NUM_TILES_N:.*]] = arith.divsi %[[N_PLUS_31]], %[[c32_i32]] : i32
+    // CHECK-DAG: %[[N_TILES_END:.*]] = arith.divsi %[[N_PLUS_31]], %[[c32_i32]] : i32
+
+    // CHECK-DAG: %[[BLOCK_INDEX_DIV_N:.*]] = arith.divsi %[[BLOCK_INDEX]], %[[N_TILES_END]] : i32
+    // CHECK-DAG: %[[M_TILES_REMAINING:.*]] = arith.subi %[[M_TILES_END]], %[[BLOCK_INDEX_DIV_N]] : i32
+    // CHECK-DAG: %[[GROUP_SIZE_M:.*]] = arith.minsi %[[M_TILES_REMAINING]], %[[c1_i32]] : i32
+    // CHECK-DAG: %[[BLOCK_INDEX_MOD_N:.*]] = arith.remsi %[[BLOCK_INDEX]], %[[N_TILES_END]] : i32
+    // CHECK-DAG: %[[GROUP_OFFSET:.*]] = arith.remsi %[[BLOCK_INDEX_MOD_N]], %[[GROUP_SIZE_M]] : i32
+    // CHECK-DAG: %[[PID_M:.*]] = arith.addi %[[BLOCK_INDEX_DIV_N]], %[[GROUP_OFFSET]] : i32
+    // CHECK-DAG: %[[PID_N:.*]] = arith.divsi %[[BLOCK_INDEX_MOD_N]], %[[GROUP_SIZE_M]] : i32
+
+    // COM: Convert pid_m / pid_n into element indices (× 32, then mod M/N)
+    // CHECK-DAG: %[[M_START:.*]] = arith.muli %[[PID_M]], %[[c32_i32]] : i32
+    // CHECK-DAG: %[[M_INDEX:.*]] = arith.remsi %[[M_START]], %[[M_SIZE]] : i32
+    // CHECK-DAG: %[[N_START:.*]] = arith.muli %[[PID_N]], %[[c32_i32]] : i32
+    // CHECK-DAG: %[[N_INDEX:.*]] = arith.remsi %[[N_START]], %[[N_SIZE]] : i32
+
+    // COM: Row/col offsets for A and B (uses A_BLOCK_STRIDE_M and f16 element size 2)
+    // CHECK-DAG: %[[A_ROW_OFFSET_ELTS:.*]] = arith.muli %[[M_INDEX]], %[[A_BLOCK_STRIDE_M]] : i32
+    // CHECK-DAG: %[[A_ROW_OFFSET_BYTES:.*]] = arith.muli %[[A_ROW_OFFSET_ELTS]], %[[c2_i32]] : i32
+    // CHECK-DAG: %[[B_COL_OFFSET_BYTES:.*]] = arith.muli %[[N_INDEX]], %[[c2_i32]] : i32
+
+    // COM: K tiling: ceil(K / 32)
+    // CHECK-DAG: %[[K_PLUS_31:.*]] = arith.addi %[[K_SIZE]], %[[c31_i32]] : i32
+    // CHECK-DAG: %[[K_TILES_END:.*]] = arith.divsi %[[K_PLUS_31]], %[[c32_i32]] : i32
 
     %offs_am_10 = tt.make_range {end = 32 : i32, start = 0 : i32} : tensor<32xi32, #ttg.slice<{dim = 1, parent = #blocked2}>>
     %offs_am_11 = tt.make_range {end = 32 : i32, start = 0 : i32} : tensor<32xi32, #ttg.slice<{dim = 0, parent = #blocked1}>>
@@ -110,7 +136,7 @@ module attributes {"ttg.num-ctas" = 1 : i32, "ttg.num-warps" = 1 : i32, ttg.targ
     %b_ptrs_37 = tt.addptr %b_ptrs_36, %b_ptrs_35 : tensor<32x32x!tt.ptr<f16>, #blocked1>, tensor<32x32xi32, #blocked1>
     %5 = arith.addi %K, %c31_i32 : i32
     %6 = arith.divsi %5, %c32_i32 : i32
-
+    // CHECK: scf.for {{.*}} iter_args(%[[A_LOOP_OFFSET:.*]] = %[[A_ROW_OFFSET_BYTES]], %[[B_LOOP_OFFSET:.*]] = %[[B_COL_OFFSET_BYTES]]) -> (i32, i32) : i32
     %accumulator:3 = scf.for %accumulator_38 = %c0_i32 to %6 step %c1_i32 iter_args(%accumulator_39 = %cst_1, %a_ptrs_40 = %a_ptrs_28, %b_ptrs_41 = %b_ptrs_37) -> (tensor<32x32xf32, #blocked>, tensor<32x32x!tt.ptr<f16>, #blocked2>, tensor<32x32x!tt.ptr<f16>, #blocked1>)  : i32 {
       %a_42 = arith.muli %accumulator_38, %c32_i32 : i32
       %a_43 = arith.subi %K, %a_42 : i32
