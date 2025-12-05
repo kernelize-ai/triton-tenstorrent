@@ -275,7 +275,7 @@ module attributes {"ttg.num-ctas" = 1 : i32, "ttg.num-warps" = 1 : i32, ttg.targ
         %7 = arith.divsi %6, %c32_i32 : i32
         // CHECK: %[[K_PLUS_31:.*]] = arith.addi %[[K_SIZE]], %[[c31_i32]]
         // CHECK: %[[K_TILES_END:.*]] = arith.divsi %[[K_PLUS_31]], %[[c32_i32]]
-        // CHECK: scf.for %[[ARG0:.*]] = %[[c0_i32]] to %[[K_TILES_END]] step %[[c1_i32]]
+        // CHECK: scf.for %[[ARG0:.*]] = %[[c0_i32]] to %[[K_TILES_END]] step %[[c1_i32]] : i32 {
         %accumulator = scf.for %accumulator_5 = %c0_i32 to %7 step %c1_i32 iter_args(%arg10 = %cst) -> (tensor<32x32xf32, #blocked>)  : i32 {
           // CHECK-DAG: ttkernel.cb_wait_front(%[[A_CB]], %[[c1_i32]])
           // CHECK-DAG: ttkernel.cb_wait_front(%[[B_CB]], %[[c1_i32]])
@@ -287,6 +287,7 @@ module attributes {"ttg.num-ctas" = 1 : i32, "ttg.num-warps" = 1 : i32, ttg.targ
         }
         %c = arith.truncf %accumulator : tensor<32x32xf32, #blocked> to tensor<32x32xf16, #blocked>
         ttg.local_store %c, %0 : tensor<32x32xf16, #blocked> -> !ttg.memdesc<32x32xf16, #shared, #smem, mutable>
+        // CHECK: }
         // CHECK: ttkernel.cb_reserve_back(%[[C_CB]], %[[c1_i32]])
         // CHECK: ttkernel.pack_tile(%[[c2]], %[[C_CB]], %[[c0]], true)
         // CHECK: return
