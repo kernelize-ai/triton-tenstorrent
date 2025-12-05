@@ -38,7 +38,7 @@ struct ConvertAddPtrOp : public OpConversionPattern<AddPtrOp> {
     slice.insert(adaptor.getOffset().getDefiningOp());
 
     DenseMap<Value, Value> tensorToScalar;
-    SetVector<Value> offsetChain; // really, rewritten offset chain...
+    SetVector<Value> rewrittenOffsetOps;
     for (Operation *op : slice) {
       LDBG("Visiting " << *op);
 
@@ -57,10 +57,10 @@ struct ConvertAddPtrOp : public OpConversionPattern<AddPtrOp> {
         uint32_t start = makeRangeOp.getStart();
         Value c = arith::createConstantI32(loc, rewriter, start);
         tensorToScalar[makeRangeOp.getResult()] = c;
-        offsetChain.insert(c);
+        rewrittenOffsetOps.insert(c);
       } else if (auto splatOp = dyn_cast<SplatOp>(op)) {
         tensorToScalar[splatOp.getResult()] = splatOp.getSrc();
-        offsetChain.insert(splatOp.getSrc());
+        rewrittenOffsetOps.insert(splatOp.getSrc());
       } else if (auto unrealizedConversionCast =
                      dyn_cast<UnrealizedConversionCastOp>(op)) {
         // TODO: this seems a little suspect?
@@ -68,7 +68,7 @@ struct ConvertAddPtrOp : public OpConversionPattern<AddPtrOp> {
                         ? tensorToScalar[unrealizedConversionCast.getOperand(0)]
                         : unrealizedConversionCast.getOperand(0);
         tensorToScalar[unrealizedConversionCast.getResult(0)] = src;
-        offsetChain.insert(src);
+        rewrittenOffsetOps.insert(src);
       } else if (auto constOp = dyn_cast<arith::ConstantOp>(op)) {
         auto value = constOp.getValue();
         auto dense = dyn_cast<SplatElementsAttr>(value);
@@ -76,7 +76,7 @@ struct ConvertAddPtrOp : public OpConversionPattern<AddPtrOp> {
           APInt v = dense.getSplatValue<APInt>();
           Value c = arith::createConstantI32(loc, rewriter, v.getSExtValue());
           tensorToScalar[constOp.getResult()] = c;
-          offsetChain.insert(c);
+          rewrittenOffsetOps.insert(c);
         }
       } else {
         Value result = op->getResult(0);
@@ -101,10 +101,10 @@ struct ConvertAddPtrOp : public OpConversionPattern<AddPtrOp> {
           newVal.setType(tensorType.getElementType());
         LDBG("Rewritten op: " << *newOp);
         tensorToScalar[result] = newVal;
-        offsetChain.insert(newVal);
+        rewrittenOffsetOps.insert(newVal);
       }
     }
-    Value offset = offsetChain.back();
+    Value offset = rewrittenOffsetOps.back();
     LDBG("Computed scalar offset: " << offset);
 
     // Drop the base addr and just return the offset converted to bytes
@@ -115,7 +115,19 @@ struct ConvertAddPtrOp : public OpConversionPattern<AddPtrOp> {
     Value elemSizeValue = arith::createConstantI32(loc, rewriter, elemSize);
     offset = arith::MulIOp::create(rewriter, loc, offset, elemSizeValue);
     LDBG("Replace addptr with offset in bytes: " << offset);
-    rewriter.replaceOp(op, offset);
+
+    // for addptr ops with a loop carried ptr operand we want to keep the add
+    // TODO: we need a better way of handling this generically - differentiating
+    // between when the addptr operation happens within a TensorAccessor-style
+    // object vs when we need to increment an integer value
+    const bool userRequiresAdd = isa<BlockArgument>(adaptor.getPtr());
+    if (userRequiresAdd) {
+      // replace op with add
+      rewriter.replaceOpWithNewOp<arith::AddIOp>(op, adaptor.getPtr(), offset);
+    } else {
+      // replace op with offset
+      rewriter.replaceOp(op, offset);
+    }
 
     return success();
   }

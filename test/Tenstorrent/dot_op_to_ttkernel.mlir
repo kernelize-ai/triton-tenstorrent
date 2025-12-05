@@ -183,9 +183,10 @@ module attributes {"ttg.num-ctas" = 1 : i32, "ttg.num-warps" = 1 : i32, ttg.targ
       %b_ptrs_54 = arith.muli %stride_bk, %c32_i32 : i32
       %b_ptrs_55 = tt.splat %b_ptrs_54 : i32 -> tensor<32x32xi32, #blocked1>
       %b_ptrs_56 = tt.addptr %b_ptrs_41, %b_ptrs_55 : tensor<32x32x!tt.ptr<f16>, #blocked1>, tensor<32x32xi32, #blocked1>
+      // CHECK: %[[A_NEXT_VALUE:.*]] = arith.addi %[[A_LOOP_OFFSET]], %[[c64_i32]]
       // CHECK: %[[B_LOOP_INCREMENT:.*]] = arith.muli %[[B_BLOCK_STRIDE_K]], %[[c64_i32]]
-      // COM: this is a bug, we should be adding these increments instead of overwriting
-      // CHECK: scf.yield %[[c64_i32]], %[[B_LOOP_INCREMENT]]
+      // CHECK: %[[B_NEXT_VALUE:.*]] = arith.addi %[[B_LOOP_OFFSET]], %[[B_LOOP_INCREMENT]]
+      // CHECK: scf.yield %[[A_NEXT_VALUE]], %[[B_NEXT_VALUE]]
       scf.yield %accumulator_52, %a_ptrs_53, %b_ptrs_56 : tensor<32x32xf32, #blocked>, tensor<32x32x!tt.ptr<f16>, #blocked2>, tensor<32x32x!tt.ptr<f16>, #blocked1>
     }
     // CHECK: return
