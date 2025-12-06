@@ -14,11 +14,11 @@ from triton.backends.driver import DriverBase
 from triton.backends.compiler import GPUTarget
 
 # for locating libTritonCPURuntime
-try:
-    _triton_C_dir = importlib.resources.files(triton).joinpath("_C")
-except AttributeError:
+#try:
+#    _triton_C_dir = importlib.resources.files(triton).joinpath("_C")
+#except AttributeError:
     # resources.files() doesn't exist for Python < 3.9
-    _triton_C_dir = importlib.resources.path(triton, "_C").__enter__()
+#    _triton_C_dir = importlib.resources.path(triton, "_C").__enter__()
 
 
 @functools.lru_cache()
@@ -55,7 +55,8 @@ def system_ccflags():
 
 @functools.lru_cache()
 def library_dirs():
-    lib_dirs = [_triton_C_dir]
+    #lib_dirs = [_triton_C_dir]
+    lib_dirs = []
     if is_macos():
         lib_dirs.extend([os.path.join(external_openmp_path(), "lib")])
         lib_dirs.extend([os.path.join(external_boost_path(), "lib")])
@@ -88,7 +89,7 @@ class CpuUtils(object):
             return (lib, kernel, 1, shared_mem, 2**12)
 
     def get_device_properties(self, *args):
-        core_count = self.device.get_property_int(nexus.property.CoreCount)
+        core_count = self.device.get_property_int(nexus.property.Size)
         return {
             "max_num_regs": core_count * 4, "max_shared_mem": 1024 * 1024 * 1024, "multiprocessor_count":
             core_count, "warpSize": 1
@@ -122,10 +123,11 @@ class CPULauncher(object):
     def __init__(self, src, metadata):
         constants = src.constants if hasattr(src, "constants") else dict()
         arg_idx = lambda x: (src.fn.arg_names.index(x), ) if isinstance(x, str) else x
-        constants = {arg_idx(idx): value for idx, value in constants.items()}
-        signature = {idx: value for idx, value in src.signature.items()}
+        self.constants = {arg_idx(idx): value for idx, value in constants.items()}
+        self.signature = {idx: value for idx, value in src.signature.items()}
 
     def __call__(self, gridX, gridY, gridZ, stream, function, *args):
+        #self.launch(gridX, gridY, gridZ, stream, function, *args)
         kernel_metadata = args[0]
         num_warps = kernel_metadata[0]
         # num_ctas = kernel_metadata[1] # should be 1
@@ -138,12 +140,15 @@ class CPULauncher(object):
         launch_exit_hook = args[3]
 
         schedule = self.device.create_schedule()
-        #print(f"creating command for function {function} with args {args[4:]}")
         command = schedule.create_command(function)
         import torch
         cb_depth = 1
         buffers = []
+        sig_types = list(self.signature.values())
         for i, arg in enumerate(args[4:]):
+            ty = sig_types[i]
+            if ty == "constexpr":
+                continue
             if isinstance(arg, torch.Tensor):
                 command.set_const(i, cb_depth, "CB", nexus.get_data_type(arg))
                 arg = self.device.create_buffer(arg)
@@ -159,9 +164,12 @@ class CPULauncher(object):
             launch_exit_hook(launch_metadata)
         
         # copy buffers back to host
-        #for buffer in buffers:
-        #    buffer.copy_to_host()
-        #self.launch(gridX, gridY, gridZ, stream, function, *args)
+        i = 0
+        for arg in args[4:]:
+            if isinstance(arg, torch.Tensor):
+                buffers[i].copy(arg)
+                i += 1
+
 
 
 class CPUDeviceInterface:
