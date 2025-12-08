@@ -30,7 +30,7 @@ export _ACTIVATE_ECHO_TOOLCHAIN_DIR_AND_EXIT=""
 source env/activate
 
 echo "Installing tt-mlir python dependencies"
-python -m pip install nanobind
+python -m pip install 'nanobind<2.10'
 
 #export LLVM_INCLUDE_DIRS="$LLVM_BUILD_DIR/include"
 #export MLIR_INCLUDE_DIRS="$LLVM_BUILD_DIR/include"
