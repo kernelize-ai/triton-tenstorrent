@@ -18,16 +18,16 @@ class PointerInfoAnalysis {
 public:
   explicit PointerInfoAnalysis(mlir::Operation *root);
 
-  std::optional<PointerInfo> getInfo(mlir::triton::LoadOp loadOp) const {
-    auto it = loadInfo.find(loadOp.getOperation());
-    if (it != loadInfo.end()) {
+  std::optional<PointerInfo> getInfo(Operation *op) const {
+    auto it = ptrInfo.find(op);
+    if (it != ptrInfo.end()) {
       return it->second;
     }
     return std::nullopt;
   }
 
 private:
-  mlir::DenseMap<Operation *, PointerInfo> loadInfo;
+  mlir::DenseMap<Operation *, PointerInfo> ptrInfo;
 };
 
 } // namespace npu
