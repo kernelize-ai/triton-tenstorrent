@@ -59,8 +59,15 @@ PointerInfoAnalysis::PointerInfoAnalysis(mlir::Operation *root) {
   root->walk([&](triton::LoadOp loadOp) {
     LDBG("pointer analysis for load op : " << *loadOp << "\n");
     Value baseAddr = traceToBaseAddress(loadOp.getPtr());
-    assert(loadInfo.try_emplace(loadOp, PointerInfo{baseAddr}).second &&
+    assert(ptrInfo.try_emplace(loadOp, PointerInfo{baseAddr}).second &&
            "expected unique load op in pointer info analysis");
+  });
+  root->walk([&](triton::StoreOp storeOp) {
+    LDBG("pointer analysis for store op : " << *storeOp << "\n");
+    Value baseAddr = traceToBaseAddress(storeOp.getPtr());
+    assert(ptrInfo.try_emplace(storeOp, PointerInfo{baseAddr}).second &&
+           "expected unique store op in pointer info analysis");
+    LDBG("store op base address: " << baseAddr << "\n");
   });
 }
 

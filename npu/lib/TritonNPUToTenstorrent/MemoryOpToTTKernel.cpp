@@ -213,20 +213,48 @@ struct ConvertLoadOp : public OpConversionPattern<triton::LoadOp> {
 struct ConvertStoreOp : public OpConversionPattern<triton::StoreOp> {
   using OpConversionPattern<triton::StoreOp>::OpConversionPattern;
 
+  explicit ConvertStoreOp(TypeConverter &typeConverter,
+                          npu::PointerInfoAnalysis *pointerInfoAnalysis,
+                          MLIRContext *context)
+      : OpConversionPattern<triton::StoreOp>(typeConverter, context),
+        pointerInfoAnalysis(pointerInfoAnalysis) {}
+
   LogicalResult
   matchAndRewrite(triton::StoreOp op, OpAdaptor adaptor,
                   ConversionPatternRewriter &rewriter) const override {
     Location loc = op.getLoc();
 
-    // Should always be a cb?
     auto cb = adaptor.getValue();
     LDBG("Store op value: " << cb << "\nwith type: " << cb.getType());
     assert(isa<ttkernel::CBType>(cb.getType()) && "expected cb type");
 
-    // Get tile size in bytes
+    auto ptrInfo = pointerInfoAnalysis->getInfo(op);
+    assert(ptrInfo && "expected pointer info for load op");
+    Value baseAddr = ptrInfo->basePtr;
+    LDBG("Store op base address: " << baseAddr << "\n");
+
+    // compute noc address
+    auto opInsertionPt = rewriter.saveInsertionPoint();
+    rewriter.setInsertionPointAfterValue(cb);
+
+    auto dataFormat = ttkernel::GetDataFormatOp::create(rewriter, loc, cb);
     auto pageSize = ttkernel::GetTileSizeOp::create(rewriter, loc, cb);
 
-    Value nocAddr = computeNocAddr(rewriter, loc, op.getPtr(), pageSize, cb);
+    Value c1bit = arith::createConstantI1(loc, rewriter, 1);
+    Value addrGen = ttkernel::GetInterleavedAddrGenFastOp::create(
+        rewriter, loc, c1bit, baseAddr, pageSize, dataFormat);
+
+    rewriter.restoreInsertionPoint(opInsertionPt);
+
+    // convert bytes offset to tile index
+    Value offset = adaptor.getPtr();
+    Value tile_id = arith::DivUIOp::create(rewriter, loc, offset, pageSize);
+
+    Value const1 = arith::createConstantI32(loc, rewriter, 1);
+    Value const0 = arith::createConstantI32(loc, rewriter, 0);
+
+    Value nocAddr = ttkernel::InterleavedAddrGenFastGetNocAddrOp::create(
+        rewriter, loc, addrGen, tile_id, const0, Value());
 
     Value l1Addr = ttkernel::GetReadPtrOp::create(rewriter, loc, cb);
     ttkernel::NocAsyncWriteOp::create(rewriter, loc, l1Addr, nocAddr, pageSize);
@@ -236,6 +264,8 @@ struct ConvertStoreOp : public OpConversionPattern<triton::StoreOp> {
     rewriter.eraseOp(op);
     return success();
   }
+
+  npu::PointerInfoAnalysis *pointerInfoAnalysis;
 };
 
 struct ConvertLocalStoreOp : public OpConversionPattern<gpu::LocalStoreOp> {
@@ -357,7 +387,8 @@ void populateMemoryOpConversionPattern(
     npu::PointerInfoAnalysis *pointerInfoAnalysis, PatternBenefit benefit) {
   patterns.add<ConvertLoadOp>(typeConverter, pointerInfoAnalysis,
                               patterns.getContext());
-  patterns.add<ConvertStoreOp>(typeConverter, patterns.getContext());
+  patterns.add<ConvertStoreOp>(typeConverter, pointerInfoAnalysis,
+                               patterns.getContext());
   patterns.add<ConvertLocalStoreOp>(typeConverter, patterns.getContext());
   patterns.add<ConvertLocalLoadOp>(typeConverter, patterns.getContext());
   patterns.add<ConvertLocalAllocOp>(typeConverter, patterns.getContext());
