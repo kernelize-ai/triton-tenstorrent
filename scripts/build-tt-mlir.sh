@@ -56,11 +56,14 @@ if [[ -z "${NO_TTMLIR_RUNTIME:-}" ]]; then
         -DCMAKE_INSTALL_RPATH='$ORIGIN' \
         -DCMAKE_INSTALL_RPATH_USE_LINK_PATH=ON \
         -DTTMLIR_ENABLE_OPMODEL=OFF \
-        -DTTMLIR_ENABLE_BINDINGS_PYTHON=OFF -DTTMLIR_ENABLE_RUNTIME=ON -DTT_RUNTIME_ENABLE_TTNN=ON -DTT_RUNTIME_ENABLE_TTMETAL=ON -DTTMLIR_ENABLE_RUNTIME_TESTS=ON \
+        -DTTMLIR_ENABLE_BINDINGS_PYTHON=OFF \
+        -DTTMLIR_ENABLE_RUNTIME=ON \
+        -DTT_RUNTIME_ENABLE_TTNN=ON \
+        -DTT_RUNTIME_ENABLE_TTMETAL=ON \
+        -DTTMLIR_ENABLE_RUNTIME_TESTS=ON \
         -DTTMLIR_ENABLE_ALCHEMIST=OFF
 
     cmake --build build
-    # TODO: install ttrt and install tt-mlir/tt-metal for actual runtime usage
 else
     echo "Building tt-mlir without runtime"
     # Hack: create the lib64 directory to avoid cmake error about missing dir on MacOS
