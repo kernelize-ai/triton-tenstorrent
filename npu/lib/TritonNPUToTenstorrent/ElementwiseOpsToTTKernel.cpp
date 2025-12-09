@@ -187,6 +187,7 @@ void populateElementwiseOpConversionPattern(TypeConverter &typeConverter,
   POPULATE_ARITH_BINARY_OP_ON_TENSORS(arith::AddIOp);
   POPULATE_ARITH_BINARY_OP_ON_TENSORS(arith::MulIOp);
   POPULATE_ARITH_BINARY_OP_ON_TENSORS(arith::RemSIOp);
+  POPULATE_ARITH_BINARY_OP_ON_TENSORS(arith::DivSIOp);
 
   POPULATE_ARITH_BINARY_OP_ON_TENSORS(arith::AndIOp);
 
