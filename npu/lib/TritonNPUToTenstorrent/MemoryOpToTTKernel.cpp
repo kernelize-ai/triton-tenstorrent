@@ -26,8 +26,6 @@ namespace npu {
 
 namespace {
 
-inline bool isScalar(Value v) { return !isa<RankedTensorType>(v.getType()); }
-
 static int64_t findAllocIdx(Operation *op) {
   if (auto localLoadOp = dyn_cast<gpu::LocalLoadOp>(op)) {
     return findAllocIdx(localLoadOp.getSrc().getDefiningOp());
@@ -39,97 +37,6 @@ static int64_t findAllocIdx(Operation *op) {
     return localAllocOp->getAttrOfType<IntegerAttr>("alloc_idx").getInt();
   }
   return -1;
-}
-
-inline Value traceToBaseAddress(Value ptr) {
-  SetVector<Operation *> baseAddrSlice;
-  mlir::BackwardSliceOptions opt;
-  opt.filter = [](Operation *op) { return !isa<ttkernel::GetArgValOp>(op); };
-  (void)getBackwardSlice(ptr, &baseAddrSlice, opt);
-  LLVM_DEBUG(for (Operation *op : baseAddrSlice) {
-    DBGS() << "backward slice op: " << *op << "\n";
-  });
-
-  Value baseAddr;
-  for (auto op : baseAddrSlice) {
-    if (op->getNumOperands() == 1 &&
-        isa<IntegerType>(op->getOperand(0).getType())) {
-      baseAddr = op->getOperand(0);
-      break;
-    }
-  }
-
-  assert(baseAddr && "could not find base address in backward slice");
-  LDBG("Found base address: " << baseAddr << ", for ptr: " << ptr);
-  return baseAddr;
-}
-
-static Value computeNocAddr(ConversionPatternRewriter &rewriter, Location loc,
-                            Value ptr, Value pageSize, Value cb) {
-  // Trace to base address and offset
-  LDBG("Computing NOC address for ptr: " << ptr);
-
-  SetVector<Operation *> baseAddrSlice;
-  mlir::BackwardSliceOptions opt;
-  opt.filter = [](Operation *op) {
-    return !isa<IntegerType>(op->getResult(0).getType());
-  };
-  (void)getBackwardSlice(ptr, &baseAddrSlice, opt);
-  LLVM_DEBUG(for (Operation *op : baseAddrSlice) {
-    DBGS() << "backward slice op: " << *op << "\n";
-  });
-
-  Value baseAddr, offset;
-  // Look for splat ops that populate tensors with integer values. These ops
-  // give us the base ptr (converted to integer) and the offset (integer).
-  // Because the slice frontier is an integer type we know that only one op with
-  // integer valued return can exist for both base addr and offset.
-  for (auto op : baseAddrSlice) {
-    if (op->getNumOperands() == 1 &&
-        isa<IntegerType>(op->getOperand(0).getType())) {
-      if (!baseAddr) {
-        baseAddr = op->getOperand(0);
-      } else {
-        offset = op->getOperand(0);
-        break;
-      }
-    }
-  }
-
-  assert(baseAddr && "could not find base address in backward slice");
-  assert(offset && "could not find offset in backward slice");
-  LDBG("Computing NOC address for base address: " << baseAddr
-                                                  << ", offset: " << offset);
-  assert(isScalar(offset) && "expected scalar offset");
-
-  // Convert offset to bytes
-  triton::PointerType ptrType;
-  if (isScalar(ptr)) {
-    ptrType = cast<triton::PointerType>(ptr.getType());
-  } else {
-    auto tensorType = cast<RankedTensorType>(ptr.getType());
-    auto elemType = tensorType.getElementType();
-    ptrType = cast<triton::PointerType>(elemType);
-  }
-  auto elemType = ptrType.getPointeeType();
-  Value elemSizeValue = arith::createConstantI32(
-      loc, rewriter, elemType.getIntOrFloatBitWidth() / 8);
-  offset = arith::MulIOp::create(rewriter, loc, offset, elemSizeValue);
-
-  Value tile_id = arith::DivUIOp::create(rewriter, loc, offset, pageSize);
-
-  Value const1 = arith::createConstantI32(loc, rewriter, 1);
-  Value const0 = arith::createConstantI32(loc, rewriter, 0);
-
-  // Create interleaved address generator and get noc address
-  auto dataFormat = ttkernel::GetDataFormatOp::create(rewriter, loc, cb);
-  Value c1bit = arith::createConstantI1(loc, rewriter, 1);
-  Value addrGen = ttkernel::GetInterleavedAddrGenFastOp::create(
-      rewriter, loc, c1bit, baseAddr, pageSize, dataFormat);
-  Value nocAddr = ttkernel::InterleavedAddrGenFastGetNocAddrOp::create(
-      rewriter, loc, addrGen, tile_id, const0, Value());
-
-  return nocAddr;
 }
 
 struct ConvertLoadOp : public OpConversionPattern<triton::LoadOp> {
@@ -213,20 +120,48 @@ struct ConvertLoadOp : public OpConversionPattern<triton::LoadOp> {
 struct ConvertStoreOp : public OpConversionPattern<triton::StoreOp> {
   using OpConversionPattern<triton::StoreOp>::OpConversionPattern;
 
+  explicit ConvertStoreOp(TypeConverter &typeConverter,
+                          npu::PointerInfoAnalysis *pointerInfoAnalysis,
+                          MLIRContext *context)
+      : OpConversionPattern<triton::StoreOp>(typeConverter, context),
+        pointerInfoAnalysis(pointerInfoAnalysis) {}
+
   LogicalResult
   matchAndRewrite(triton::StoreOp op, OpAdaptor adaptor,
                   ConversionPatternRewriter &rewriter) const override {
     Location loc = op.getLoc();
 
-    // Should always be a cb?
     auto cb = adaptor.getValue();
     LDBG("Store op value: " << cb << "\nwith type: " << cb.getType());
     assert(isa<ttkernel::CBType>(cb.getType()) && "expected cb type");
 
-    // Get tile size in bytes
+    auto ptrInfo = pointerInfoAnalysis->getInfo(op);
+    assert(ptrInfo && "expected pointer info for load op");
+    Value baseAddr = ptrInfo->basePtr;
+    LDBG("Store op base address: " << baseAddr << "\n");
+
+    // compute noc address
+    auto opInsertionPt = rewriter.saveInsertionPoint();
+    rewriter.setInsertionPointAfterValue(cb);
+
+    auto dataFormat = ttkernel::GetDataFormatOp::create(rewriter, loc, cb);
     auto pageSize = ttkernel::GetTileSizeOp::create(rewriter, loc, cb);
 
-    Value nocAddr = computeNocAddr(rewriter, loc, op.getPtr(), pageSize, cb);
+    Value c1bit = arith::createConstantI1(loc, rewriter, 1);
+    Value addrGen = ttkernel::GetInterleavedAddrGenFastOp::create(
+        rewriter, loc, c1bit, baseAddr, pageSize, dataFormat);
+
+    rewriter.restoreInsertionPoint(opInsertionPt);
+
+    // convert bytes offset to tile index
+    Value offset = adaptor.getPtr();
+    Value tile_id = arith::DivUIOp::create(rewriter, loc, offset, pageSize);
+
+    Value const1 = arith::createConstantI32(loc, rewriter, 1);
+    Value const0 = arith::createConstantI32(loc, rewriter, 0);
+
+    Value nocAddr = ttkernel::InterleavedAddrGenFastGetNocAddrOp::create(
+        rewriter, loc, addrGen, tile_id, const0, Value());
 
     Value l1Addr = ttkernel::GetReadPtrOp::create(rewriter, loc, cb);
     ttkernel::NocAsyncWriteOp::create(rewriter, loc, l1Addr, nocAddr, pageSize);
@@ -236,6 +171,8 @@ struct ConvertStoreOp : public OpConversionPattern<triton::StoreOp> {
     rewriter.eraseOp(op);
     return success();
   }
+
+  npu::PointerInfoAnalysis *pointerInfoAnalysis;
 };
 
 struct ConvertLocalStoreOp : public OpConversionPattern<gpu::LocalStoreOp> {
@@ -357,7 +294,8 @@ void populateMemoryOpConversionPattern(
     npu::PointerInfoAnalysis *pointerInfoAnalysis, PatternBenefit benefit) {
   patterns.add<ConvertLoadOp>(typeConverter, pointerInfoAnalysis,
                               patterns.getContext());
-  patterns.add<ConvertStoreOp>(typeConverter, patterns.getContext());
+  patterns.add<ConvertStoreOp>(typeConverter, pointerInfoAnalysis,
+                               patterns.getContext());
   patterns.add<ConvertLocalStoreOp>(typeConverter, patterns.getContext());
   patterns.add<ConvertLocalLoadOp>(typeConverter, patterns.getContext());
   patterns.add<ConvertLocalAllocOp>(typeConverter, patterns.getContext());
