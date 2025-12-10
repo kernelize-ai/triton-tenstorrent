@@ -32,19 +32,6 @@ def TritonTenstorrentConvertComputeOps : Pass<"tritontenstorrent-convert-compute
                             ];
 }
 
-def TritonTenstorrentPtrRotate : Pass<"tritontenstorrent-ptr-rotate", "mlir::ModuleOp"> {
-    let summary = "Move all pointer offsetting to base pointer instead of array of pointers";
-
-    let description = [{
-        is this still used?
-    }];
-
-    let dependentDialects = ["mlir::triton::npu::tt::TritonTenstorrentDialect",
-                             "mlir::triton::TritonDialect",
-                             "mlir::func::FuncDialect"
-                            ];
-}
-
 def TritonTenstorrentRemoveRedundantMasks : Pass<"tritontenstorrent-remove-redundant-masks", "mlir::ModuleOp"> {
     let summary = "Remove redundant mask operations in Tenstorrent kernels";
 
