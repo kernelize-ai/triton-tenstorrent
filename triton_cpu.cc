@@ -54,9 +54,6 @@ void init_triton_npu_passes_tenstorrent(py::module &&m) {
   m.def("add_core_specialize", [](mlir::PassManager &pm) {
     pm.addPass(mlir::triton::cpu::createCoreSpecialize());
   });
-  m.def("convert_triton_func_to_func", [](mlir::PassManager &pm) {
-    pm.addPass(mlir::triton::npu::createConvertTritonFuncToFunc());
-  });
   m.def("add_propagate_register_indices", [](mlir::PassManager &pm) {
     pm.addPass(
         mlir::triton::npu::createTritonTenstorrentPropagateTileEncoding());

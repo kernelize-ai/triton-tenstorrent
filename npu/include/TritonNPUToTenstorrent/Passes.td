@@ -3,19 +3,6 @@
 
 include "mlir/Pass/PassBase.td"
 
-def ConvertTritonFuncToFunc : Pass<"convert-triton-func-to-func", "mlir::ModuleOp"> {
-    let summary = "Convert tt::FuncOp to canonical func:FuncOp";
-
-    let description = [{
-        Converts tt:FuncOp to canonical func::FuncOp. Preserves arguments and types but drops Triton-specific function attributes. This must run before converting ops to ttkernel, as ttkernel ops often expect a FuncOp op container.
-    }];
-
-    let dependentDialects = ["mlir::triton::TritonDialect",
-                             "func::FuncDialect",
-                             "mlir::tt::ttkernel::TTKernelDialect"
-                            ];
-}
-
 def ConvertTritonNPUToTTKernel : Pass<"convert-triton-npu-to-ttkernel", "mlir::ModuleOp"> {
     let summary = "Convert TritonNPU to TTKernel";
     let description = [{
