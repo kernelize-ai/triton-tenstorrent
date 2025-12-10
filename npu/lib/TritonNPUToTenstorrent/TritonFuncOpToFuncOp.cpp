@@ -13,21 +13,15 @@
 #include "ttmlir/Dialect/TTKernel/IR/TTKernelOps.h"
 
 namespace mlir {
+using namespace tt;
 namespace triton {
 namespace npu {
-
-#define GEN_PASS_DEF_CONVERTTRITONFUNCTOFUNC
-#include "npu/include/TritonNPUToTenstorrent/Passes.h.inc"
 
 #define DEBUG_TYPE "convert-triton-npu-to-ttkernel"
 #define DBGS() (llvm::dbgs() << "[" DEBUG_TYPE "]: ")
 #define LDBG(X) LLVM_DEBUG(DBGS() << X << "\n")
 
 namespace {
-
-using namespace mlir;
-using namespace mlir::triton;
-using namespace tt;
 
 inline tt::ttkernel::ThreadType
 getThreadTypeFromFunctionName(StringRef funcName) {
@@ -143,31 +137,6 @@ struct ConvertReturnOp : public OpConversionPattern<triton::ReturnOp> {
 };
 
 } // namespace
-
-struct ConvertTritonFuncOpToFuncOpPass
-    : public impl::ConvertTritonFuncToFuncBase<
-          ConvertTritonFuncOpToFuncOpPass> {
-
-  void runOnOperation() override {
-    MLIRContext *context = &getContext();
-    ModuleOp mod = getOperation();
-
-    mlir::ConversionTarget target{*context};
-    target.addLegalDialect<func::FuncDialect>();
-    target.addIllegalOp<triton::FuncOp>();
-    target.addIllegalOp<triton::ReturnOp>();
-
-    TypeConverter typeConverter;
-    typeConverter.addConversion([](Type type) { return type; });
-
-    mlir::RewritePatternSet patterns(context);
-    patterns.add<ConvertTritonFunc>(typeConverter, patterns.getContext());
-    patterns.add<ConvertReturnOp>(typeConverter, patterns.getContext());
-
-    if (applyPartialConversion(mod, target, std::move(patterns)).failed())
-      signalPassFailure();
-  }
-};
 
 void populateFuncOpConversionPattern(TypeConverter &typeConverter,
                                      RewritePatternSet &patterns,
