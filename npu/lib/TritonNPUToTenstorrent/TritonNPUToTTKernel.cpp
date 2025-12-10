@@ -179,10 +179,12 @@ public:
       ttkernel::MatmulInitOp::create(builder, loc, aCb, bCb, outCb, transpose);
     }
     if (addSFPUInit) {
-      auto tileRegsAcquireOps = funcOp.getOps<ttkernel::TileRegsAcquireOp>();
+      SmallVector<ttkernel::TileRegsAcquireOp, 4> tileRegsAcquireOps;
+      funcOp.walk([&](ttkernel::TileRegsAcquireOp op) {
+        tileRegsAcquireOps.push_back(op);
+      });
       assert(!tileRegsAcquireOps.empty() && "expecting tile regs acquire op");
-      Operation *acquireOp = *tileRegsAcquireOps.begin();
-
+      Operation *acquireOp = tileRegsAcquireOps.front();
       OpBuilder builder(acquireOp);
       ttkernel::PackTileOp packTileOp = *packTileOps.begin();
       Value inCb = copyTileOps.begin()->first.getCb0();
