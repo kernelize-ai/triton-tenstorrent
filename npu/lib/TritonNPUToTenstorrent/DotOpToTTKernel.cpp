@@ -40,11 +40,6 @@ struct ConvertDotOp : public OpConversionPattern<triton::DotOp> {
     Location loc = op.getLoc();
     auto typeConverter = getTypeConverter();
 
-    // add wait fronts so we know the CBs are ready
-    Value numPages = arith::createConstantI32(loc, rewriter, 1);
-    ttkernel::CBWaitFrontOp::create(rewriter, loc, adaptor.getA(), numPages);
-    ttkernel::CBWaitFrontOp::create(rewriter, loc, adaptor.getB(), numPages);
-
     Value c0 = arith::createIndexConstant(loc, rewriter, 0);
     // Note that this must match the dest register index for PackTile
     Value destRegisterIndex = arith::createIndexConstant(loc, rewriter, 2);

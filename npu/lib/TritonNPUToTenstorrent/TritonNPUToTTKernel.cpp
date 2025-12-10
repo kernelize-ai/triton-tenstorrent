@@ -119,23 +119,6 @@ public:
     }
   }
 
-  // coalesce copy tile waits before the firsts copy tile ops since tile
-  // registers may not be acquired yet
-  void insertCopyTileWaits() {
-    if (copyTileOps.empty())
-      return;
-
-    OpBuilder builder(copyTileInitOps.front());
-    for (auto copyTileOpItr : copyTileOps) {
-      ttkernel::CopyTileOp copyTileOp = copyTileOpItr.first;
-      Value numTiles = arith::createConstantI32(copyTileOp->getLoc(), builder,
-                                                copyTileOpItr.second);
-      Value cb = copyTileOp.getCb0();
-      ttkernel::CBWaitFrontOp::create(builder, copyTileOp->getLoc(), cb,
-                                      numTiles);
-    }
-  }
-
   void insertComputeInitializationOps() {
     if (addMMInit) {
       // mm_init goes after cb initialization ops. but we need to collect the
@@ -343,7 +326,6 @@ struct ConvertTritonNPUToTTKernelPass
         return;
 
       InitializationHelper initHelper(funcOp);
-      initHelper.insertCopyTileWaits();
       initHelper.insertTileRegsAcquireOps();
       initHelper.insertComputeInitializationOps();
     });

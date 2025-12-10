@@ -15,7 +15,6 @@ module attributes {"ttg.num-ctas" = 1 : i32, "ttg.num-warps" = 1 : i32, ttg.targ
     %x_0 = ttg.local_load %x : !ttg.memdesc<1024xf32, #shared, #smem, mutable> -> tensor<1024xf32, #triton_tenstorrent.tile_encoding<{index = 0, parent = #blocked}>>
     %y_1 = ttg.local_load %y : !ttg.memdesc<1024xf32, #shared, #smem, mutable> -> tensor<1024xf32, #triton_tenstorrent.tile_encoding<{index = 1, parent = #blocked}>>
     // CHECK: ttkernel.cb_wait_front(%[[X]], {{.*}})
-    // CHECK: ttkernel.cb_wait_front(%[[Y]], {{.*}})
 
     // CHECK: ttkernel.init_sfpu(%[[X]], %[[OUTPUT]])
     // CHECK: ttkernel.tile_regs_acquire
@@ -25,6 +24,7 @@ module attributes {"ttg.num-ctas" = 1 : i32, "ttg.num-warps" = 1 : i32, ttg.targ
     // CHECK-DAG: %[[C0_1:.*]] = arith.constant 0 : index
     // CHECK: ttkernel.copy_tile(%[[X]], %[[C0_0]], %[[C0_1]])
 
+    // CHECK-DAG: ttkernel.cb_wait_front(%[[Y]], {{.*}})
     // CHECK: ttkernel.copy_tile_init(%[[Y]])
     // CHECK-DAG: %[[C0_2:.*]] = arith.constant 0 : index
     // CHECK-DAG: %[[C1_1:.*]] = arith.constant 1 : index

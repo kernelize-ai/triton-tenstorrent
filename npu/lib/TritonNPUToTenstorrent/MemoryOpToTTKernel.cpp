@@ -228,13 +228,16 @@ struct ConvertLocalLoadOp : public OpConversionPattern<gpu::LocalLoadOp> {
     assert(isa<ttkernel::CBType>(src.getType()) &&
            "expected memref type for type converted load src");
 
+    // 1. wait front on the cb to know data is ready
+    Value numPages = arith::createConstantI32(loc, rewriter, 1);
+    auto waitFrontOp =
+        ttkernel::CBWaitFrontOp::create(rewriter, loc, src, numPages);
+
+    // 2. for ops that operate directly on data in cbs, just replace the load op
+    // with its ptr
     assert(op->hasOneUse() &&
            "expected local load with store user to have one use");
     if (isa<StoreOp>(*op->getUsers().begin())) {
-      // wait front on the cb to know data is ready
-      Value numPages = arith::createConstantI32(loc, rewriter, 1);
-      auto waitFrontOp =
-          ttkernel::CBWaitFrontOp::create(rewriter, loc, src, numPages);
       rewriter.replaceOp(op, src);
       return success();
     }
@@ -248,6 +251,7 @@ struct ConvertLocalLoadOp : public OpConversionPattern<gpu::LocalLoadOp> {
       return success();
     }
 
+    // 3. copy data from the cb into DST register
     ttkernel::CopyTileInitOp::create(rewriter, loc, src);
     Value c0 = arith::createIndexConstant(loc, rewriter, 0);
     npu::tt::TileEncodingAttr loadEncoding =
