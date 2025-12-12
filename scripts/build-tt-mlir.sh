@@ -61,7 +61,8 @@ if [[ -z "${NO_TTMLIR_RUNTIME:-}" ]]; then
         -DTT_RUNTIME_ENABLE_TTNN=ON \
         -DTT_RUNTIME_ENABLE_TTMETAL=ON \
         -DTTMLIR_ENABLE_RUNTIME_TESTS=ON \
-        -DTTMLIR_ENABLE_ALCHEMIST=OFF
+        -DTTMLIR_ENABLE_ALCHEMIST=OFF \
+        -DTTMLIR_ENABLE_SHARED_LIB=OFF
 
     cmake --build build
 else
@@ -78,6 +79,7 @@ else
         -DTT_RUNTIME_ENABLE_TTMETAL=OFF \
         -DTTMLIR_ENABLE_RUNTIME_TESTS=OFF \
         -DTTMLIR_ENABLE_ALCHEMIST=OFF \
+        -DTTMLIR_ENABLE_SHARED_LIB=OFF \
         -Dnanobind_DIR="$(python -c 'import os, nanobind; print(os.path.join(os.path.dirname(nanobind.__file__), "cmake"))')" \
         -Dpybind11_DIR="$(python -c 'import os, pybind11; print(os.path.join(os.path.dirname(pybind11.__file__), "share", "cmake", "pybind11"))')"
     cmake --build build
