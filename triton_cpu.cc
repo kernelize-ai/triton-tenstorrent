@@ -65,6 +65,10 @@ void init_triton_npu_passes_tenstorrent(py::module &&m) {
   m.def("add_convert_compute_ops", [](mlir::PassManager &pm) {
     pm.addPass(mlir::triton::npu::createTritonTenstorrentConvertComputeOps());
   });
+  m.def("add_convert_tensor_desc", [](mlir::PassManager &pm) {
+    pm.addPass(mlir::triton::npu::
+                   createTritonTenstorrentConvertTensorDescToLoadStore());
+  });
   m.def("add_canonicalize_matmul_loops", [](mlir::PassManager &pm) {
     pm.addPass(
         mlir::triton::npu::createTritonTenstorrentCanonicalizeMatmulLoops());
