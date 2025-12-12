@@ -30,7 +30,7 @@ export _ACTIVATE_ECHO_TOOLCHAIN_DIR_AND_EXIT=""
 source env/activate
 
 echo "Installing tt-mlir python dependencies"
-python -m pip install 'nanobind<2.10'
+python -m pip install 'nanobind==2.10'
 
 #export LLVM_INCLUDE_DIRS="$LLVM_BUILD_DIR/include"
 #export MLIR_INCLUDE_DIRS="$LLVM_BUILD_DIR/include"
@@ -61,7 +61,8 @@ if [[ -z "${NO_TTMLIR_RUNTIME:-}" ]]; then
         -DTT_RUNTIME_ENABLE_TTNN=ON \
         -DTT_RUNTIME_ENABLE_TTMETAL=ON \
         -DTTMLIR_ENABLE_RUNTIME_TESTS=ON \
-        -DTTMLIR_ENABLE_ALCHEMIST=OFF
+        -DTTMLIR_ENABLE_ALCHEMIST=OFF \
+        -DTTMLIR_ENABLE_SHARED_LIB=OFF
 
     cmake --build build
 else
@@ -78,6 +79,7 @@ else
         -DTT_RUNTIME_ENABLE_TTMETAL=OFF \
         -DTTMLIR_ENABLE_RUNTIME_TESTS=OFF \
         -DTTMLIR_ENABLE_ALCHEMIST=OFF \
+        -DTTMLIR_ENABLE_SHARED_LIB=OFF \
         -Dnanobind_DIR="$(python -c 'import os, nanobind; print(os.path.join(os.path.dirname(nanobind.__file__), "cmake"))')" \
         -Dpybind11_DIR="$(python -c 'import os, pybind11; print(os.path.join(os.path.dirname(pybind11.__file__), "share", "cmake", "pybind11"))')"
     cmake --build build
