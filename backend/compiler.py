@@ -104,6 +104,7 @@ class CPUBackend(BaseBackend):
         passes.common.add_inliner(pm)
         passes.ttir.add_rewrite_tensor_pointer(pm)
         #passes.ttir.add_rewrite_tensor_descriptor_to_pointer(pm)
+        cpu.passes.tenstorrent.add_convert_tensor_desc(pm)
         passes.common.add_canonicalizer(pm)
         passes.ttir.add_combine(pm)
         passes.ttir.add_reorder_broadcast(pm)
@@ -196,7 +197,6 @@ class CPUBackend(BaseBackend):
         pm = ir.pass_manager(mod.context)
         pm.enable_debug()
 
-        cpu.passes.tenstorrent.add_convert_tensor_desc(pm)
         cpu.passes.tenstorrent.add_convert_compute_ops(pm)
         cpu.passes.tenstorrent.add_propagate_register_indices(pm)
         passes.ttgpuir.add_remove_layout_conversions(pm)
