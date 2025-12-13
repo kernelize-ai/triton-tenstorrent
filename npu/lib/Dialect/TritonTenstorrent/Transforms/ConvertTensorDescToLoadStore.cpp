@@ -58,6 +58,7 @@ struct Descriptor {
   ValueRange shape;
   ValueRange strides;
   Value paddingOption;
+  TensorDescType type;
 };
 
 Descriptor unpackDescriptor(TensorDescType type, ValueRange pack) {
@@ -72,6 +73,7 @@ Descriptor unpackDescriptor(TensorDescType type, ValueRange pack) {
   res.shape = pack.slice(1, rank);
   res.strides = pack.slice(1 + rank, rank);
   res.paddingOption = pack[1 + 2 * rank];
+  res.type = type;
   return res;
 }
 
@@ -155,6 +157,45 @@ Value generatePtr(OpBuilder &builder, const Location &loc,
                   ValueRange offsets) {
   assert(blockShape.size() == desc.shape.size());
   assert(blockShape.size() == offsets.size());
+#if 1
+  auto i32Ty = builder.getIntegerType(32);
+
+  SmallVector<Value, 4> blockShapeValues;
+  for (unsigned i = 0; i < blockShape.size(); ++i) {
+    blockShapeValues.push_back(arith::ConstantOp::create(builder, loc, i32Ty, IntegerAttr::get(i32Ty, static_cast<int32_t>(blockShape[i]))));  
+  }
+
+  SmallVector<Value, 4> tileCoord;
+  // tileCoord[i] = offset[i] / blockShape[i]
+  for (unsigned i = 0; i < offsets.size(); ++i) {
+    tileCoord.push_back(arith::DivSIOp::create(builder, loc, offsets[i], blockShapeValues[i]));
+  }
+
+  // tilesPerDim[i] = ceil(desc.shape[i] / blockShape[i])
+  SmallVector<Value, 4> tilesPerDim;
+  for (unsigned i = 0; i < blockShape.size(); ++i) {
+    tilesPerDim.push_back(arith::CeilDivSIOp::create(builder, loc, desc.shape[i], blockShapeValues[i]));
+  }
+
+  // linearize the tileId 
+  // TODO: copy from Utility.h/linearize for LLVM 
+  Value tileId = tileCoord[0];
+  for (unsigned i = 1; i < tileCoord.size(); i++) {
+    tileId = arith::MulIOp::create(builder, loc, tileId, tilesPerDim[i]);
+    tileId = arith::AddIOp::create(builder, loc, tileId, tileCoord[i]);
+  }
+
+  int32_t numElems = 
+  static_cast<int32_t>(std::accumulate(blockShape.begin(), blockShape.end(), 1LL, std::multiplies<int64_t>()));
+  Type elementType = cast<RankedTensorType>(desc.type.getBlockType()).getElementType();
+  int32_t numBytes = elementType.getIntOrFloatBitWidth() / 8;
+  Value offset = arith::MulIOp::create(builder, loc, tileId, arith::ConstantOp::create(builder, loc, i32Ty, IntegerAttr::get(i32Ty, numElems * numBytes)));
+
+  Type ptrType = triton::getPointerType(elementType);
+  // TODO: directionally correct but we do need to return tensor here, so the load input type (ptr type) matches the output type (tensor type)
+  return triton::AddPtrOp::create(builder, loc, ptrType, desc.base, offset);
+
+#else
   SmallVector<Value> offsetRanges;
   for (unsigned i = 0; i < blockShape.size(); ++i) {
     auto offsetWithRange =
@@ -164,6 +205,7 @@ Value generatePtr(OpBuilder &builder, const Location &loc,
 
   return generatePtrFromOffsetRanges(builder, loc, blockShape, desc,
                                      offsetRanges);
+#endif 
 }
 
 // TODO: generate masks if required - currently we assume the tensors are
