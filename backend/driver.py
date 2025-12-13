@@ -258,6 +258,8 @@ class CPUDriver(DriverBase):
         return self.device.create_buffer(size, nexus.get_data_type(dtype))
     def get_device_buffer(self, torch_buffer):
         return self.device.create_buffer(torch_buffer)
+    def copy_buffer_to_host(self, device_buffer, host_buffer):
+        return device_buffer.copy(host_buffer)
 
     def get_benchmarker(self):
         from triton.testing import do_bench
