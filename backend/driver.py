@@ -149,7 +149,7 @@ class CPULauncher(object):
             ty = sig_types[i]
             if ty == "constexpr":
                 continue
-            if isinstance(arg, torch.Tensor):
+            if isinstance(arg, torch.Tensor) or isinstance(arg, nexus.buffer):
                 command.set_const(i, cb_depth, "CB", nexus.get_data_type(arg))
                 arg = self.device.create_buffer(arg)
                 buffers.append(arg)
@@ -162,13 +162,6 @@ class CPULauncher(object):
         #self.device.run_command(function, args[4:], [gridX, gridY, gridZ, num_warps, 1, 1]) # , shared_memory)
         if launch_exit_hook is not None:
             launch_exit_hook(launch_metadata)
-        
-        # copy buffers back to host
-        i = 0
-        for arg in args[4:]:
-            if isinstance(arg, torch.Tensor):
-                buffers[i].copy(arg)
-                i += 1
 
 
 
@@ -233,7 +226,7 @@ class CPUDriver(DriverBase):
     @staticmethod
     def is_active():
         try:
-            return CPUDriver.device
+            return bool(CPUDriver.device)
         except ImportError:
             return False
 
@@ -261,6 +254,11 @@ class CPUDriver(DriverBase):
         import torch
         return torch.device("cpu")
 
+    def get_empty_device_buffer(self, size, dtype):
+        return self.device.create_buffer(size, nexus.get_data_type(dtype))
+    def get_device_buffer(self, torch_buffer):
+        return self.device.create_buffer(torch_buffer)
+
     def get_benchmarker(self):
         from triton.testing import do_bench
         return do_bench
@@ -268,10 +266,7 @@ class CPUDriver(DriverBase):
     def get_empty_cache_for_benchmark(self):
         import torch
 
-        # We maintain a buffer of 256 MB that we clear
-        # before each kernel call to make sure that the L2 cache
-        # doesn't contain any input data before the run
-        cache_size = 256 * 1024 * 1024
+        cache_size = 1024
         return torch.empty(int(cache_size // 4), dtype=torch.int, device='cpu')
 
     def clear_cache(self, cache):
