@@ -152,13 +152,11 @@ Value generatePtrFromOffsetRanges(OpBuilder &builder, Location loc,
   return ptr;
 }
 
-Value generatePtr(OpBuilder &builder, const Location &loc,
-                  ArrayRef<std::int64_t> blockShape, Descriptor &desc,
+Value generatedTiledByteOffset(OpBuilder &builder, const Location &loc, ArrayRef<std::int64_t> blockShape, Descriptor &desc,
                   ValueRange offsets) {
   assert(blockShape.size() == desc.shape.size());
   assert(blockShape.size() == offsets.size());
-#if 1
-  auto i32Ty = builder.getIntegerType(32);
+auto i32Ty = builder.getIntegerType(32);
 
   SmallVector<Value, 4> blockShapeValues;
   for (unsigned i = 0; i < blockShape.size(); ++i) {
@@ -191,9 +189,34 @@ Value generatePtr(OpBuilder &builder, const Location &loc,
   int32_t numBytes = elementType.getIntOrFloatBitWidth() / 8;
   Value offset = arith::MulIOp::create(builder, loc, tileId, arith::ConstantOp::create(builder, loc, i32Ty, IntegerAttr::get(i32Ty, numElems * numBytes)));
 
-  Type ptrType = triton::getPointerType(elementType);
+  return offset;
+}
+
+Value generatePtr(OpBuilder &builder, const Location &loc,
+                  ArrayRef<std::int64_t> blockShape, Descriptor &desc,
+                  ValueRange offsets) {
+  assert(blockShape.size() == desc.shape.size());
+  assert(blockShape.size() == offsets.size());
+#if 1
+  Value offset = generatedTiledByteOffset(builder, loc, blockShape, desc, offsets);
+  
+  // splat the offset to the first dim then broadcast for remaining dims 
+  auto firstDimTensorType = RankedTensorType::get({blockShape[0]}, offset.getType());
+  Value splatOffset = triton::SplatOp::create(builder, loc, firstDimTensorType, offset);
+  Value offsetTensor = expandOffsets(builder, loc, blockShape, splatOffset, 0);
+
+  // TODO: we should really add individual offsets within the broader offsets tensor, but for now we know we're going to drop the tensor in favor of the initial offset value during later lowering. Also, we should respect the tile-ized nfaces convention which is somewhat complicated 
+
+  // 2. splat + expand the base ptr 
+  auto ptrType = cast<triton::PointerType>(desc.base.getType());
+  auto ptrTensorType = RankedTensorType::get(blockShape, ptrType);
+  Value ptr = triton::SplatOp::create(builder, loc, ptrTensorType, desc.base);
+  
+  // not right since we're missing broadcast and expand 
+
+
   // TODO: directionally correct but we do need to return tensor here, so the load input type (ptr type) matches the output type (tensor type)
-  return triton::AddPtrOp::create(builder, loc, ptrType, desc.base, offset);
+  return triton::AddPtrOp::create(builder, loc, ptrType, ptr, offsetTensor);
 
 #else
   SmallVector<Value> offsetRanges;
