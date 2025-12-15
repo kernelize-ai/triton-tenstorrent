@@ -123,7 +123,6 @@ void matmul_multi_core(
     constexpr CoreCoord end_core = {0, 1};
     CoreRange all_cores(start_core, end_core);
     fmt::print("Using {} cores for computation.\n", all_cores.size());
-    uint32_t work_per_core = 2;
 
     // Extracting Matrix dimensions from input/output vectors and converting to tile coordinates.
     // The accelerator works with 32x32 tiles, so we need to convert from element dimensions
@@ -239,7 +238,7 @@ void matmul_multi_core(
 
     // Iterate through each work group and assign work to cores
     for (const auto& core : all_cores) {
-        fmt::print("Core {} assigned {} output tiles starting at offset {}\n", core.str(), work_per_core, work_offset);
+        fmt::print("Core {} output tiles starting at offset {}\n", core.str(), work_offset);
         // Set arguments for the reader kernel (data input)
         tt_metal::SetRuntimeArgs(
             program,
