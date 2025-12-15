@@ -149,52 +149,6 @@ Value generatePtrFromOffsetRanges(OpBuilder &builder, Location loc,
 }
 #endif
 
-Value computeTileId(OpBuilder &builder, const Location &loc,
-                    ArrayRef<std::int64_t> blockShape, Descriptor &desc,
-                    ValueRange offsets) {
-  assert(blockShape.size() == desc.shape.size());
-  assert(blockShape.size() == offsets.size());
-  auto i32Ty = builder.getIntegerType(32);
-
-  SmallVector<Value, 4> blockShapeValues;
-  for (unsigned i = 0; i < blockShape.size(); ++i) {
-    blockShapeValues.push_back(arith::ConstantOp::create(
-        builder, loc, i32Ty,
-        IntegerAttr::get(i32Ty, static_cast<int32_t>(blockShape[i]))));
-  }
-
-  SmallVector<Value, 4> tileCoord;
-  // tileCoord[i] = offset[i] / blockShape[i]
-  for (unsigned i = 0; i < offsets.size(); ++i) {
-    tileCoord.push_back(
-        arith::DivSIOp::create(builder, loc, offsets[i], blockShapeValues[i]));
-  }
-
-  // tilesPerDim[i] = ceil(desc.shape[i] / blockShape[i])
-  SmallVector<Value, 4> tilesPerDim;
-  for (unsigned i = 0; i < blockShape.size(); ++i) {
-    tilesPerDim.push_back(arith::CeilDivSIOp::create(
-        builder, loc, desc.shape[i], blockShapeValues[i]));
-  }
-
-  // linearize the tileId
-  // TODO: copy from Utility.h/linearize for LLVM
-  Value tileId = tileCoord[0];
-  for (unsigned i = 1; i < tileCoord.size(); i++) {
-    tileId = arith::MulIOp::create(builder, loc, tileId, tilesPerDim[i]);
-    tileId = arith::AddIOp::create(builder, loc, tileId, tileCoord[i]);
-  }
-
-#if 0
-  int32_t numElems =
-  static_cast<int32_t>(std::accumulate(blockShape.begin(), blockShape.end(), 1LL, std::multiplies<int64_t>()));
-  Type elementType = cast<RankedTensorType>(desc.type.getBlockType()).getElementType();
-  int32_t numBytes = elementType.getIntOrFloatBitWidth() / 8;
-  Value offset = arith::MulIOp::create(builder, loc, tileId, arith::ConstantOp::create(builder, loc, i32Ty, IntegerAttr::get(i32Ty, numElems * numBytes)));
-#endif
-  return tileId;
-}
-
 // TODO: this isn't quite right because it doesn't take faces into account, but
 // it should otherwise be fine for now
 Value buildIntraTileLinearOffsets(OpBuilder &builder, Location loc,
