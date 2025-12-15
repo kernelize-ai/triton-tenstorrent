@@ -108,9 +108,12 @@ struct ConvertTritonFunc : public OpConversionPattern<triton::FuncOp> {
                               << newType);
 
         Value indexVal = arith::createIndexConstant(loc, rewriter, idx);
-        Value getArgVal =
-            ttkernel::GetArgValOp::create(rewriter, loc, newType, indexVal);
-
+        Value getArgVal = ttkernel::GetArgValOp::create(
+            rewriter, loc, rewriter.getIntegerType(32), indexVal);
+        if (isa<IntegerType>(newType) && newType.getIntOrFloatBitWidth() < 32) {
+          getArgVal =
+              arith::TruncIOp::create(rewriter, loc, newType, getArgVal);
+        }
         argReplacements.push_back(getArgVal);
       }
       rewriter.mergeBlocks(&oldEntry, newEntry, argReplacements);
