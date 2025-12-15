@@ -145,10 +145,8 @@ def matmul_kernel_tma(a_desc, b_desc, c_desc,  #
 
 def matmul_tma(a, b, warp_specialize: bool):
     # Check constraints.
-    assert a.shape[1] == b.shape[1], "Incompatible dimensions"  # b is transposed
     assert a.dtype == b.dtype, "Incompatible dtypes"
-
-    b = b.T.contiguous() # TODO: nvidia assumes b is transposed - do we need to follow / support that? 
+    assert a.shape[1] == b.shape[0], "Incompatible dimensions"
 
     M, K = a.shape
     K, N = b.shape 
@@ -161,7 +159,6 @@ def matmul_tma(a, b, warp_specialize: bool):
     a_desc = TensorDescriptor.from_tensor(a, dummy_block)
     b_desc = TensorDescriptor.from_tensor(b, dummy_block)
     c_desc = TensorDescriptor.from_tensor(c, dummy_block)
-
     def grid(META):
         BLOCK_M = META["BLOCK_SIZE_M"]
         BLOCK_N = META["BLOCK_SIZE_N"]
@@ -318,7 +315,7 @@ if __name__ == "__main__":
 
         torch.manual_seed(0)
 
-        validate(32, 32, 32, dtype)
+        validate(64, 32, 64, dtype)
         
         """
         validate(8192, 8192, args.K_range[0], dtype)
