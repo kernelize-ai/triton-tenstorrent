@@ -20,18 +20,18 @@ from types import ModuleType
 
 @dataclass(frozen=True)
 class CPUOptions:
-    num_warps: int = int(os.environ.get('TRITON_CPU_NUM_WARPS', 1))
+    num_warps: int = 1
     num_ctas: int = 1
     num_stages: int = 1
     cluster_dims: tuple = (1, 1, 1)
     debug: bool = False
     arch: str = None
     enable_fp_fusion: bool = True
-    backend_name: str = 'cpu'
+    backend_name: str = 'tt-metal'
     sanitize_overflow: bool = True
     instrumentation_mode: str = ""
     allowed_dot_input_precisions: Tuple[str] = ("ieee", )
-    matrix_instr_nonkdim: int = 16
+    matrix_instr_nonkdim: int = 32
     warp_size: int = 1
     min_dot_size: int = 1
 
@@ -46,18 +46,18 @@ class CPUBackend(BaseBackend):
 
     @staticmethod
     def supports_target(target: GPUTarget):
-        return target.backend == "tenstorrent" or target.backend == "cpu"
+        return target.backend == "tt-metal"
 
     def get_target_name(self, options) -> str:
-        return "cpu"
+        return "tt-metal"
 
     def __init__(self, target: GPUTarget) -> None:
         super().__init__(target)
-        self.binary_ext = "so"
+        self.binary_ext = "cpp"
         self.device = 'Tenstorrent'
 
     def parse_options(self, options):
-        args = {'arch': cpu.get_processor_name()}
+        args = {'arch': "BLACKHOLE"}
         if "enable_fp_fusion" not in options:
             args["enable_fp_fusion"] = knobs.language.default_fp_fusion
         args.update(
@@ -284,7 +284,6 @@ class CPUBackend(BaseBackend):
         cpp_file += "\n#ifdef WRITER_KERNEL\n"
         cpp_file += cpu.translate_to_cpp(mod, writer_kernel)
         cpp_file += "\n#endif  // WRITER_KERNEL\n"
-
         return cpp_file
 
     @staticmethod
