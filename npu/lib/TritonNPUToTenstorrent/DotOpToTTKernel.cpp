@@ -43,10 +43,8 @@ struct ConvertDotOp : public OpConversionPattern<triton::DotOp> {
     Value c0 = arith::createIndexConstant(loc, rewriter, 0);
     // Note that this must match the dest register index for PackTile
     Value destRegisterIndex = arith::createIndexConstant(loc, rewriter, 2);
-    Value transpose = arith::createConstantI32(loc, rewriter, 0);
     ttkernel::MatmulTilesOp::create(rewriter, loc, adaptor.getA(),
-                                    adaptor.getB(), c0, c0, destRegisterIndex,
-                                    transpose);
+                                    adaptor.getB(), c0, c0, destRegisterIndex);
 
     // foward the dot op c operand to the users of the dot op
     rewriter.replaceOp(op, adaptor.getC());

@@ -279,7 +279,7 @@ module attributes {"ttg.num-ctas" = 1 : i32, "ttg.num-warps" = 1 : i32, ttg.targ
         %accumulator = scf.for %accumulator_5 = %c0_i32 to %7 step %c1_i32 iter_args(%arg10 = %cst) -> (tensor<32x32xf32, #blocked>)  : i32 {
           // CHECK-DAG: ttkernel.cb_wait_front(%[[A_CB]], %[[c1_i32]])
           // CHECK-DAG: ttkernel.cb_wait_front(%[[B_CB]], %[[c1_i32]])
-          // CHECK: ttkernel.matmul_tiles(%[[A_CB]], %[[B_CB]], %[[c0]], %[[c0]], %[[c2]], %[[c0_i32]])
+          // CHECK: ttkernel.matmul_tiles(%[[A_CB]], %[[B_CB]], %[[c0]], %[[c0]], %[[c2]])
         %a_6 = ttg.local_load %a : !ttg.memdesc<32x32xf16, #shared, #smem, mutable> -> tensor<32x32xf16, #ttg.dot_op<{opIdx = 0, parent = #blocked}>>
         %b_7 = ttg.local_load %b : !ttg.memdesc<32x32xf16, #shared, #smem, mutable> -> tensor<32x32xf16, #ttg.dot_op<{opIdx = 1, parent = #blocked}>>
         %accumulator_8 = tt.dot %a_6, %b_7, %arg10 : tensor<32x32xf16, #ttg.dot_op<{opIdx = 0, parent = #blocked}>> * tensor<32x32xf16, #ttg.dot_op<{opIdx = 1, parent = #blocked}>> -> tensor<32x32xf32, #blocked>
