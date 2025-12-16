@@ -3,7 +3,7 @@ project(triton_tenstorrent_matmul_example)
 
 add_compile_definitions(OVERRIDE_KERNEL_PREFIX="${CMAKE_CURRENT_SOURCE_DIR}/../")
 
-add_subdirectory(matmul_common)
+add_subdirectory(../matmul_common matmul_common)
 
 add_executable(metal_example_matmul_multi_core)
 target_sources(metal_example_matmul_multi_core PRIVATE matmul_multi_core.cpp)
