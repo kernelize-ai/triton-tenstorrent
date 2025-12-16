@@ -58,7 +58,6 @@ struct Descriptor {
   ValueRange shape;
   ValueRange strides;
   Value paddingOption;
-  TensorDescType type; // TODO remove and get from base value instead
 };
 
 Descriptor unpackDescriptor(TensorDescType type, ValueRange pack) {
@@ -73,21 +72,7 @@ Descriptor unpackDescriptor(TensorDescType type, ValueRange pack) {
   res.shape = pack.slice(1, rank);
   res.strides = pack.slice(1 + rank, rank);
   res.paddingOption = pack[1 + 2 * rank];
-  res.type = type;
   return res;
-}
-
-SmallVector<mlir::Value> castToI64(OpBuilder &builder,
-                                   mlir::ValueRange values) {
-#if 1
-  // tenstorrent address space is 32-bits
-  return values;
-#else
-  auto i64Type = builder.getI64Type();
-  return llvm::map_to_vector(values, [&](mlir::Value v) {
-    return builder.createOrFold<arith::ExtSIOp>(v.getLoc(), i64Type, v);
-  });
-#endif
 }
 
 Value expandOffsets(OpBuilder &builder, Location loc,
@@ -117,40 +102,7 @@ Value getExpandedOffsetWithRange(OpBuilder &builder, const Location &loc,
   Value offsets = arith::AddIOp::create(builder, loc, splatOffset, range);
   return expandOffsets(builder, loc, blockShape, offsets, dim);
 }
-#if 0
-Value generatePtrFromOffsetRanges(OpBuilder &builder, Location loc,
-                                  ArrayRef<int64_t> blockShape,
-                                  Descriptor &desc, ValueRange offsets) {
-  assert(blockShape.size() == desc.shape.size());
-  assert(blockShape.size() == offsets.size());
-  auto indexTensorType =
-      RankedTensorType::get(blockShape, builder.getI32Type());
-  auto ptrType = cast<triton::PointerType>(desc.base.getType());
-  auto ptrTensorType = RankedTensorType::get(blockShape, ptrType);
 
-  // Generate offsets per dimension
-  Value ptr = triton::SplatOp::create(builder, loc, ptrTensorType, desc.base);
-  for (unsigned i = 0; i < blockShape.size(); ++i) {
-    // We must splat strides into the expanded shape not a row for retaining
-    // the divisibility information given by strides
-    Value splatStride = triton::SplatOp::create(
-        builder, loc, offsets[i].getType(), desc.strides[i]);
-    Value offsetWithStride =
-        arith::MulIOp::create(builder, loc, offsets[i], splatStride);
-    Value broadcasted = triton::BroadcastOp::create(
-        builder, loc, indexTensorType, offsetWithStride);
-
-    // Add to the pointer
-    ptr =
-        triton::AddPtrOp::create(builder, loc, ptrTensorType, ptr, broadcasted);
-  }
-
-  return ptr;
-}
-#endif
-
-// TODO: this isn't quite right because it doesn't take faces into account, but
-// it should otherwise be fine for now
 Value buildIntraTileLinearOffsets(OpBuilder &builder, Location loc,
                                   ArrayRef<int64_t> blockShape,
                                   ValueRange offsetRanges) {
@@ -260,7 +212,7 @@ Value generatePtr(OpBuilder &builder, const Location &loc,
                   ValueRange offsets) {
   assert(blockShape.size() == desc.shape.size());
   assert(blockShape.size() == offsets.size());
-#if 1
+
   SmallVector<Value> offsetRanges;
   for (unsigned i = 0; i < blockShape.size(); ++i) {
     auto offsetWithRange =
@@ -270,47 +222,6 @@ Value generatePtr(OpBuilder &builder, const Location &loc,
 
   return generatePtrFromOffsetRanges(builder, loc, blockShape, desc, offsets,
                                      offsetRanges);
-#else
-
-#if 1
-  Value offset =
-      generatedTiledByteOffset(builder, loc, blockShape, desc, offsets);
-
-  // splat the offset to the first dim then broadcast for remaining dims
-  auto firstDimTensorType =
-      RankedTensorType::get({blockShape[0]}, offset.getType());
-  Value splatOffset =
-      triton::SplatOp::create(builder, loc, firstDimTensorType, offset);
-  Value offsetTensor = expandOffsets(builder, loc, blockShape, splatOffset, 0);
-
-  // TODO: we should really add individual offsets within the broader offsets
-  // tensor, but for now we know we're going to drop the tensor in favor of the
-  // initial offset value during later lowering. Also, we should respect the
-  // tile-ized nfaces convention which is somewhat complicated
-
-  // 2. splat + expand the base ptr
-  auto ptrType = cast<triton::PointerType>(desc.base.getType());
-  auto ptrTensorType = RankedTensorType::get(blockShape, ptrType);
-  Value ptr = triton::SplatOp::create(builder, loc, ptrTensorType, desc.base);
-
-  // not right since we're missing broadcast and expand
-
-  // TODO: directionally correct but we do need to return tensor here, so the
-  // load input type (ptr type) matches the output type (tensor type)
-  return triton::AddPtrOp::create(builder, loc, ptrType, ptr, offsetTensor);
-
-#else
-  SmallVector<Value> offsetRanges;
-  for (unsigned i = 0; i < blockShape.size(); ++i) {
-    auto offsetWithRange =
-        getExpandedOffsetWithRange(builder, loc, blockShape, offsets[i], i);
-    offsetRanges.push_back(offsetWithRange);
-  }
-
-  return generatePtrFromOffsetRanges(builder, loc, blockShape, desc,
-                                     offsetRanges);
-#endif
-#endif
 }
 
 // TODO: generate masks if required - currently we assume the tensors are
@@ -334,7 +245,7 @@ struct RewriteLoadPattern : OpConversionPattern<triton::DescriptorLoadOp> {
     const auto blockShape = op.getDesc().getType().getBlockType().getShape();
     auto descTy = op.getDesc().getType();
     auto desc = unpackDescriptor(descTy, adaptor.getDesc());
-    auto offsets = castToI64(rewriter, op.getIndices());
+    auto offsets = op.getIndices();
 
     auto blockTy = descTy.getSignlessBlockType();
     auto attr = rewriter.getZeroAttr(blockTy);
@@ -361,7 +272,7 @@ struct RewriteStorePattern : OpConversionPattern<triton::DescriptorStoreOp> {
     const auto blockShape = op.getDesc().getType().getBlockType().getShape();
     auto descTy = op.getDesc().getType();
     auto desc = unpackDescriptor(descTy, adaptor.getDesc());
-    auto offsets = castToI64(rewriter, op.getIndices());
+    auto offsets = op.getIndices();
 
     Value mask = generateMask(rewriter, loc, blockShape);
 
