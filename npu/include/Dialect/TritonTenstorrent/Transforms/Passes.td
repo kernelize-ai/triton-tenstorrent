@@ -3,6 +3,14 @@
 
 include "mlir/Pass/PassBase.td"
 
+def TritonTenstorrentConvertTensorDescToLoadStore : Pass<"tritontenstorrent-convert-tensor-desc", "mlir::ModuleOp"> {
+    let summary = "Convert Triton tensor descriptors to Triton load/store operations";
+
+    let description = "Can we convert a Tensor Descriptor load/store into a Triton load/store? We will try to convert TensorDescriptor to ptr, and then apply the appropriate offsets using addptr.";
+
+    let dependentDialects = ["mlir::triton::TritonDialect"];
+}
+
 def TritonTenstorrentPropagateTileEncoding : Pass<"tritontenstorrent-propagate-tile-encoding", "mlir::ModuleOp"> {
     let summary = "Propagate tile encoding from compute ops to local loads";
 

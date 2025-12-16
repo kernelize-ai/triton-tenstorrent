@@ -5,14 +5,14 @@ add_compile_definitions(OVERRIDE_KERNEL_PREFIX="${CMAKE_CURRENT_SOURCE_DIR}/../"
 
 add_subdirectory(../matmul_common matmul_common)
 
-add_executable(metal_example_matmul_multi_core)
-target_sources(metal_example_matmul_multi_core PRIVATE matmul_multi_core.cpp)
+add_executable(metal_example_matmul_multi_core_tma)
+target_sources(metal_example_matmul_multi_core_tma PRIVATE matmul_multi_core_tma.cpp)
 
 if(NOT TARGET TT::Metalium)
     find_package(TT-Metalium REQUIRED)
 endif()
 target_link_libraries(
-    metal_example_matmul_multi_core
+    metal_example_matmul_multi_core_tma
     PRIVATE
         TT::Metalium
         Matmul::Common

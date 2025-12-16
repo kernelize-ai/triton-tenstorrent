@@ -1,0 +1,329 @@
+"""
+Persistent Matmul
+=====================
+This script demonstrates persistent kernel implementations of matrix multiplication using Triton.
+Various matmul methods are included, such as naive, persistent, and TMA (Tensor Memory Accelerator) based approaches.
+The kernels support both FP16 and FP8 data types but the FP8 implementation is only available on CUDA devices with compute capability >= 9.0.
+
+Triton and cuBLAS implementations are benchmarked under different configurations and evaluated using the proton profiler.
+Users can pass command-line arguments to specify matrix dimensions and iteration steps flexibly.
+
+.. code-block:: bash
+
+    # FP8
+    python 09-persistent-matmul.py --prec fp8 --K_range 128 1024 --K_step 128
+
+    # FP16
+    python 09-persistent-matmul.py --prec fp16 --K_range 128 1024 --K_step 128
+
+Note that currently this tutorial will fail on devices with a small shared memory size, such as RTX-4090.
+"""
+
+import argparse
+import itertools
+
+import torch
+import triton
+import triton.language as tl
+import triton.profiler as proton
+from triton.tools.tensor_descriptor import TensorDescriptor
+from contextlib import contextmanager
+
+from typing import Optional
+
+if torch.cuda.is_available():
+    from triton._C.libtriton import nvidia
+    cublas_workspace = torch.empty(32 * 1024 * 1024, device="cuda", dtype=torch.uint8)
+    cublas = nvidia.cublas.CublasLt(cublas_workspace)
+else:
+    cublas = None
+
+
+def is_cuda():
+    return triton.runtime.driver.active.get_current_target().backend == "cuda"
+
+
+def supports_tma():
+    return is_cuda() and torch.cuda.get_device_capability()[0] >= 9
+
+
+def is_hopper():
+    return torch.cuda.get_device_capability()[0] == 9
+
+
+def supports_ws():
+    return is_cuda() and torch.cuda.get_device_capability()[0] >= 9
+
+
+def _matmul_launch_metadata(grid, kernel, args):
+    ret = {}
+    M, N, K, WS = args["M"], args["N"], args["K"], args.get("WARP_SPECIALIZE", False)
+    ws_str = "_ws" if WS else ""
+    ret["name"] = f"{kernel.name}{ws_str} [M={M}, N={N}, K={K}]"
+    if "c_ptr" in args:
+        bytes_per_elem = args["c_ptr"].element_size()
+    else:
+        bytes_per_elem = 1 if args["FP8_OUTPUT"] else 2
+    ret[f"flops{bytes_per_elem * 8}"] = 2. * M * N * K
+    ret["bytes"] = bytes_per_elem * (M * K + N * K + M * N)
+    return ret
+
+
+HAS_TENSOR_DESC = supports_tma() and hasattr(tl, "make_tensor_descriptor")
+HAS_HOST_TENSOR_DESC = supports_tma() and hasattr(triton.tools.tensor_descriptor, "TensorDescriptor")
+HAS_WARP_SPECIALIZE = supports_ws() and HAS_TENSOR_DESC
+
+
+def matmul_get_configs(pre_hook=None):
+    return [
+        triton.Config({'BLOCK_SIZE_M': BM, 'BLOCK_SIZE_N': BN, "BLOCK_SIZE_K": BK, "GROUP_SIZE_M": 8}, num_stages=s,
+                      num_warps=w, pre_hook=pre_hook)
+        for BM in [32]
+        for BN in [32]
+        for BK in [32]
+        for s in ([1])
+        for w in [1]
+    ]
+
+def matmul_tma_set_block_size_hook(nargs):
+    EPILOGUE_SUBTILE = nargs.get("EPILOGUE_SUBTILE", False)
+    BLOCK_M = nargs["BLOCK_SIZE_M"]
+    BLOCK_N = nargs["BLOCK_SIZE_N"]
+    BLOCK_K = nargs["BLOCK_SIZE_K"]
+    nargs["a_desc"].block_shape = [BLOCK_M, BLOCK_K]
+    nargs["b_desc"].block_shape = [BLOCK_N, BLOCK_K]
+    if EPILOGUE_SUBTILE:
+        nargs["c_desc"].block_shape = [BLOCK_M, BLOCK_N // 2]
+    else:
+        nargs["c_desc"].block_shape = [BLOCK_M, BLOCK_N]
+
+@triton.autotune(
+    configs=matmul_get_configs(pre_hook=matmul_tma_set_block_size_hook),
+    key=["M", "N", "K", "WARP_SPECIALIZE"],
+)
+@triton.jit(launch_metadata=_matmul_launch_metadata)
+def matmul_kernel_tma(a_desc, b_desc, c_desc,  #
+                      M, N, K,  #
+                      BLOCK_SIZE_M: tl.constexpr,  #
+                      BLOCK_SIZE_N: tl.constexpr,  #
+                      BLOCK_SIZE_K: tl.constexpr,  #
+                      GROUP_SIZE_M: tl.constexpr,  #
+                      FP8_OUTPUT: tl.constexpr,  #
+                      WARP_SPECIALIZE: tl.constexpr,  #
+                      ):
+    dtype = tl.float8e4nv if FP8_OUTPUT else tl.float16
+
+    pid = tl.program_id(axis=0)
+    num_pid_m = tl.cdiv(M, BLOCK_SIZE_M)
+    num_pid_n = tl.cdiv(N, BLOCK_SIZE_N)
+    num_pid_in_group = GROUP_SIZE_M * num_pid_n
+    group_id = pid // num_pid_in_group
+    first_pid_m = group_id * GROUP_SIZE_M
+    group_size_m = min(num_pid_m - first_pid_m, GROUP_SIZE_M)
+    pid_m = first_pid_m + (pid % group_size_m)
+    pid_n = (pid % num_pid_in_group) // group_size_m
+
+    k_tiles = tl.cdiv(K, BLOCK_SIZE_K)
+
+    offs_am = pid_m * BLOCK_SIZE_M
+    offs_bn = pid_n * BLOCK_SIZE_N
+
+    accumulator = tl.zeros((BLOCK_SIZE_M, BLOCK_SIZE_N), dtype=tl.float32)
+
+    for k in tl.range(k_tiles, warp_specialize=WARP_SPECIALIZE):
+        offs_k = k * BLOCK_SIZE_K
+        a = a_desc.load([offs_am, offs_k])
+        b = b_desc.load([offs_k, offs_bn])
+        accumulator = tl.dot(a, b, accumulator) # removed transpose 
+
+    c = accumulator.to(dtype)
+
+    offs_cm = pid_m * BLOCK_SIZE_M
+    offs_cn = pid_n * BLOCK_SIZE_N
+    c_desc.store([offs_cm, offs_cn], c)
+
+
+def matmul_tma(a, b, warp_specialize: bool):
+    # Check constraints.
+    assert a.dtype == b.dtype, "Incompatible dtypes"
+    assert a.shape[1] == b.shape[0], "Incompatible dimensions"
+
+    M, K = a.shape
+    K, N = b.shape 
+    dtype = a.dtype
+
+    c = torch.empty((M, N), device=a.device, dtype=dtype)
+
+    # A dummy block value that will [maybe?] be overwritten when we have the real block size
+    dummy_block = [32, 32]
+    a_desc = TensorDescriptor.from_tensor(a, dummy_block)
+    b_desc = TensorDescriptor.from_tensor(b, dummy_block)
+    c_desc = TensorDescriptor.from_tensor(c, dummy_block)
+    def grid(META):
+        BLOCK_M = META["BLOCK_SIZE_M"]
+        BLOCK_N = META["BLOCK_SIZE_N"]
+        return (triton.cdiv(M, BLOCK_M) * triton.cdiv(N, BLOCK_N), )
+
+    matmul_kernel_tma[grid](
+        a_desc, b_desc, c_desc,  #
+        M, N, K,  #
+        FP8_OUTPUT=dtype == torch.float8_e4m3fn,  #
+        WARP_SPECIALIZE=warp_specialize,  #
+    )
+    return c
+
+def cublas_matmul(a, b):
+    # Check constraints.
+    assert a.shape[1] == b.shape[1], "Incompatible dimensions"  # b is transposed
+    M, K = a.shape
+    N, K = b.shape
+    dtype = a.dtype
+    c = torch.empty((M, N), device=a.device, dtype=dtype)
+    bytes_per_elem = a.element_size()
+    flops_str = f"flops{bytes_per_elem * 8}"
+    with proton.scope(f"cublas [M={M}, N={N}, K={K}]",
+                      {"bytes": bytes_per_elem * (M * K + N * K + M * N), flops_str: 2. * M * N * K}):
+        cublas.matmul(a, b, c)
+    return c
+
+
+def torch_matmul(a, b):
+    M, K = a.shape
+    N, K = b.shape
+    bytes_per_elem = a.element_size()
+    flops_str = f"flops{bytes_per_elem * 8}"
+    with proton.scope(f"torch [M={M}, N={N}, K={K}]",
+                      {"bytes": bytes_per_elem * (M * K + N * K + M * N), flops_str: 2. * M * N * K}):
+        c = torch.matmul(a, b.T)
+    return c
+
+
+@contextmanager
+def proton_context():
+    proton.activate(0)
+    try:
+        yield
+    finally:
+        proton.deactivate(0)
+
+
+def bench_fn(label, reps, warmup_reps, fn, *args):
+    print(f"Benchmarking {label}: ...", end="")
+    for _ in range(warmup_reps):
+        fn(*args)
+    with proton_context():
+        for _ in range(reps):
+            fn(*args)
+    print(f"\rBenchmarking {label}: done")
+
+
+def bench(K, dtype, reps=10000, warmup_reps=10000):
+    M = 8192
+    N = 8192
+    a = torch.randn((M, K), device="cuda", dtype=torch.float16).to(dtype)
+    b = torch.randn((K, N), device="cuda", dtype=torch.float16).to(dtype)
+
+    b = b.T.contiguous()
+
+    if cublas is not None:
+        bench_fn("cublas", reps, warmup_reps, cublas_matmul, a, b)
+    if dtype == torch.float16:
+        bench_fn("torch", reps, warmup_reps, torch_matmul, a, b)
+    bench_fn("naive", reps, warmup_reps, matmul, a, b.T)
+    bench_fn("persistent", reps, warmup_reps, matmul_persistent, a, b.T)
+    warp_specialize = [False, True] if HAS_WARP_SPECIALIZE else [False]
+    for ws in warp_specialize:
+        ws_str = "_ws" if ws else ""
+        # disable on-host warpspec on Hopper
+        if HAS_HOST_TENSOR_DESC and not (is_hopper() and ws):
+            bench_fn(f"tma_persistent{ws_str}", reps, warmup_reps, lambda a, b: matmul_tma_persistent(a, b, ws), a, b)
+            bench_fn(f"tma{ws_str}", reps, warmup_reps, lambda a, b: matmul_tma(a, b, ws), a, b)
+        if HAS_TENSOR_DESC:
+            bench_fn(f"descriptor_persistent{ws_str}", reps, warmup_reps,
+                     lambda a, b: matmul_descriptor_persistent(a, b, ws), a, b)
+
+
+def run_test(expect, fn, a, b, label, enabled=True):
+    print(f"  {label}: ...", end="")
+    if enabled:
+        actual = fn(a, b)
+        passed = torch.allclose(expect, actual.to(expect.dtype), atol=1.0)
+        icon = "✅" if passed else "❌"
+    else:
+        icon = "⭕"
+    print(f"\r  {label}: {icon}  ")
+
+
+def validate(M, N, K, dtype):
+    print(f"{M=}, {N=}, {K=}, verification naive vs: ")
+    a = torch.randn((M, K), device="cpu", dtype=torch.float16).to(dtype)
+    b = torch.randn((K, N), device="cpu", dtype=torch.float16).to(dtype)
+    #b = b.T.contiguous()
+
+    naive_result = torch_matmul(a, b.T).to(torch.float16)
+    run_test(naive_result, matmul_tma(a, b, False), "TMA", enabled=True)
+    """
+    run_test(naive_result, torch_matmul, a, b, "Torch", enabled=dtype == torch.float16)
+    run_test(naive_result, cublas_matmul, a, b, "cuBLAS", enabled=cublas is not None)
+    run_test(naive_result, matmul_persistent, a, b.T, "Persistent")
+
+    kernels = [
+        (matmul_tma, "TMA", HAS_HOST_TENSOR_DESC),
+        (matmul_tma_persistent, "TMA Persistent", HAS_HOST_TENSOR_DESC),
+        (matmul_descriptor_persistent, "Tensor Descriptor Persistent", HAS_TENSOR_DESC),
+    ]
+    warp_specialize = [False, True] if HAS_WARP_SPECIALIZE else [False]
+
+    for (kernel, label, enabled), warp_specialize in itertools.product(kernels, warp_specialize):
+        label = f"{label} (warp_specialize={warp_specialize})"
+        # skip if hopper and warp_specialize and not on-device
+        skipped = is_hopper() and warp_specialize and kernel != matmul_descriptor_persistent
+        enabled = enabled and (not warp_specialize or HAS_TENSOR_DESC) and (not skipped)
+        run_test(naive_result, lambda a, b: kernel(a, b, warp_specialize), a, b, label, enabled)
+    """
+    print()
+
+
+def show_profile(precision, profile_name):
+    import triton.profiler.viewer as proton_viewer
+    metric_names = ["time/ms"]
+    if precision == 'fp8':
+        metric_names = ["tflop8/s"] + metric_names
+    elif precision == 'fp16':
+        metric_names = ["tflop16/s"] + metric_names
+    file_name = f"{profile_name}.hatchet"
+    tree, metrics = proton_viewer.parse(metric_names, file_name)
+    proton_viewer.print_tree(tree, metrics)
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("-K", type=int, required=False, default=512)
+    parser.add_argument("--K_range", type=int, nargs=2)
+    parser.add_argument("--K_step", type=int, default=512)
+    parser.add_argument("--prec", type=str, choices=["fp8", "fp16"], default="fp16")
+    args = parser.parse_args()
+
+    if args.prec == 'fp8' and (not hasattr(torch, "float8_e4m3fn") or not is_cuda()):
+        print("This example requires CUDA with fp8 support.")
+    else:
+        dtype = torch.float8_e4m3fn if args.prec == 'fp8' else torch.float16
+
+        if args.K and args.K_range is None:
+            args.K_range = [args.K, args.K]
+            args.K_step = 1  # doesn't matter as long as it's not 0
+
+        torch.manual_seed(0)
+
+        validate(64, 32, 64, dtype)
+        
+        """
+        validate(8192, 8192, args.K_range[0], dtype)
+
+        proton.start("matmul", hook="triton")
+        proton.deactivate()
+        for K in range(args.K_range[0], args.K_range[1] + 1, args.K_step):
+            bench(K, dtype)
+        proton.finalize()
+        show_profile(args.prec, "matmul")
+        """
