@@ -79,12 +79,29 @@ module {
       %b = tt.descriptor_load %b_desc[%offs_k, %offs_bn] : !tt.tensordesc<tensor<32x32xf16>> -> tensor<32x32xf16>
       %accumulator_20 = tt.dot %a, %b, %accumulator_19 : tensor<32x32xf16> * tensor<32x32xf16> -> tensor<32x32xf32>
       scf.yield %accumulator_20 : tensor<32x32xf32>
+      // CHECK: scf.yield
     // CHECK: }
     }
     %c = arith.truncf %accumulator_18 : tensor<32x32xf32> to tensor<32x32xf16>
     %offs_cm = arith.muli %pid_m_15, %c32_i32 : i32
     %offs_cn = arith.muli %pid_n_16, %c32_i32 : i32
     // CHECK-NOT: tt.descriptor_store
+
+    // CHECK: %[[M_TILE:.*]] = arith.divsi {{.*}}, %[[c32_i32]]
+    // CHECK: %[[N_TILE:.*]] = arith.divsi {{.*}}, %[[c32_i32]]
+    // CHECK: %[[M_TILES:.*]] = arith.ceildivsi {{.*}}, %[[c32_i32]]
+    // CHECK: %[[C_M_OFFSET:.*]] = arith.muli %[[M_TILE]], %[[M_TILES]]
+    // CHECK: %[[C_TILE_ID:.*]] = arith.addi %[[C_M_OFFSET]], %[[N_TILE]]
+    // CHECK: %[[C_TILE_ELEM_BASE:.*]] = arith.muli %[[C_TILE_ID]], %[[c1024_i32]]
+
+    // CHECK: %[[C_INTRA_OFFSET:.*]] = arith.addi
+
+    // CHECK: %[[C_TILE_ID_TENSOR:.*]] = tt.splat %[[C_TILE_ELEM_BASE]]
+    // CHECK: %[[C_OFFSET:.*]] = arith.addi %[[C_TILE_ID_TENSOR]], %[[C_INTRA_OFFSET]]
+
+    // CHECK: %[[BASE_PTR:.*]] = tt.splat %{{.*}}
+    // CHECK: %[[OUT_PTRS:.*]] = tt.addptr %[[BASE_PTR]], %[[C_OFFSET]]
+    // CHECK: tt.store %[[OUT_PTRS]], {{.*}}
     tt.descriptor_store %c_desc[%offs_cm, %offs_cn], %c : !tt.tensordesc<tensor<32x32xf16>>, tensor<32x32xf16>
     tt.return
   }
