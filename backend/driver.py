@@ -6,7 +6,6 @@ import tempfile
 import time
 import platform
 import importlib
-import nexus
 from pathlib import Path
 
 from triton.runtime.build import compile_module_from_src
@@ -55,23 +54,18 @@ def library_dirs():
         lib_dirs.extend([os.path.join(external_boost_path(), "lib")])
     return lib_dirs
 
-
-runtime = nexus.get_runtime("tt-metal")
-
+def get_nexus_runtime():
+    import nexus
+    return nexus.get_runtime("tt-metal")
 
 class CpuUtils(object):
-    device = runtime.get_device(0)
-
-    def __new__(cls):
-        if not hasattr(cls, 'instance'):
-            cls.instance = super(CpuUtils, cls).__new__(cls)
-        return cls.instance
-
     def __init__(self):
-        pass
+        runtime = get_nexus_runtime()
+        self.device = runtime.get_device(0)
 
     def load_binary(self, name, kernel, shared_mem, device):
-        #print(f"LOAD BINARY: {name} {kernel}")
+        ## TODO: change to load_library from kernel string so the tmp files are not needed
+        ## tmpfile must be persistent since the file will be jit compiled on the first run
         with tempfile.NamedTemporaryFile(mode="wb", suffix=".cpp", delete=False) as f:
             f.write(kernel)
             f.flush()
@@ -83,6 +77,7 @@ class CpuUtils(object):
             return (lib, kernel, 1, shared_mem, 2**12)
 
     def get_device_properties(self, *args):
+        import nexus
         core_count = self.device.get_property_int(nexus.property.Size)
         return {
             "max_num_regs": core_count * 4, "max_shared_mem": 1024 * 1024 * 1024, "multiprocessor_count": core_count,
@@ -113,15 +108,16 @@ def ty_to_cpp(ty):
 
 
 class CPULauncher(object):
-    device = runtime.get_device(0)
-
     def __init__(self, src, metadata):
+        runtime = get_nexus_runtime()
+        self.device = runtime.get_device(0)
         constants = src.constants if hasattr(src, "constants") else dict()
         arg_idx = lambda x: (src.fn.arg_names.index(x), ) if isinstance(x, str) else x
         self.constants = {arg_idx(idx): value for idx, value in constants.items()}
         self.signature = {idx: value for idx, value in src.signature.items()}
 
     def __call__(self, gridX, gridY, gridZ, stream, function, *args):
+        import nexus
         #self.launch(gridX, gridY, gridZ, stream, function, *args)
         kernel_metadata = args[0]
         num_warps = kernel_metadata[0]
@@ -138,7 +134,7 @@ class CPULauncher(object):
         command = schedule.create_command(function)
         import torch
         ## TODO: Get CB depth from TuningConfig
-        cb_depth = 4
+        cb_depth = 1
         buffers = []
         sig_types = list(self.signature.values())
         idx = 0
@@ -218,6 +214,7 @@ class CPUDeviceInterface:
 
 
 class CPUDriver(DriverBase):
+    runtime = get_nexus_runtime()
     device = runtime.get_device(0)
 
     @staticmethod
@@ -252,6 +249,7 @@ class CPUDriver(DriverBase):
         return torch.device("cpu")
 
     def get_empty_device_buffer(self, size, dtype):
+        import nexus
         return self.device.create_buffer(size, nexus.get_data_type(dtype))
 
     def get_device_buffer(self, torch_buffer):
