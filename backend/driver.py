@@ -54,11 +54,14 @@ def library_dirs():
         lib_dirs.extend([os.path.join(external_boost_path(), "lib")])
     return lib_dirs
 
+
 def get_nexus_runtime():
     import nexus
     return nexus.get_runtime("tt-metal")
 
+
 class CpuUtils(object):
+
     def __init__(self):
         runtime = get_nexus_runtime()
         self.device = runtime.get_device(0)
@@ -108,6 +111,7 @@ def ty_to_cpp(ty):
 
 
 class CPULauncher(object):
+
     def __init__(self, src, metadata):
         runtime = get_nexus_runtime()
         self.device = runtime.get_device(0)
