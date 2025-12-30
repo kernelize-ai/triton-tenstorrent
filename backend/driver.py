@@ -218,18 +218,24 @@ class CPUDeviceInterface:
 
 
 class CPUDriver(DriverBase):
-    runtime = get_nexus_runtime()
-    device = runtime.get_device(0)
 
     @staticmethod
     def is_active():
         try:
-            return bool(CPUDriver.device)
+            return bool(CPUDriver.get_device())
         except ImportError:
             return False
 
+    @staticmethod
+    def get_device():
+        import nexus
+        runtime = get_nexus_runtime()
+        device = runtime.get_device(0)
+        return device
+
     def __init__(self):
-        self.utils = CpuUtils()
+        self.device = CPUDriver.get_device()
+        self.utils = CpuUtils(self.device)
         import torch
         self.get_current_stream = lambda idx: torch.cpu.Stream()
         self.launcher_cls = CPULauncher
