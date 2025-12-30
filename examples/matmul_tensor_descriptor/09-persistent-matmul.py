@@ -78,9 +78,9 @@ def matmul_get_configs(pre_hook=None):
     return [
         triton.Config({'BLOCK_SIZE_M': BM, 'BLOCK_SIZE_N': BN, "BLOCK_SIZE_K": BK, "GROUP_SIZE_M": 8}, num_stages=s,
                       num_warps=w, pre_hook=pre_hook)
-        for BM in [32]
-        for BN in [32]
-        for BK in [32]
+        for BM in [64] 
+        for BN in [256]
+        for BK in [64]
         for s in ([1])
         for w in [1]
     ]
@@ -133,8 +133,8 @@ def matmul_kernel_tma(a_desc, b_desc, c_desc,  #
     for k in tl.range(k_tiles, warp_specialize=WARP_SPECIALIZE):
         offs_k = k * BLOCK_SIZE_K
         a = a_desc.load([offs_am, offs_k])
-        b = b_desc.load([offs_k, offs_bn])
-        accumulator = tl.dot(a, b, accumulator) # removed transpose 
+        b = b_desc.load([offs_bn, offs_k])
+        accumulator = tl.dot(a, b.T, accumulator)
 
     c = accumulator.to(dtype)
 
@@ -150,12 +150,13 @@ def matmul_tma(a, b, warp_specialize: bool):
 
     M, K = a.shape
     K, N = b.shape 
+    #import pdb; pdb.set_trace()
     dtype = a.dtype
 
     c = torch.empty((M, N), device=a.device, dtype=dtype)
 
     # A dummy block value that will [maybe?] be overwritten when we have the real block size
-    dummy_block = [32, 32]
+    dummy_block = [1, 1]
     a_desc = TensorDescriptor.from_tensor(a, dummy_block)
     b_desc = TensorDescriptor.from_tensor(b, dummy_block)
     c_desc = TensorDescriptor.from_tensor(c, dummy_block)
@@ -315,7 +316,7 @@ if __name__ == "__main__":
 
         torch.manual_seed(0)
 
-        validate(64, 32, 64, dtype)
+        validate(64, 2560, 9728, dtype)
         
         """
         validate(8192, 8192, args.K_range[0], dtype)

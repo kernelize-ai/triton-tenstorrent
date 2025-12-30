@@ -108,24 +108,15 @@ void matmul_multi_core(
     Program program{};
 
     // Get the compute grid size to determine how many cores are available
-    auto core_grid = mesh_device->compute_with_storage_grid_size();
-    auto num_output_tiles_total = (M * N) / TILE_HW;
+    CoreCoord core_grid = mesh_device->compute_with_storage_grid_size();
+    uint32_t num_cores_x = core_grid.x;
+    uint32_t num_cores_y = core_grid.y;
 
-    // Use the split_work_to_cores utility function to distribute matrix multiplication work
-    // across available cores for efficient SPMD (Single Program, Multiple Data) execution.
-    // This function takes the total number of output tiles and available cores, then calculates
-    // how to divide the work when it cannot be evenly distributed. It returns two groups of cores:
-    // - Primary group: handles more tiles per core
-    // - Secondary group: handles fewer tiles per core
-    // The secondary group is empty if the work can be evenly distributed across all cores. This
-    // approach minimizes workload imbalance between cores for optimal performance.
-    constexpr CoreCoord start_core = {0, 0};
-    constexpr CoreCoord end_core = {0, 1};
-    CoreRange all_cores(start_core, end_core);
-    fmt::print("Using {} cores for computation.\n", all_cores.size());
-    uint32_t work_per_core = 2;
+    // NOTE: Only supports matmuls where output is blocks of 16 x 16 tiles (ie. multiples of 16*32 x 16*32)
+    // NOTE: Maximum number of tiles in output is 120 * 16^2 = 30,720 (eg. [1, 1, 5120, 6144])2
+    uint32_t in0_block_w = 2;
 
-    // Extracting Matrix dimensions from input/output vectors and converting to tile coordinates.
+   // Extracting Matrix dimensions from input/output vectors and converting to tile coordinates.
     // The accelerator works with 32x32 tiles, so we need to convert from element dimensions
     // to tile dimensions for proper addressing and computation.
     const uint32_t Mt = M / TILE_HEIGHT;  // Number of tiles in M dimension
@@ -142,6 +133,59 @@ void matmul_multi_core(
         M,
         N,
         Mt * Nt);
+
+    auto matmul_params = bmm_op_utils::get_large_matmul_params(Mt, Nt, num_cores_y, num_cores_x, in0_block_w);
+    uint32_t per_core_M = std::get<0>(matmul_params);
+    uint32_t per_core_N = std::get<1>(matmul_params);
+    uint32_t out_subblock_h = std::get<2>(matmul_params);
+    uint32_t out_subblock_w = std::get<3>(matmul_params);
+
+    fmt::print(" -- Metalium Core Sizing --\n");
+    fmt::print(
+        " -- per_core_M= {} -- per_core_N= {} -- out_subblock_h= {} -- out_subblock_w= {} --\n",
+        per_core_M,
+        per_core_N,
+        out_subblock_h,
+        out_subblock_w);
+
+    TT_ASSERT(Mt % per_core_M == 0);
+    TT_ASSERT(Nt % per_core_N == 0);
+    TT_ASSERT(Kt % in0_block_w == 0);
+
+    uint32_t num_output_tiles_total = (M * N) / TILE_HW;
+
+    // Use the split_work_to_cores utility function to distribute matrix multiplication work
+    // across available cores for efficient SPMD (Single Program, Multiple Data) execution.
+    // This function takes the total number of output tiles and available cores, then calculates
+    // how to divide the work when it cannot be evenly distributed. It returns two groups of cores:
+    // - Primary group: handles more tiles per core
+    // - Secondary group: handles fewer tiles per core
+    // The secondary group is empty if the work can be evenly distributed across all cores. This
+    // approach minimizes workload imbalance between cores for optimal performance.
+    auto [num_cores, all_cores, core_group_1, core_group_2, units_per_core_group_1, units_per_core_group_2] =
+        split_work_to_cores(core_grid, num_output_tiles_total);
+    fmt::print("Split work to cores: " 
+               "Total Cores = {}, "
+               "Cores in Group 1 = {}, Units/Core in Group 1 = {}, "
+               "Cores in Group 2 = {}, Units/Core in Group 2 = {}\n",
+               num_cores,
+               core_group_1.size(),
+               units_per_core_group_1,
+               core_group_2.size(),
+               units_per_core_group_2);
+#if 1
+
+    auto cores = grid_to_cores(num_cores, num_cores_x, num_cores_y);
+#else
+    uint32_t num_cores_x = core_grid.x;
+    uint32_t num_cores_y = core_grid.y;
+    auto cores = grid_to_cores(num_cores, num_cores_x, num_cores_y);
+
+    CoreCoord end_core = core_grid; // TODO: remove storage? 
+    CoreRange all_cores(start_core, end_core);
+#endif 
+
+    fmt::print("Using {} cores for computation.\n", all_cores.size());
 
     // Create DRAM buffers for input and output matrices (replicated per device across the mesh).
     // We allocate DRAM buffers for the input matrices and output matrix.
@@ -238,8 +282,17 @@ void matmul_multi_core(
     fmt::print("Matrix strides: AM={}, BK={}, CM={}\n", stride_AM, stride_BK, stride_CM);
 
     // Iterate through each work group and assign work to cores
-    for (const auto& core : all_cores) {
-        fmt::print("Core {} assigned {} output tiles starting at offset {}\n", core.str(), work_per_core, work_offset);
+    for (int i = 0; i < cores.size(); ++i) {
+        const auto& core = cores[i];
+        uint32_t units_per_core;
+        if (core_group_1.contains(core)) {
+            units_per_core = units_per_core_group_1;
+        } else if (core_group_2.contains(core)) {
+            units_per_core = units_per_core_group_2;
+        } else {
+            TT_THROW("Core not in specified core ranges");
+        }
+        fmt::print("Core {} processing {} blocks starting at offset {}\n", core.str(), units_per_core, work_offset);
         // Set arguments for the reader kernel (data input)
         tt_metal::SetRuntimeArgs(
             program,
@@ -360,7 +413,7 @@ void matmul_multi_core(
                 K,                           
                 work_offset 
             });                   
-        work_offset += 1;  // Update offset for next core
+        work_offset += units_per_core;  // Update offset for next core
     }
     
     // Launch program & read in output buffer result into the host vector
@@ -413,8 +466,8 @@ int main() {
 
         // Create source data with specified matrix dimensions
         constexpr uint32_t M = 64;  // Number of rows in matrix A (user-defined)
-        constexpr uint32_t N = 32;  // Number of columns in matrix B (user-defined)
-        constexpr uint32_t K = 64;  // Inner dimension for multiplication (user-defined)
+        constexpr uint32_t N = 2560;  // Number of columns in matrix B (user-defined)
+        constexpr uint32_t K = 9728;  // Inner dimension for multiplication (user-defined)
 
         // Ensure that the matrix dimensions are compatible with the tile size
         static_assert(M % TILE_HEIGHT == 0, "M must be divisible by TILE_HEIGHT");
