@@ -1,14 +1,15 @@
 // matmul_kernel_tma__reader
 #include <cstdint>
 #include "tools/profiler/kernel_profiler.hpp"
+#include "firmware_common.h"
 #include "dataflow_api.h"
 void kernel_main() {
   bool v1 = false;
   int32_t v2 = 31;
-  int32_t v3 = 1;
-  int32_t v4 = 0;
-  int32_t v5 = 32;
-  int32_t v6 = 8;
+  int32_t v3 = 0;
+  int32_t v4 = 32;
+  int32_t v5 = 8;
+  int32_t v6 = 1;
   int32_t v7 = 1024;
   bool v8 = true;
   int32_t v9 = 2;
@@ -59,32 +60,35 @@ void kernel_main() {
   v49.page_size = v48;
   v49.data_format = v47;
   InterleavedAddrGenFast<true> v50 = v49;
-  int32_t v51 = get_arg_val<uint32_t>(33);
-  int32_t v52 = (int32_t) ((uint32_t) ((int32_t) ((uint32_t) v41 + (uint32_t) v2) / v5) * (uint32_t) v6);
-  int32_t v53 = (int32_t) ((uint32_t) (v51 / v52) * (uint32_t) v6);
-  int32_t v54 = (int32_t) ((uint32_t) ((int32_t) ((uint32_t) v40 + (uint32_t) v2) / v5) - (uint32_t) v53) < v6 ? (int32_t) ((uint32_t) ((int32_t) ((uint32_t) v40 + (uint32_t) v2) / v5) - (uint32_t) v53) : v6;
-  for (int32_t i55 = v4; i55 < ((int32_t) ((uint32_t) v42 + (uint32_t) v2) / v5); i55 += v3) {
-    int32_t v56 = (int32_t) ((uint32_t) i55 * (uint32_t) v5);
-    int32_t v57 = v56 / v5;
-    int32_t v58 = (int32_t) ((uint32_t) v56 % (uint32_t) v5);
-    uint64_t temp_559 = v50.get_noc_addr((int32_t) ((uint32_t) ((int32_t) ((uint32_t) ((int32_t) ((uint32_t) ((int32_t) ((uint32_t) ((int32_t) ((uint32_t) ((int32_t) ((uint32_t) ((int32_t) ((uint32_t) ((int32_t) ((uint32_t) v53 + (uint32_t) (v51 % v54))) * (uint32_t) v5) / v5) * (uint32_t) (v12 != (int32_t) ((uint32_t) (v12 / v5) * (uint32_t) v5) & v12 < v4 == v1 ? (int32_t) ((uint32_t) (v12 / v5) + (uint32_t) v3) : v12 / v5))) + (uint32_t) v57)) * (uint32_t) v7)) + (uint32_t) ((int32_t) ((uint32_t) ((int32_t) ((uint32_t) ((int32_t) ((uint32_t) ((int32_t) ((uint32_t) ((int32_t) ((uint32_t) v53 + (uint32_t) (v51 % v54))) * (uint32_t) v5)) % (uint32_t) v5)) * (uint32_t) v5)) + (uint32_t) v58)))) * (uint32_t) v9)) / (uint32_t) v48), v4);
-    cb_reserve_back(get_compile_time_arg_val(0), v3);
-    int32_t v59 = get_write_ptr(get_compile_time_arg_val(0));
-    noc_async_read(temp_559, v59, v48);
-    {
-    DeviceZoneScopedN("noc_async_read_barrier");
-    noc_async_read_barrier();
+  int32_t v51 = get_arg_val<uint32_t>(34);
+  int32_t v52 = get_arg_val<uint32_t>(33);
+  int32_t v53 = (int32_t) ((uint32_t) ((int32_t) ((uint32_t) v41 + (uint32_t) v2) / v4) * (uint32_t) v5);
+  for (int32_t i54 = v52; i54 < v51; i54 += v6) {
+    int32_t v55 = (int32_t) ((uint32_t) (i54 / v53) * (uint32_t) v5);
+    int32_t v56 = (int32_t) ((uint32_t) ((int32_t) ((uint32_t) v40 + (uint32_t) v2) / v4) - (uint32_t) v55) < v5 ? (int32_t) ((uint32_t) ((int32_t) ((uint32_t) v40 + (uint32_t) v2) / v4) - (uint32_t) v55) : v5;
+    for (int32_t j57 = v3; j57 < ((int32_t) ((uint32_t) v42 + (uint32_t) v2) / v4); j57 += v6) {
+      int32_t v58 = (int32_t) ((uint32_t) j57 * (uint32_t) v4);
+      int32_t v59 = v58 / v4;
+      int32_t v60 = (int32_t) ((uint32_t) v58 % (uint32_t) v4);
+      uint64_t temp_569 = v50.get_noc_addr((int32_t) ((uint32_t) ((int32_t) ((uint32_t) ((int32_t) ((uint32_t) ((int32_t) ((uint32_t) ((int32_t) ((uint32_t) ((int32_t) ((uint32_t) ((int32_t) ((uint32_t) ((int32_t) ((uint32_t) v55 + (uint32_t) (i54 % v56))) * (uint32_t) v4) / v4) * (uint32_t) (v12 != (int32_t) ((uint32_t) (v12 / v4) * (uint32_t) v4) & v12 < v3 == v1 ? (int32_t) ((uint32_t) (v12 / v4) + (uint32_t) v6) : v12 / v4))) + (uint32_t) v59)) * (uint32_t) v7)) + (uint32_t) ((int32_t) ((uint32_t) ((int32_t) ((uint32_t) ((int32_t) ((uint32_t) ((int32_t) ((uint32_t) ((int32_t) ((uint32_t) v55 + (uint32_t) (i54 % v56))) * (uint32_t) v4)) % (uint32_t) v4)) * (uint32_t) v4)) + (uint32_t) v60)))) * (uint32_t) v9)) / (uint32_t) v48), v3);
+      cb_reserve_back(get_compile_time_arg_val(0), v6);
+      int32_t v61 = get_write_ptr(get_compile_time_arg_val(0));
+      noc_async_read(temp_569, v61, v48);
+      {
+      DeviceZoneScopedN("noc_async_read_barrier");
+      noc_async_read_barrier();
+      }
+      cb_push_back(get_compile_time_arg_val(0), v6);
+      uint64_t temp_613 = v46.get_noc_addr((int32_t) ((uint32_t) ((int32_t) ((uint32_t) ((int32_t) ((uint32_t) ((int32_t) ((uint32_t) ((int32_t) ((uint32_t) ((int32_t) ((uint32_t) v59 * (uint32_t) (v22 != (int32_t) ((uint32_t) (v22 / v4) * (uint32_t) v4) & v22 < v3 == v1 ? (int32_t) ((uint32_t) (v22 / v4) + (uint32_t) v6) : v22 / v4))) + (uint32_t) ((int32_t) ((uint32_t) ((i54 % v53) / v56) * (uint32_t) v4) / v4))) * (uint32_t) v7)) + (uint32_t) ((int32_t) ((uint32_t) ((int32_t) ((uint32_t) v60 * (uint32_t) v4)) + (uint32_t) ((int32_t) ((uint32_t) ((int32_t) ((uint32_t) ((i54 % v53) / v56) * (uint32_t) v4)) % (uint32_t) v4)))))) * (uint32_t) v9)) / (uint32_t) v44), v3);
+      cb_reserve_back(get_compile_time_arg_val(1), v6);
+      int32_t v62 = get_write_ptr(get_compile_time_arg_val(1));
+      noc_async_read(temp_613, v62, v44);
+      {
+      DeviceZoneScopedN("noc_async_read_barrier");
+      noc_async_read_barrier();
+      }
+      cb_push_back(get_compile_time_arg_val(1), v6);
     }
-    cb_push_back(get_compile_time_arg_val(0), v3);
-    uint64_t temp_603 = v46.get_noc_addr((int32_t) ((uint32_t) ((int32_t) ((uint32_t) ((int32_t) ((uint32_t) ((int32_t) ((uint32_t) ((int32_t) ((uint32_t) ((int32_t) ((uint32_t) v57 * (uint32_t) (v22 != (int32_t) ((uint32_t) (v22 / v5) * (uint32_t) v5) & v22 < v4 == v1 ? (int32_t) ((uint32_t) (v22 / v5) + (uint32_t) v3) : v22 / v5))) + (uint32_t) ((int32_t) ((uint32_t) ((v51 % v52) / v54) * (uint32_t) v5) / v5))) * (uint32_t) v7)) + (uint32_t) ((int32_t) ((uint32_t) ((int32_t) ((uint32_t) v58 * (uint32_t) v5)) + (uint32_t) ((int32_t) ((uint32_t) ((int32_t) ((uint32_t) ((v51 % v52) / v54) * (uint32_t) v5)) % (uint32_t) v5)))))) * (uint32_t) v9)) / (uint32_t) v44), v4);
-    cb_reserve_back(get_compile_time_arg_val(1), v3);
-    int32_t v60 = get_write_ptr(get_compile_time_arg_val(1));
-    noc_async_read(temp_603, v60, v44);
-    {
-    DeviceZoneScopedN("noc_async_read_barrier");
-    noc_async_read_barrier();
-    }
-    cb_push_back(get_compile_time_arg_val(1), v3);
   }
   return;
 }

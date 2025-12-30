@@ -1,6 +1,7 @@
 // matmul_kernel_tma__compute
 #include <cstdint>
 #include "tools/profiler/kernel_profiler.hpp"
+#include "firmware_common.h"
 #include "llk_defs.h"
 #include "compute_kernel_api/binary_max_min.h"
 #include "compute_kernel_api/common.h"
@@ -41,8 +42,8 @@ namespace NAMESPACE {
 void kernel_main() {
   size_t v1 = 0;
   size_t v2 = 2;
-  int32_t v3 = 1;
-  int32_t v4 = 0;
+  int32_t v3 = 0;
+  int32_t v4 = 1;
   int32_t v5 = get_arg_val<uint32_t>(v1);
   int32_t v6 = get_arg_val<uint32_t>(1);
   int32_t v7 = get_arg_val<uint32_t>(v2);
@@ -76,30 +77,34 @@ void kernel_main() {
   int32_t v35 = get_arg_val<uint32_t>(30);
   int32_t v36 = get_arg_val<uint32_t>(31);
   int32_t v37 = get_arg_val<uint32_t>(32);
-  tile_regs_acquire();
-  mm_init(get_compile_time_arg_val(0), get_compile_time_arg_val(1), get_compile_time_arg_val(2), v4);
-  for (int32_t i38 = v4; i38 < ((int32_t) ((uint32_t) v37 + (uint32_t) 31) / 32); i38 += v3) {
-    {
-    DeviceZoneScopedN("cb_wait_front");
-    cb_wait_front(get_compile_time_arg_val(0), v3);
+  mm_init(get_compile_time_arg_val(0), get_compile_time_arg_val(1), get_compile_time_arg_val(2), v3);
+  int32_t v38 = get_arg_val<uint32_t>(34);
+  int32_t v39 = get_arg_val<uint32_t>(33);
+  for (int32_t i40 = v39; i40 < v38; i40 += v4) {
+    tile_regs_acquire();
+    for (int32_t j41 = v3; j41 < ((int32_t) ((uint32_t) v37 + (uint32_t) 31) / 32); j41 += v4) {
+      {
+      DeviceZoneScopedN("cb_wait_front");
+      cb_wait_front(get_compile_time_arg_val(0), v4);
+      }
+      {
+      DeviceZoneScopedN("cb_wait_front");
+      cb_wait_front(get_compile_time_arg_val(1), v4);
+      }
+      matmul_tiles(get_compile_time_arg_val(0), get_compile_time_arg_val(1), v1, v1, v2);
+      cb_pop_front(get_compile_time_arg_val(0), v4);
+      cb_pop_front(get_compile_time_arg_val(1), v4);
     }
+    cb_reserve_back(get_compile_time_arg_val(2), v4);
+    tile_regs_commit();
     {
-    DeviceZoneScopedN("cb_wait_front");
-    cb_wait_front(get_compile_time_arg_val(1), v3);
+    DeviceZoneScopedN("tile_regs_wait");
+    tile_regs_wait();
     }
-    matmul_tiles(get_compile_time_arg_val(0), get_compile_time_arg_val(1), v1, v1, v2);
-    cb_pop_front(get_compile_time_arg_val(0), v3);
-    cb_pop_front(get_compile_time_arg_val(1), v3);
+    pack_tile<true>(v2, get_compile_time_arg_val(2), v1);
+    tile_regs_release();
+    cb_push_back(get_compile_time_arg_val(2), v4);
   }
-  cb_reserve_back(get_compile_time_arg_val(2), v3);
-  tile_regs_commit();
-  {
-  DeviceZoneScopedN("tile_regs_wait");
-  tile_regs_wait();
-  }
-  pack_tile<true>(v2, get_compile_time_arg_val(2), v1);
-  tile_regs_release();
-  cb_push_back(get_compile_time_arg_val(2), v3);
   return;
 }
 void MAIN { kernel_main(); }
