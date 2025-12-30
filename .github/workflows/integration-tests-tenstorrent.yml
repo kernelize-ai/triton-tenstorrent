@@ -141,11 +141,10 @@ jobs:
         run: |
           python -m pytest --device "cpu" python/test/unit/language/test_core.py -k "test_reduce1d or test_load_store_same_ptr"
           python -m pytest --device "cpu" python/test/unit/runtime/test_launch.py -k "not test_launch_with_options"
-      - name: Run tutorial 01 on CPU
-        if: false
+      - name: Run the triton offline compiler on tutorial 01
         working-directory: ./triton
         run: |
-          python python/tutorials/01-vector-add.py
+          python python/triton/tools/compile.py --target tenstorrent:0:1 --signature "*fp16,*fp16,*fp16,i32,1024" --grid 1,1,1 -n add_kernel ../python/tutorials/01-vector-add.py
       - name: Run interpreter tests
         working-directory: ./triton
         if: false
