@@ -62,9 +62,8 @@ def get_nexus_runtime():
 
 class CpuUtils(object):
 
-    def __init__(self):
-        runtime = get_nexus_runtime()
-        self.device = runtime.get_device(0)
+    def __init__(self, device):
+        self.device = device
 
     def load_binary(self, name, kernel, shared_mem, device):
         ## TODO: change to load_library from kernel string so the tmp files are not needed
