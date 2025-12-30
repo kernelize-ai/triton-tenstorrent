@@ -17,6 +17,8 @@
 #include "npu/include/Dialect/TritonTenstorrent/IR/Attributes.h"
 #include "npu/include/Dialect/TritonTenstorrent/IR/Dialect.h"
 
+#include "cpu/include/Dialect/TritonCPU/IR/Dialect.h" // BlockIndexOps from MakePersistentKernel
+
 // Tenstorrent TTKernel includes
 #include "ttmlir/Dialect/TTKernel/IR/TTKernel.h"
 #include "ttmlir/Dialect/TTKernel/IR/TTKernelOps.h"
@@ -288,6 +290,7 @@ struct ConvertTritonNPUToTTKernelPass
     target.addLegalDialect<func::FuncDialect>();
 
     target.addIllegalDialect<triton::TritonDialect>();
+    target.addIllegalDialect<triton::cpu::TritonCPUDialect>();
     target.addIllegalDialect<triton::gpu::TritonGPUDialect>();
 
     target.addLegalOp<UnrealizedConversionCastOp>();
