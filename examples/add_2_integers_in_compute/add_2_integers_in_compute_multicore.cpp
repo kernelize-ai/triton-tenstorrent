@@ -46,12 +46,11 @@ int main() {
     // simultaneously.
     Program program = CreateProgram();
 
-    // We will only be using one Tensix core for this particular example. As Tenstorrent processors are a 2D grid of
-    // cores we can specify the core coordinates as (0, 0).
     constexpr CoreCoord start_core = {0, 0};
-    constexpr CoreCoord end_core = {3, 3};
+    constexpr CoreCoord end_core = {6, 6};
     CoreRange cores(start_core, end_core);
     uint32_t num_cores = cores.size();
+    uint32_t blocks_per_core = 32;
     fmt::print("Using {} cores for computation.\n", num_cores);
 
     // Most data on Tensix is stored in tiles. A tile is a 2D array of (usually) 32x32 values. And the Tensix uses
@@ -70,7 +69,7 @@ int main() {
                                         // as the tile size for efficiency.
         .buffer_type = tt_metal::BufferType::DRAM};  // Type of buffer (DRAM or L1(SRAM))
     distributed::ReplicatedBufferConfig distributed_buffer_config{
-        .size = num_cores * single_tile_size  // Size of the buffer in bytes
+        .size = num_cores * blocks_per_core * single_tile_size  // Size of the buffer in bytes
     };
     // Create 3 buffers in DRAM to hold the 2 input tiles and 1 output tile.
     auto src0_dram_buffer = distributed::MeshBuffer::create(distributed_buffer_config, dram_config, mesh_device.get());
@@ -150,12 +149,12 @@ int main() {
     // Create the data that will be used as input to the kernels.
     // src0 is a vector of bfloat16 values initialized to random values between 0.0f and 14.0f.
     // src1 is a vector of bfloat16 values initialized to random values between 0.0f and 8.0f.
-    std::vector<bfloat16> src0_vec(num_cores * n_elements_per_tile);
-    std::vector<bfloat16> src1_vec(num_cores * n_elements_per_tile);
+    std::vector<bfloat16> src0_vec(num_cores * blocks_per_core * n_elements_per_tile);
+    std::vector<bfloat16> src1_vec(num_cores * blocks_per_core * n_elements_per_tile);
     std::mt19937 rng(std::random_device{}());
     std::uniform_real_distribution<float> dist1(0.0f, 14.0f);
     std::uniform_real_distribution<float> dist2(0.0f, 8.0f);
-    for (size_t i = 0; i < num_cores * n_elements_per_tile; ++i) {
+    for (size_t i = 0; i < num_cores * blocks_per_core * n_elements_per_tile; ++i) {
         src0_vec[i] = bfloat16(dist1(rng));
         src1_vec[i] = bfloat16(dist2(rng));
     }
@@ -179,9 +178,17 @@ int main() {
             program,
             binary_reader_kernel_id,
             core,
-            {(uint32_t)src0_dram_buffer->address(), (uint32_t)src1_dram_buffer->address(), (uint32_t)dst_dram_buffer->address(), uint32_t(num_cores * n_elements_per_tile), core_id});
-        SetRuntimeArgs(program, eltwise_binary_kernel_id, core, {});
-        SetRuntimeArgs(program, unary_writer_kernel_id, core, {(uint32_t)src0_dram_buffer->address(), (uint32_t)src1_dram_buffer->address(), (uint32_t)dst_dram_buffer->address(), uint32_t(num_cores * n_elements_per_tile), core_id});
+            {(uint32_t)src0_dram_buffer->address(), (uint32_t)src1_dram_buffer->address(), (uint32_t)dst_dram_buffer->address(), uint32_t(num_cores * blocks_per_core * n_elements_per_tile), core_id * blocks_per_core, core_id * blocks_per_core + blocks_per_core});
+        SetRuntimeArgs(
+            program, 
+            eltwise_binary_kernel_id, 
+            core, 
+            {NULL, NULL, NULL, 0, core_id * blocks_per_core, core_id * blocks_per_core + blocks_per_core});
+        SetRuntimeArgs(
+            program,
+            unary_writer_kernel_id,
+            core,
+            {(uint32_t)src0_dram_buffer->address(), (uint32_t)src1_dram_buffer->address(), (uint32_t)dst_dram_buffer->address(), uint32_t(num_cores * blocks_per_core * n_elements_per_tile), core_id * blocks_per_core, core_id * blocks_per_core + blocks_per_core});
     }
 #else
     SetRuntimeArgs(
@@ -202,7 +209,7 @@ int main() {
     // operation is blocking or not.
     std::vector<bfloat16> result_vec;
     distributed::EnqueueReadMeshBuffer(cq, result_vec, dst_dram_buffer, true);
-    if (result_vec.size() != num_cores * n_elements_per_tile) {
+    if (result_vec.size() != num_cores * n_elements_per_tile * blocks_per_core) {
         throw std::runtime_error("Error: result_vec size does not match expected size!");
     }
 
@@ -210,7 +217,7 @@ int main() {
 
     // compare the results with the expected values.
     bool success = true;
-    for (size_t i = 0; i < num_cores * n_elements_per_tile; ++i) {
+    for (size_t i = 0; i < num_cores * n_elements_per_tile * blocks_per_core; ++i) {
         float expected = static_cast<float>(src0_vec[i]) + static_cast<float>(src1_vec[i]);
         if (std::abs(expected - static_cast<float>(result_vec[i])) > 3e-1f) {
             fmt::print(
