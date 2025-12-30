@@ -105,9 +105,10 @@ public:
       ttkernel::TileRegsAcquireOp::create(builder,
                                           copyTileInitOps.front().getLoc());
     } else {
-      auto packTilesItr = funcOp.getOps<ttkernel::PackTileOp>();
-      assert(!packTilesItr.empty() && "expecting at least one pack tile op");
-      Operation *firstPackTileOp = *packTilesItr.begin();
+      SmallVector<ttkernel::PackTileOp, 4> packTileOps;
+      funcOp.walk([&](ttkernel::PackTileOp op) { packTileOps.push_back(op); });
+      assert(!packTileOps.empty() && "expecting at least one pack tile op");
+      auto firstPackTileOp = packTileOps.front();
       Block *parentBlock = firstPackTileOp->getBlock();
       OpBuilder builder(parentBlock, parentBlock->begin());
       // put the tile regs acquire ops after any get arg val ops. This seems to
