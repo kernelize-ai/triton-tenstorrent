@@ -32,10 +32,7 @@ source env/activate
 echo "Installing tt-mlir python dependencies"
 python -m pip install 'nanobind==2.10'
 
-#export LLVM_INCLUDE_DIRS="$LLVM_BUILD_DIR/include"
-#export MLIR_INCLUDE_DIRS="$LLVM_BUILD_DIR/include"
 LLVM_LIBRARY_DIR="$LLVM_BUILD_DIR/lib"
-#export LLVM_SYSPATH="$LLVM_BUILD_DIR"
 MLIR_DIR="$LLVM_LIBRARY_DIR/cmake/mlir"
 LLVM_DIR="$LLVM_LIBRARY_DIR/cmake/llvm"
 
