@@ -119,11 +119,16 @@ void matmul_multi_core(
     // - Secondary group: handles fewer tiles per core
     // The secondary group is empty if the work can be evenly distributed across all cores. This
     // approach minimizes workload imbalance between cores for optimal performance.
-    constexpr CoreCoord start_core = {0, 0};
-    constexpr CoreCoord end_core = {0, 1};
-    CoreRange all_cores(start_core, end_core);
-    fmt::print("Using {} cores for computation.\n", all_cores.size());
-    uint32_t work_per_core = 2;
+    auto [num_cores, all_cores, core_group_1, core_group_2, work_per_core1, work_per_core2] =
+        split_work_to_cores(core_grid, num_output_tiles_total);
+    fmt::print(
+        "Distributing {} output tiles across {} cores: {} cores x {} tiles/core + {} cores x {} tiles/core\n",
+        num_output_tiles_total,
+        num_cores,
+        core_group_1.num_cores(),
+        work_per_core1,
+        core_group_2.num_cores(),
+        work_per_core2);
 
     // Extracting Matrix dimensions from input/output vectors and converting to tile coordinates.
     // The accelerator works with 32x32 tiles, so we need to convert from element dimensions
@@ -231,6 +236,8 @@ void matmul_multi_core(
     // tiles - each core computes different output tiles. Runtime arguments can be changed between program executions
     // without recompilation.
     uint32_t work_offset = 0;
+    auto work_groups = {std::make_pair(core_group_1, work_per_core1), std::make_pair(core_group_2, work_per_core2)};
+
 
     uint32_t stride_AM = K;
     uint32_t stride_BK = N;
@@ -238,129 +245,136 @@ void matmul_multi_core(
     fmt::print("Matrix strides: AM={}, BK={}, CM={}\n", stride_AM, stride_BK, stride_CM);
 
     // Iterate through each work group and assign work to cores
-    for (const auto& core : all_cores) {
-        fmt::print("Core {} assigned {} output tiles starting at offset {}\n", core.str(), work_per_core, work_offset);
-        // Set arguments for the reader kernel (data input)
-        tt_metal::SetRuntimeArgs(
-            program,
-            reader_id,
-            core,
-            {src0_dram_buffer->address(),  // Address of matrix A in DRAM
-                M, // shape[0]
-                K, // shape[1]
-                stride_AM, // strides[0]
-                1, // strides[1]
-                0, // padding (bool)
-                M, // shape[0] // repeated? 
-                K, // shape[1]
-                stride_AM, // strides[0]
-                1, // strides[1]
-                src1_dram_buffer->address(),  // Address of matrix B in DRAM
-                K, // shape[0]
-                N, // shape[1]
-                stride_BK, // strides[0]
-                1, // strides[1]
-                0, // padding (bool)
-                K, // shape[0]
-                N, // shape[1]
-                stride_BK, // strides[0]
-                1, // strides[1]
-                dst_dram_buffer->address(),
-                M, // shape[0]
-                N, // shape[1]
-                stride_CM, // strides[0]
-                1, // strides[1]
-                0, // padding (bool)
-                K, // shape[0]
-                N, // shape[1]
-                stride_BK, // strides[0]
-                1, // strides[1]
-                M,                           
-                N,                           
-                K,                           
-                work_offset 
-            });          
+    for (const auto& [ranges, work_per_core] : work_groups) {
+        for (const auto& range : ranges.ranges()) {
+            for (const auto& core : range) {
+                // fmt::print("Core {} assigned {} output tiles starting at offset {}\n", core.str(), work_per_core, work_offset);
+                // Set arguments for the reader kernel (data input)
+                tt_metal::SetRuntimeArgs(
+                    program,
+                    reader_id,
+                    core,
+                    {src0_dram_buffer->address(),  // Address of matrix A in DRAM
+                        M, // shape[0]
+                        K, // shape[1]
+                        stride_AM, // strides[0]
+                        1, // strides[1]
+                        0, // padding (bool)
+                        M, // shape[0] // repeated? 
+                        K, // shape[1]
+                        stride_AM, // strides[0]
+                        1, // strides[1]
+                        src1_dram_buffer->address(),  // Address of matrix B in DRAM
+                        K, // shape[0]
+                        N, // shape[1]
+                        stride_BK, // strides[0]
+                        1, // strides[1]
+                        0, // padding (bool)
+                        K, // shape[0]
+                        N, // shape[1]
+                        stride_BK, // strides[0]
+                        1, // strides[1]
+                        dst_dram_buffer->address(),
+                        M, // shape[0]
+                        N, // shape[1]
+                        stride_CM, // strides[0]
+                        1, // strides[1]
+                        0, // padding (bool)
+                        K, // shape[0]
+                        N, // shape[1]
+                        stride_BK, // strides[0]
+                        1, // strides[1]
+                        M,                           
+                        N,                           
+                        K,                           
+                        work_offset,
+                        work_offset + work_per_core
+                    });          
 
-        // Set arguments for the writer kernel (data output)
-        tt_metal::SetRuntimeArgs(
-            program, writer_id, core,             
-            {src0_dram_buffer->address(),  // Address of matrix A in DRAM
-                M, // shape[0]
-                K, // shape[1]
-                stride_AM, // strides[0]
-                1, // strides[1]
-                0, // padding (bool)
-                M, // shape[0] // repeated? 
-                K, // shape[1]
-                stride_AM, // strides[0]
-                1, // strides[1]
-                src1_dram_buffer->address(),  // Address of matrix B in DRAM
-                K, // shape[0]
-                N, // shape[1]
-                stride_BK, // strides[0]
-                1, // strides[1]
-                0, // padding (bool)
-                K, // shape[0]
-                N, // shape[1]
-                stride_BK, // strides[0]
-                1, // strides[1]
-                dst_dram_buffer->address(),
-                M, // shape[0]
-                N, // shape[1]
-                stride_CM, // strides[0]
-                1, // strides[1]
-                0, // padding (bool)
-                K, // shape[0]
-                N, // shape[1]
-                stride_BK, // strides[0]
-                1, // strides[1]
-                M,                           
-                N,                           
-                K,                           
-                work_offset 
-            });  
+                // Set arguments for the writer kernel (data output)
+                tt_metal::SetRuntimeArgs(
+                    program, writer_id, core,             
+                    {src0_dram_buffer->address(),  // Address of matrix A in DRAM
+                        M, // shape[0]
+                        K, // shape[1]
+                        stride_AM, // strides[0]
+                        1, // strides[1]
+                        0, // padding (bool)
+                        M, // shape[0] // repeated? 
+                        K, // shape[1]
+                        stride_AM, // strides[0]
+                        1, // strides[1]
+                        src1_dram_buffer->address(),  // Address of matrix B in DRAM
+                        K, // shape[0]
+                        N, // shape[1]
+                        stride_BK, // strides[0]
+                        1, // strides[1]
+                        0, // padding (bool)
+                        K, // shape[0]
+                        N, // shape[1]
+                        stride_BK, // strides[0]
+                        1, // strides[1]
+                        dst_dram_buffer->address(),
+                        M, // shape[0]
+                        N, // shape[1]
+                        stride_CM, // strides[0]
+                        1, // strides[1]
+                        0, // padding (bool)
+                        K, // shape[0]
+                        N, // shape[1]
+                        stride_BK, // strides[0]
+                        1, // strides[1]
+                        M,                           
+                        N,                           
+                        K,                           
+                        work_offset,
+                        work_offset + work_per_core
+                    });  
 
-        // Set arguments for the compute kernel
-        tt_metal::SetRuntimeArgs(
-            program,
-            compute_kernel_id,
-            core,
-            {src0_dram_buffer->address(),  // Address of matrix A in DRAM
-                M, // shape[0]
-                K, // shape[1]
-                stride_AM, // strides[0]
-                1, // strides[1]
-                0, // padding (bool)
-                M, // shape[0] // repeated? 
-                K, // shape[1]
-                stride_AM, // strides[0]
-                1, // strides[1]
-                src1_dram_buffer->address(),  // Address of matrix B in DRAM
-                K, // shape[0]
-                N, // shape[1]
-                stride_BK, // strides[0]
-                1, // strides[1]
-                0, // padding (bool)
-                K, // shape[0]
-                N, // shape[1]
-                stride_BK, // strides[0]
-                1, // strides[1]
-                dst_dram_buffer->address(),
-                M, // shape[0]
-                N, // shape[1]
-                stride_CM, // strides[0]
-                1, // strides[1]
-                0, // padding (bool)
-                K, // shape[0]
-                N, // shape[1]
-                stride_BK, // strides[0]
-                1, // strides[1]
-                M,                           
-                N,                           
-                K,                           
-                work_offset 
-            });                   
-        work_offset += 1;  // Update offset for next core
+                // Set arguments for the compute kernel
+                tt_metal::SetRuntimeArgs(
+                    program,
+                    compute_kernel_id,
+                    core,
+                    {src0_dram_buffer->address(),  // Address of matrix A in DRAM
+                        M, // shape[0]
+                        K, // shape[1]
+                        stride_AM, // strides[0]
+                        1, // strides[1]
+                        0, // padding (bool)
+                        M, // shape[0] // repeated? 
+                        K, // shape[1]
+                        stride_AM, // strides[0]
+                        1, // strides[1]
+                        src1_dram_buffer->address(),  // Address of matrix B in DRAM
+                        K, // shape[0]
+                        N, // shape[1]
+                        stride_BK, // strides[0]
+                        1, // strides[1]
+                        0, // padding (bool)
+                        K, // shape[0]
+                        N, // shape[1]
+                        stride_BK, // strides[0]
+                        1, // strides[1]
+                        dst_dram_buffer->address(),
+                        M, // shape[0]
+                        N, // shape[1]
+                        stride_CM, // strides[0]
+                        1, // strides[1]
+                        0, // padding (bool)
+                        K, // shape[0]
+                        N, // shape[1]
+                        stride_BK, // strides[0]
+                        1, // strides[1]
+                        M,                           
+                        N,                           
+                        K,                           
+                        work_offset,
+                        work_offset + work_per_core
+                    });                   
+                work_offset += work_per_core;  // Update offset for next core
+            }
+        }
     }
     
     // Launch program & read in output buffer result into the host vector
@@ -404,7 +418,7 @@ std::string slice_to_string(const std::vector<bfloat16>& mat,
     return oss.str();
 }
 
-int main() {
+int main(int argc, char* argv[]) {
     bool pass = true;
 
     try {
@@ -412,14 +426,19 @@ int main() {
         std::shared_ptr<distributed::MeshDevice> mesh_device = distributed::MeshDevice::create_unit_mesh(device_id);
 
         // Create source data with specified matrix dimensions
-        constexpr uint32_t M = 64;  // Number of rows in matrix A (user-defined)
-        constexpr uint32_t N = 32;  // Number of columns in matrix B (user-defined)
-        constexpr uint32_t K = 64;  // Inner dimension for multiplication (user-defined)
-
-        // Ensure that the matrix dimensions are compatible with the tile size
-        static_assert(M % TILE_HEIGHT == 0, "M must be divisible by TILE_HEIGHT");
-        static_assert(N % TILE_WIDTH == 0, "N must be divisible by TILE_WIDTH");
-        static_assert(K % TILE_WIDTH == 0, "K must be divisible by TILE_WIDTH");
+        // Matrix dimensions - use command line args if provided, otherwise use defaults
+        uint32_t M = 256;  // Number of rows in matrix A (default)
+        uint32_t N = 128;  // Number of columns in matrix B (default)
+        uint32_t K = 64;   // Inner dimension for multiplication (default)
+        
+        if (argc >= 4) {
+            M = std::atoi(argv[1]);
+            N = std::atoi(argv[2]);
+            K = std::atoi(argv[3]);
+            fmt::print("Using user-specified dimensions: M={}, N={}, K={}\n", M, N, K);
+        } else {
+            fmt::print("Using default dimensions: M={}, N={}, K={}\n", M, N, K);
+        }
 
         // Calculate matrix dimensions in tiles for the accelerator
         uint32_t Mt = M / TILE_HEIGHT;
