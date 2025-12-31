@@ -1,7 +1,7 @@
 // add_kernel__compute
 #include <cstdint>
 #include "tools/profiler/kernel_profiler.hpp"
-#include "firmware_common.h"
+#include "internal/firmware_common.h"
 #include "llk_defs.h"
 #include "compute_kernel_api/binary_max_min.h"
 #include "compute_kernel_api/common.h"
@@ -35,6 +35,10 @@
 #include "compute_kernel_api/eltwise_unary/relu.h"
 #include "compute_kernel_api/eltwise_unary/binop_with_scalar.h"
 #include "compute_kernel_api/eltwise_unary/where.h"
+inline uint32_t float_to_bits(float f) { uint32_t r; __builtin_memcpy(&r, &f, sizeof(r)); return r; }
+#ifndef INFINITY
+#define INFINITY __builtin_inff()
+#endif
 #define REDUCE_OP PoolType::SUM
 #define REDUCE_DIM ReduceDim::REDUCE_COL
 #include "compute_kernel_api/reduce.h"

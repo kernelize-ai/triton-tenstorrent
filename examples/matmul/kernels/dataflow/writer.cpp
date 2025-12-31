@@ -1,8 +1,8 @@
 // matmul_kernel__writer
 #include <cstdint>
 #include "tools/profiler/kernel_profiler.hpp"
-#include "firmware_common.h"
-#include "dataflow_api.h"
+#include "internal/firmware_common.h"
+#include "api/dataflow/dataflow_api.h"
 void kernel_main() {
   bool v1 = true;
   int32_t v2 = 1;

@@ -1,8 +1,8 @@
 // add_kernel__reader
 #include <cstdint>
 #include "tools/profiler/kernel_profiler.hpp"
-#include "firmware_common.h"
-#include "dataflow_api.h"
+#include "internal/firmware_common.h"
+#include "api/dataflow/dataflow_api.h"
 void kernel_main() {
   int32_t v1 = 1;
   bool v2 = true;
