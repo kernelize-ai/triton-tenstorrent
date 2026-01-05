@@ -122,13 +122,16 @@ void matmul_multi_core(
     auto [num_cores, all_cores, core_group_1, core_group_2, work_per_core1, work_per_core2] =
         split_work_to_cores(core_grid, num_output_tiles_total);
     fmt::print(
-        "Distributing {} output tiles across {} cores: {} cores x {} tiles/core + {} cores x {} tiles/core\n",
+        "Distributing {} output tiles across {} cores: {} cores ({}) x {} tiles/core + {} cores ({}) x {} tiles/core\n",
         num_output_tiles_total,
         num_cores,
         core_group_1.num_cores(),
+        core_group_1.str(),
         work_per_core1,
         core_group_2.num_cores(),
+        core_group_2.str(),
         work_per_core2);
+    fmt::print("All cores: {}\n", all_cores.str());
 
     // Extracting Matrix dimensions from input/output vectors and converting to tile coordinates.
     // The accelerator works with 32x32 tiles, so we need to convert from element dimensions
