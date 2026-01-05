@@ -234,7 +234,7 @@ class CPUBackend(BaseBackend):
         return mod
 
     @staticmethod
-    def make_ttmlir_cpp_file(mod, metadata, options):
+    def make_emitc(mod, metadata, options):
         pm = ir.pass_manager(mod.context)
         pm.enable_debug()
 
@@ -249,9 +249,17 @@ class CPUBackend(BaseBackend):
         cpu.passes.common.add_arith_expand(pm)
         cpu.passes.tenstorrent.add_ttkernel_to_emitc(pm)
         passes.common.add_canonicalizer(pm)
-        cpu.passes.tenstorrent.add_form_expressions_pass(pm)
 
-        pm.run(mod, "make_ttmlir_cpp")
+        pm.run(mod, "make_emit_c")
+        return mod
+
+    @staticmethod
+    def make_ttmlir_cpp_file(mod, metadata, options):
+        pm = ir.pass_manager(mod.context)
+        pm.enable_debug()
+
+        cpu.passes.tenstorrent.add_form_expressions_pass(pm)
+        pm.run(mod, "make_ttmlir_cpp_file")
 
         # find function names
         src = str(mod)
@@ -324,6 +332,7 @@ class CPUBackend(BaseBackend):
             stages["so"] = lambda src, metadata: self.make_library(src, metadata, options)
         elif self.device == 'Tenstorrent':
             stages["ttmlir"] = lambda src, metadata: self.make_tenstorrent_mlir(src, metadata, options)
+            stages["emitc"] = lambda src, metadata: self.make_emitc(src, metadata, options)
             stages["cpp"] = lambda src, metadata: self.make_ttmlir_cpp_file(src, metadata, options)
             stages['so'] = lambda src, metadata: self.make_tenstorrent_binary(src, metadata, options)
 
