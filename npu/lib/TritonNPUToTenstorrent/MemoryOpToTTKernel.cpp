@@ -93,11 +93,9 @@ struct ConvertLoadOp : public OpConversionPattern<triton::LoadOp> {
 
     Value const0 = arith::createConstantI32(loc, rewriter, 0);
 
-    auto loadType = cast<RankedTensorType>(op.getType());
+    llvm::errs() << "cb type = " << cb.getType() << "\n";
     // determine how many tiles we need to load by converting the shape to tiles
-    const int32_t numTiles =
-        std::accumulate(loadType.getShape().begin(), loadType.getShape().end(),
-                        1, [](unsigned a, unsigned b) { return a * (b / 32); });
+    const int32_t numTiles = cast<ttkernel::CBType>(cb.getType()).getNumTiles();
     Value numPages = arith::createConstantI32(loc, rewriter, numTiles);
     ttkernel::CBReserveBackOp::create(rewriter, loc, cb, numPages);
 
@@ -184,9 +182,7 @@ struct ConvertStoreOp : public OpConversionPattern<triton::StoreOp> {
 
     auto storeType = cast<RankedTensorType>(op.getValue().getType());
     // determine how many tiles we need to load by converting the shape to tiles
-    const int32_t numTiles = std::accumulate(
-        storeType.getShape().begin(), storeType.getShape().end(), 1,
-        [](unsigned a, unsigned b) { return a * (b / 32); });
+    const int32_t numTiles = cast<ttkernel::CBType>(cb.getType()).getNumTiles();
     Value numPages = arith::createConstantI32(loc, rewriter, numTiles);
 
     Value l1Addr = ttkernel::GetReadPtrOp::create(rewriter, loc, cb);
