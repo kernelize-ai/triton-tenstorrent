@@ -125,6 +125,7 @@ struct ConvertDotOp : public OpConversionPattern<triton::DotOp> {
           rewriter, loc, arith::createConstantI32(loc, rewriter, i), dst,
           arith::createConstantI32(loc, rewriter, i));
     }
+    ttkernel::CBPushBackOp::create(rewriter, loc, dst, numPages);
 #else
     // using the loop carried dest counter but really this should be the same as
     // the number of output tiles. do we need it? can we just use a constant
@@ -144,8 +145,12 @@ struct ConvertDotOp : public OpConversionPattern<triton::DotOp> {
 #endif
 #endif
 
-    ttkernel::CBPopFrontOp::create(rewriter, loc, adaptor.getA(), aNumTilesVal);
-    ttkernel::CBPopFrontOp::create(rewriter, loc, adaptor.getB(), bNumTilesVal);
+    ttkernel::CBPopFrontOp::create(
+        rewriter, loc, adaptor.getA(),
+        arith::createConstantI32(loc, rewriter, aCBType.getNumTiles()));
+    ttkernel::CBPopFrontOp::create(
+        rewriter, loc, adaptor.getB(),
+        arith::createConstantI32(loc, rewriter, bCBType.getNumTiles()));
 
     // foward the dot op c operand to the users of the dot op
     rewriter.replaceOp(op, adaptor.getC());

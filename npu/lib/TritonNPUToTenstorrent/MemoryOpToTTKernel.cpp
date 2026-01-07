@@ -188,7 +188,6 @@ struct ConvertStoreOp : public OpConversionPattern<triton::StoreOp> {
         storeType.getShape().begin(), storeType.getShape().end(), 1,
         [](unsigned a, unsigned b) { return a * (b / 32); });
     Value numPages = arith::createConstantI32(loc, rewriter, numTiles);
-    ttkernel::CBReserveBackOp::create(rewriter, loc, cb, numPages);
 
     Value l1Addr = ttkernel::GetReadPtrOp::create(rewriter, loc, cb);
 
@@ -244,7 +243,9 @@ struct ConvertLocalStoreOp : public OpConversionPattern<gpu::LocalStoreOp> {
         arith::createConstantI32(loc, rewriter, dstCBType.getNumTiles());
 
     auto srcOp = op.getSrc().getDefiningOp();
-    if (false && !isa<triton::LoadOp>(srcOp)) {
+    if (!isa<triton::LoadOp>(srcOp)) {
+      // just delete the op and return
+#if 0
       // reserve back the cb for pack tile
       ttkernel::CBReserveBackOp::create(rewriter, loc, dst, numPages);
 
@@ -258,12 +259,13 @@ struct ConvertLocalStoreOp : public OpConversionPattern<gpu::LocalStoreOp> {
                                      packTileLoop.getInductionVar(), dst,
                                      packTileLoop.getInductionVar());
       }
-
+#endif
       rewriter.eraseOp(op);
       return success();
     }
 
-    ttkernel::CBPushBackOp::create(rewriter, loc, dst, numPages);
+    // disabled this since it is happening too late with changes to load/dot
+    // lowering ttkernel::CBPushBackOp::create(rewriter, loc, dst, numPages);
     rewriter.eraseOp(op);
 
     return success();
