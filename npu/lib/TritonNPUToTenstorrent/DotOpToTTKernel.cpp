@@ -95,8 +95,9 @@ struct ConvertDotOp : public OpConversionPattern<triton::DotOp> {
       rewriter.setInsertionPointAfter(bLoop);
       scf::YieldOp::create(rewriter, loc, bLoop.getResult(0));
     }
-
     rewriter.setInsertionPointAfter(aLoop);
+
+#if 0
 #if 1
     Value dst;
     {
@@ -143,6 +144,8 @@ struct ConvertDotOp : public OpConversionPattern<triton::DotOp> {
     }
     rewriter.setInsertionPointAfter(packTileLoop);
 #endif
+#endif
+
 #endif
 
     ttkernel::CBPopFrontOp::create(

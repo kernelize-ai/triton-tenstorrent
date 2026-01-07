@@ -245,10 +245,18 @@ struct ConvertLocalStoreOp : public OpConversionPattern<gpu::LocalStoreOp> {
     auto srcOp = op.getSrc().getDefiningOp();
     if (!isa<triton::LoadOp>(srcOp)) {
       // just delete the op and return
-#if 0
+#if 1
       // reserve back the cb for pack tile
       ttkernel::CBReserveBackOp::create(rewriter, loc, dst, numPages);
 
+#if 1
+      for (unsigned i = 0; i < dstCBType.getNumTiles(); ++i) {
+        ttkernel::PackTileOp::create(
+            rewriter, loc, arith::createConstantI32(loc, rewriter, i), dst,
+            arith::createConstantI32(loc, rewriter, i));
+      }
+      ttkernel::CBPushBackOp::create(rewriter, loc, dst, numPages);
+#else
       // Pack the tile into the cb
       scf::ForOp packTileLoop = scf::ForOp::create(
           rewriter, loc, arith::createConstantI32(loc, rewriter, 0), numPages,
@@ -260,12 +268,14 @@ struct ConvertLocalStoreOp : public OpConversionPattern<gpu::LocalStoreOp> {
                                      packTileLoop.getInductionVar());
       }
 #endif
+#endif
       rewriter.eraseOp(op);
       return success();
     }
 
     // disabled this since it is happening too late with changes to load/dot
-    // lowering ttkernel::CBPushBackOp::create(rewriter, loc, dst, numPages);
+    // lowering
+    // ttkernel::CBPushBackOp::create(rewriter, loc, dst, numPages);
     rewriter.eraseOp(op);
 
     return success();

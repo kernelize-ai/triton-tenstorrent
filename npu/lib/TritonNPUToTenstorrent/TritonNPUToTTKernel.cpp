@@ -105,7 +105,7 @@ public:
       ttkernel::TileRegsAcquireOp::create(builder,
                                           copyTileInitOps.front().getLoc());
     } else {
-#if 1
+#if 0
       SmallVector<ttkernel::CBWaitFrontOp, 4> cbWaitFrontOps;
       funcOp.walk(
           [&](ttkernel::CBWaitFrontOp op) { cbWaitFrontOps.push_back(op); });
