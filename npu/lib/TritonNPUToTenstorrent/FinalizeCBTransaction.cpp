@@ -41,9 +41,12 @@ struct TTKernelCBPopInputs : public OpRewritePattern<ttkernel::CBWaitFrontOp> {
     auto matmulOpItr = block->getOps<ttkernel::MatmulTilesOp>().begin();
     if (matmulOpItr != block->getOps<ttkernel::MatmulTilesOp>().end()) {
       // can there be more than one?
+#if 0
+      // TODO: handle at dotop site
       rewriter.setInsertionPointAfter(*matmulOpItr);
       ttkernel::CBPopFrontOp::create(rewriter, op.getLoc(), op.getCb(),
                                      op.getNumPages());
+#endif
     } else {
 
       auto packTileOpItr = block->getOps<ttkernel::PackTileOp>().begin();
