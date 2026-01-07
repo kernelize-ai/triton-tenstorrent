@@ -210,6 +210,25 @@ private:
   const bool addMMInit;
 };
 
+inline SmallVector<int64_t, 2>
+convertShapeToTileShape(ArrayRef<int64_t> shape) {
+  if (shape.size() == 1) {
+    return SmallVector<int64_t, 2>{shape[0] / (32 * 32)};
+  }
+  SmallVector<int64_t, 2> tileShape;
+  tileShape.reserve(shape.size());
+  for (unsigned i = 0; i < shape.size(); ++i) {
+    if (shape[i] == 1) {
+      tileShape.push_back(1);
+      continue;
+    }
+    assert(shape[i] % 32 == 0 &&
+           "expecting shape dimensions to be multiple of 32");
+    tileShape.push_back(shape[i] / 32);
+  }
+  return tileShape;
+}
+
 } // namespace
 
 struct ConvertTritonNPUToTTKernelPass
@@ -223,23 +242,7 @@ struct ConvertTritonNPUToTTKernelPass
     typeConverter.addConversion([](Type type) { return type; });
     typeConverter.addConversion([](gpu::MemDescType memdesc) {
       // convert memdesc to memref
-      auto convertShapeToTileShape = [](gpu::MemDescType type) {
-        const auto &shape = type.getShape();
-        SmallVector<int64_t, 4> tileShape;
-        tileShape.reserve(shape.size());
-        for (unsigned i = 0; i < shape.size(); ++i) {
-          // TODO: support shape sizes < 32 by clamping to 1?
-          if (shape[i] == 1) {
-            tileShape.push_back(1);
-            continue;
-          }
-          assert(shape[i] % 32 == 0 &&
-                 "expecting shape dimensions to be multiple of 32");
-          tileShape.push_back(shape[i] / 32);
-        }
-        return tileShape;
-      };
-      auto shape = convertShapeToTileShape(memdesc);
+      auto shape = convertShapeToTileShape(memdesc.getShape());
       auto ttcoreTileType = ttcore::TileType::get(
           memdesc.getContext(), ttcore::TileType::getDefaultShape(),
           ttcore::elementTypeToDataType(memdesc.getElementType()));
@@ -251,28 +254,12 @@ struct ConvertTritonNPUToTTKernelPass
       return ttkernel::CBType::get(cbMemRefType);
     });
     typeConverter.addConversion([](RankedTensorType type) -> Type {
-      auto convertShapeToTileShape = [](RankedTensorType type) {
-        const auto &shape = type.getShape();
-        SmallVector<int64_t, 4> tileShape;
-        tileShape.reserve(shape.size());
-        for (unsigned i = 0; i < shape.size(); ++i) {
-          // TODO: support shape sizes < 32 by clamping to 1?
-          if (shape[i] == 1) {
-            tileShape.push_back(1);
-            continue;
-          }
-          assert(shape[i] % 32 == 0 &&
-                 "expecting shape dimensions to be multiple of 32");
-          tileShape.push_back(shape[i] / 32);
-        }
-        return tileShape;
-      };
       auto etype = type.getElementType();
       if (isa<triton::PointerType>(etype)) {
         return IntegerType::get(type.getContext(), 32);
       }
       if (isa<npu::tt::TileEncodingAttr>(type.getEncoding())) {
-        auto shape = convertShapeToTileShape(type);
+        auto shape = convertShapeToTileShape(type.getShape());
         auto ttcoreTileType = ttcore::TileType::get(
             type.getContext(), ttcore::TileType::getDefaultShape(),
             ttcore::elementTypeToDataType(etype));
@@ -288,7 +275,7 @@ struct ConvertTritonNPUToTTKernelPass
         // dot operands read directly from cbs, so convert to cb type
         assert(type.getShape().size() == 2 &&
                "expecting rank 2 tensor for dot operand");
-        auto shape = convertShapeToTileShape(type);
+        auto shape = convertShapeToTileShape(type.getShape());
         auto ttcoreTileType = ttcore::TileType::get(
             type.getContext(), ttcore::TileType::getDefaultShape(),
             ttcore::elementTypeToDataType(etype));

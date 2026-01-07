@@ -250,10 +250,19 @@ struct ConvertLocalStoreOp : public OpConversionPattern<gpu::LocalStoreOp> {
       ttkernel::CBReserveBackOp::create(rewriter, loc, dst, numPages);
 
 #if 1
-      for (unsigned i = 0; i < dstCBType.getNumTiles(); ++i) {
+      auto srcType = cast<RankedTensorType>(op.getSrc().getType());
+      unsigned destIndexOffset = 0;
+      if (auto tileEncodingAttr =
+              dyn_cast<npu::tt::TileEncodingAttr>(srcType.getEncoding())) {
+        destIndexOffset = tileEncodingAttr.getIndex();
+      }
+
+      for (unsigned i = destIndexOffset;
+           i < destIndexOffset + dstCBType.getNumTiles(); ++i) {
+        // assume the output CB is always 0-indexed
         ttkernel::PackTileOp::create(
             rewriter, loc, arith::createConstantI32(loc, rewriter, i), dst,
-            arith::createConstantI32(loc, rewriter, i));
+            arith::createConstantI32(loc, rewriter, i - destIndexOffset));
       }
       ttkernel::CBPushBackOp::create(rewriter, loc, dst, numPages);
 #else
