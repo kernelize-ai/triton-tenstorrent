@@ -280,6 +280,8 @@ struct ConvertLocalLoadOp : public OpConversionPattern<gpu::LocalLoadOp> {
 
     auto src = adaptor.getSrc();
     auto srcType = cast<ttkernel::CBType>(src.getType());
+    Value numPages =
+        arith::createConstantI32(loc, rewriter, srcType.getNumTiles());
 
     LDBG("Converted load src type = " << src.getType() << "\n");
     assert(isa<ttkernel::CBType>(src.getType()) &&
@@ -293,8 +295,7 @@ struct ConvertLocalLoadOp : public OpConversionPattern<gpu::LocalLoadOp> {
     if (!hasDotUser) {
       // Dot ops read directly from cbs and handle their own waits
       // TODO: consider verifying that all users are dot ops?
-      Value numPages =
-          arith::createConstantI32(loc, rewriter, srcType.getNumTiles());
+      // TODO: could we sink this into last block (3. copy data...)?
       auto waitFrontOp =
           ttkernel::CBWaitFrontOp::create(rewriter, loc, src, numPages);
     }
@@ -325,6 +326,7 @@ struct ConvertLocalLoadOp : public OpConversionPattern<gpu::LocalLoadOp> {
     Value destRegisterIndex =
         arith::createIndexConstant(loc, rewriter, loadEncoding.getIndex());
     ttkernel::CopyTileOp::create(rewriter, loc, src, c0, destRegisterIndex);
+    ttkernel::CBPopFrontOp::create(rewriter, loc, src, numPages);
     rewriter.replaceOp(op, src);
     return success();
   }
