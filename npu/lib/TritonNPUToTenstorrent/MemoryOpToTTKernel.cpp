@@ -241,11 +241,10 @@ struct ConvertLocalStoreOp : public OpConversionPattern<gpu::LocalStoreOp> {
     auto srcOp = op.getSrc().getDefiningOp();
     if (!isa<triton::LoadOp>(srcOp)) {
       // just delete the op and return
-#if 1
+
       // reserve back the cb for pack tile
       ttkernel::CBReserveBackOp::create(rewriter, loc, dst, numPages);
 
-#if 1
       auto srcType = cast<RankedTensorType>(op.getSrc().getType());
       unsigned destIndexOffset = 0;
       if (auto tileEncodingAttr =
@@ -268,19 +267,6 @@ struct ConvertLocalStoreOp : public OpConversionPattern<gpu::LocalStoreOp> {
       ttkernel::TileRegsReleaseOp::create(rewriter, loc);
 
       ttkernel::CBPushBackOp::create(rewriter, loc, dst, numPages);
-#else
-      // Pack the tile into the cb
-      scf::ForOp packTileLoop = scf::ForOp::create(
-          rewriter, loc, arith::createConstantI32(loc, rewriter, 0), numPages,
-          arith::createConstantI32(loc, rewriter, 1), ValueRange{});
-      rewriter.setInsertionPointToStart(packTileLoop.getBody());
-      {
-        ttkernel::PackTileOp::create(rewriter, loc,
-                                     packTileLoop.getInductionVar(), dst,
-                                     packTileLoop.getInductionVar());
-      }
-#endif
-#endif
       rewriter.eraseOp(op);
       return success();
     }

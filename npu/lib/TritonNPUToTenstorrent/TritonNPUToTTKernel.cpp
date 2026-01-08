@@ -105,24 +105,6 @@ public:
       ttkernel::TileRegsAcquireOp::create(builder,
                                           copyTileInitOps.front().getLoc());
     } else {
-#if 0
-      SmallVector<ttkernel::CBWaitFrontOp, 4> cbWaitFrontOps;
-      funcOp.walk(
-          [&](ttkernel::CBWaitFrontOp op) { cbWaitFrontOps.push_back(op); });
-      assert(!cbWaitFrontOps.empty() &&
-             "expecting at least one cb wait front op");
-      auto firstWaitFrontOp = cbWaitFrontOps.front();
-      Block *parentBlock = firstWaitFrontOp->getBlock();
-      OpBuilder builder(parentBlock, parentBlock->begin());
-      // put the tile regs acquire ops after any get arg val ops. This seems to
-      // be mostly cosmetic.
-      auto getArgValOpItr = parentBlock->getOps<ttkernel::GetArgValOp>();
-      if (!getArgValOpItr.empty()) {
-        auto argValOps = llvm::reverse(getArgValOpItr);
-        builder.setInsertionPointAfter(*argValOps.begin());
-      }
-      ttkernel::TileRegsAcquireOp::create(builder, firstWaitFrontOp->getLoc());
-#else
       SmallVector<ttkernel::PackTileOp, 4> packTileOps;
       funcOp.walk([&](ttkernel::PackTileOp op) { packTileOps.push_back(op); });
       assert(!packTileOps.empty() && "expecting at least one pack tile op");
@@ -137,7 +119,6 @@ public:
         builder.setInsertionPointAfter(*argValOps.begin());
       }
       ttkernel::TileRegsAcquireOp::create(builder, firstPackTileOp->getLoc());
-#endif
     }
   }
 
