@@ -133,8 +133,10 @@ class CPULauncher(object):
         launch_enter_hook = args[2]
         launch_exit_hook = args[3]
 
+        print(f"Driver: 0")
         schedule = self.device.create_schedule()
         command = schedule.create_command(function)
+        print(f"Driver: 1")
         import torch
         ## TODO: Get CB depth from TuningConfig
         cb_depth = 1
@@ -153,10 +155,13 @@ class CPULauncher(object):
                 buffers.append(arg)
             command.set_arg(idx, arg)
             idx += 1
+        print(f"Driver: 2")
         command.finalize([gridX, gridY, gridZ], [num_warps, 1, 1], shared_memory)
         if launch_enter_hook is not None:
             launch_enter_hook(launch_metadata)
+        print(f"Driver: 3")
         schedule.run()
+        print(f"Driver: 4")
         if launch_exit_hook is not None:
             launch_exit_hook(launch_metadata)
 
@@ -220,6 +225,7 @@ class CPUDriver(DriverBase):
 
     @staticmethod
     def is_active():
+        return True
         try:
             return bool(CPUDriver.get_device())
         except ImportError:
@@ -251,7 +257,7 @@ class CPUDriver(DriverBase):
     def get_current_target(self):
         capability = "cpu"
         warp_size = 1
-        return GPUTarget("tt-metal", capability, warp_size)
+        return GPUTarget("tenstorrent", capability, warp_size)
 
     def get_active_torch_device(self):
         import torch

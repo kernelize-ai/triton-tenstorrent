@@ -27,7 +27,7 @@ class CPUOptions:
     debug: bool = False
     arch: str = None
     enable_fp_fusion: bool = True
-    backend_name: str = 'tt-metal'
+    backend_name: str = 'tenstorrent'
     sanitize_overflow: bool = True
     instrumentation_mode: str = ""
     allowed_dot_input_precisions: Tuple[str] = ("ieee", )
@@ -46,10 +46,10 @@ class CPUBackend(BaseBackend):
 
     @staticmethod
     def supports_target(target: GPUTarget):
-        return target.backend == "tt-metal"
+        return target.backend == "tenstorrent"
 
     def get_target_name(self, options) -> str:
-        return "tt-metal"
+        return "tenstorrent"
 
     def __init__(self, target: GPUTarget) -> None:
         super().__init__(target)
@@ -99,6 +99,7 @@ class CPUBackend(BaseBackend):
 
     @staticmethod
     def make_ttir(mod, metadata, options):
+        print(f"make_ttir: 0")
         pm = ir.pass_manager(mod.context)
         pm.enable_debug()
         passes.common.add_inliner(pm)
