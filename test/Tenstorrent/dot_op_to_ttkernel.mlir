@@ -25,24 +25,20 @@ module attributes {"ttg.num-ctas" = 1 : i32, "ttg.num-warps" = 1 : i32, ttg.targ
 
     // CHECK-DAG: %[[c0:.*]] = arith.constant 0 : index
     // CHECK-DAG: %[[c1:.*]] = arith.constant 1 : index
-    // CHECK-DAG: %[[c2:.*]] = arith.constant 2 : index
     // CHECK-DAG: %[[c3:.*]] = arith.constant 3 : index
     // CHECK-DAG: %[[c4:.*]] = arith.constant 4 : index
     // CHECK-DAG: %[[c5:.*]] = arith.constant 5 : index
     // CHECK-DAG: %[[c6:.*]] = arith.constant 6 : index
     // CHECK-DAG: %[[c7:.*]] = arith.constant 7 : index
-    // CHECK-DAG: %[[c8:.*]] = arith.constant 8 : index
     // CHECK-DAG: %[[c9:.*]] = arith.constant 9 : index
 
     // CHECK-DAG: %[[A_PTR:.*]] = ttkernel.get_arg_val(%[[c0]])
     // CHECK-DAG: %[[B_PTR:.*]] = ttkernel.get_arg_val(%[[c1]])
-    // CHECK-DAG: %[[C_PTR:.*]] = ttkernel.get_arg_val(%[[c2]])
     // CHECK-DAG: %[[M_SIZE:.*]] = ttkernel.get_arg_val(%[[c3]])
     // CHECK-DAG: %[[N_SIZE:.*]] = ttkernel.get_arg_val(%[[c4]])
     // CHECK-DAG: %[[K_SIZE:.*]] = ttkernel.get_arg_val(%[[c5]])
     // CHECK-DAG: %[[A_BLOCK_STRIDE_M:.*]] = ttkernel.get_arg_val(%[[c6]])
     // CHECK-DAG: %[[B_BLOCK_STRIDE_K:.*]] = ttkernel.get_arg_val(%[[c7]])
-    // CHECK-DAG: %[[C_BLOCK_STRIDE_M:.*]] = ttkernel.get_arg_val(%[[c8]])
     // CHECK-DAG: %[[BLOCK_INDEX:.*]] = ttkernel.get_arg_val(%[[c9]])
 
     // CHECK-DAG: %[[B_CB:.*]] = ttkernel.get_compile_time_arg_val(1)
@@ -216,32 +212,15 @@ module attributes {"ttg.num-ctas" = 1 : i32, "ttg.num-warps" = 1 : i32, ttg.targ
         // CHECK-DAG: %[[c32_i32:.*]] = arith.constant 32 : i32
 
         // CHECK-DAG: %[[c0:.*]] = arith.constant 0 : index
-        // CHECK-DAG: %[[c1:.*]] = arith.constant 1 : index
-        // CHECK-DAG: %[[c2:.*]] = arith.constant 2 : index
-        // CHECK-DAG: %[[c3:.*]] = arith.constant 3 : index
-        // CHECK-DAG: %[[c4:.*]] = arith.constant 4 : index
         // CHECK-DAG: %[[c5:.*]] = arith.constant 5 : index
-        // CHECK-DAG: %[[c6:.*]] = arith.constant 6 : index
-        // CHECK-DAG: %[[c7:.*]] = arith.constant 7 : index
-        // CHECK-DAG: %[[c8:.*]] = arith.constant 8 : index
-        // CHECK-DAG: %[[c9:.*]] = arith.constant 9 : index
 
-        // CHECK-DAG: %[[A_PTR:.*]] = ttkernel.get_arg_val(%[[c0]])
-        // CHECK-DAG: %[[B_PTR:.*]] = ttkernel.get_arg_val(%[[c1]])
-        // CHECK-DAG: %[[C_PTR:.*]] = ttkernel.get_arg_val(%[[c2]])
-        // CHECK-DAG: %[[M_SIZE:.*]] = ttkernel.get_arg_val(%[[c3]])
-        // CHECK-DAG: %[[N_SIZE:.*]] = ttkernel.get_arg_val(%[[c4]])
         // CHECK-DAG: %[[K_SIZE:.*]] = ttkernel.get_arg_val(%[[c5]])
-        // CHECK-DAG: %[[A_BLOCK_STRIDE_M:.*]] = ttkernel.get_arg_val(%[[c6]])
-        // CHECK-DAG: %[[B_BLOCK_STRIDE_K:.*]] = ttkernel.get_arg_val(%[[c7]])
-        // CHECK-DAG: %[[C_BLOCK_STRIDE_M:.*]] = ttkernel.get_arg_val(%[[c8]])
 
         // CHECK-DAG: %[[A_CB:.*]] = ttkernel.get_compile_time_arg_val(0)
         // CHECK-DAG: %[[B_CB:.*]] = ttkernel.get_compile_time_arg_val(1)
         // CHECK-DAG: %[[C_CB:.*]] = ttkernel.get_compile_time_arg_val(2)
 
         // CHECK: ttkernel.mm_init(%[[A_CB]], %[[B_CB]], %[[C_CB]], %[[c0_i32]])
-        // CHECK-DAG: %[[BLOCK_INDEX:.*]] = ttkernel.get_arg_val(%[[c9]])
         %0 = ttg.local_alloc {alloc_idx = 2 : i32} : () -> !ttg.memdesc<32x32xf16, #shared, #smem, mutable>
         %b = ttg.local_alloc {alloc_idx = 1 : i32} : () -> !ttg.memdesc<32x32xf16, #shared, #smem, mutable>
         %a = ttg.local_alloc {alloc_idx = 0 : i32} : () -> !ttg.memdesc<32x32xf16, #shared, #smem, mutable>
@@ -320,26 +299,15 @@ tt.func public @matmul_kernel__writer(%a_ptr: !tt.ptr<f16> {tt.divisibility = 8 
     // CHECK-DAG: %[[c64_i32:.*]] = arith.constant 64 : i32
     // CHECK-DAG: %[[c_true:.*]] = arith.constant true
 
-    // CHECK-DAG: %[[c0:.*]] = arith.constant 0 : index
-    // CHECK-DAG: %[[c1:.*]] = arith.constant 1 : index
+
     // CHECK-DAG: %[[c2:.*]] = arith.constant 2 : index
     // CHECK-DAG: %[[c3:.*]] = arith.constant 3 : index
     // CHECK-DAG: %[[c4:.*]] = arith.constant 4 : index
-    // CHECK-DAG: %[[c5:.*]] = arith.constant 5 : index
-    // CHECK-DAG: %[[c6:.*]] = arith.constant 6 : index
-    // CHECK-DAG: %[[c7:.*]] = arith.constant 7 : index
-    // CHECK-DAG: %[[c8:.*]] = arith.constant 8 : index
     // CHECK-DAG: %[[c9:.*]] = arith.constant 9 : index
 
-    // CHECK-DAG: %[[A_PTR:.*]] = ttkernel.get_arg_val(%[[c0]])
-    // CHECK-DAG: %[[B_PTR:.*]] = ttkernel.get_arg_val(%[[c1]])
     // CHECK-DAG: %[[C_PTR:.*]] = ttkernel.get_arg_val(%[[c2]])
     // CHECK-DAG: %[[M_SIZE:.*]] = ttkernel.get_arg_val(%[[c3]])
     // CHECK-DAG: %[[N_SIZE:.*]] = ttkernel.get_arg_val(%[[c4]])
-    // CHECK-DAG: %[[K_SIZE:.*]] = ttkernel.get_arg_val(%[[c5]])
-    // CHECK-DAG: %[[A_BLOCK_STRIDE_M:.*]] = ttkernel.get_arg_val(%[[c6]])
-    // CHECK-DAG: %[[B_BLOCK_STRIDE_K:.*]] = ttkernel.get_arg_val(%[[c7]])
-    // CHECK-DAG: %[[C_BLOCK_STRIDE_M:.*]] = ttkernel.get_arg_val(%[[c8]])
 
     %0 = ttg.local_alloc {alloc_idx = 2 : i32} : () -> !ttg.memdesc<32x32xf16, #shared, #smem, mutable>
     // CHECK-DAG: %[[C_CB:.*]] = ttkernel.get_compile_time_arg_val(2)

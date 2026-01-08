@@ -14,7 +14,6 @@ module attributes {"ttg.num-ctas" = 1 : i32, "ttg.num-warps" = 1 : i32, ttg.targ
     // CHECK-DAG: %[[c0_index:.*]] = arith.constant 0 : index
     // CHECK-DAG: %[[c1_index:.*]] = arith.constant 1 : index
     // CHECK-DAG: %[[c2_index:.*]] = arith.constant 2 : index
-    // CHECK-DAG: %[[c3_index:.*]] = arith.constant 3 : index
 
     // CHECK-DAG: %[[X:.*]] = ttkernel.get_compile_time_arg_val(0)
     // CHECK-DAG: %[[Y:.*]] = ttkernel.get_compile_time_arg_val(1)
@@ -68,8 +67,6 @@ module attributes {"ttg.num-ctas" = 1 : i32, "ttg.num-warps" = 1 : i32, ttg.targ
 
     // CHECK-DAG: %[[c0_index:.*]] = arith.constant 0 : index
     // CHECK-DAG: %[[c1_index:.*]] = arith.constant 1 : index
-    // CHECK-DAG: %[[c2_index:.*]] = arith.constant 2 : index
-    // CHECK-DAG: %[[c3_index:.*]] = arith.constant 3 : index
     // CHECK-DAG: %[[c4_index:.*]] = arith.constant 4 : index
 
     // CHECK-DAG: %[[X_PTR:.*]] = ttkernel.get_arg_val(%[[c0_index]])
@@ -142,10 +139,7 @@ module attributes {"ttg.num-ctas" = 1 : i32, "ttg.num-warps" = 1 : i32, ttg.targ
 
     // CHECK-DAG: %[[true:.*]] = arith.constant true
 
-    // CHECK-DAG: %[[c0_index:.*]] = arith.constant 0 : index
-    // CHECK-DAG: %[[c1_index:.*]] = arith.constant 1 : index
     // CHECK-DAG: %[[c2_index:.*]] = arith.constant 2 : index
-    // CHECK-DAG: %[[c3_index:.*]] = arith.constant 3 : index
     // CHECK-DAG: %[[c4_index:.*]] = arith.constant 4 : index
 
     // CHECK-DAG: %[[OUTPUT_PTR:.*]] = ttkernel.get_arg_val(%[[c2_index]])
