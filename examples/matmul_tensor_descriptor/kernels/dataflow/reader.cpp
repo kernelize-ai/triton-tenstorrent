@@ -69,14 +69,39 @@ void kernel_main() {
       int32_t v43;
       v42 = v41;
       v43 = (int32_t) ((uint32_t) ((int32_t) ((uint32_t) ((int32_t) ((uint32_t) ((int32_t) ((uint32_t) ((int32_t) ((uint32_t) ((int32_t) ((uint32_t) v33 * (uint32_t) (v13 != (int32_t) ((uint32_t) (v13 / v4) * (uint32_t) v4) & v13 < v3 == v1 ? (int32_t) ((uint32_t) (v13 / v4) + (uint32_t) v6) : v13 / v4))) + (uint32_t) ((int32_t) ((uint32_t) ((i28 % v27) / v30) * (uint32_t) v4) / v4))) * (uint32_t) 4096)) + (uint32_t) ((int32_t) ((uint32_t) ((int32_t) ((uint32_t) v34 * (uint32_t) v4)) + (uint32_t) ((int32_t) ((uint32_t) ((int32_t) ((uint32_t) ((i28 % v27) / v30) * (uint32_t) v4)) % (uint32_t) v4)))))) * (uint32_t) v8)) / (uint32_t) v18);
+      int32_t tiles_per_row_B = (v13 + 31) / 32;   // N in elements, 32 elements per tile col
+#if 1
+      uint32_t pid_n = (i28 % v27) / v30;
+
+      uint32_t N = v15;
+      uint32_t Nt_tiles = N / 32;        // since you assert multiples of 32
+      uint32_t BNt = 64 / 32;            // 2 (block N in tiles)
+      uint32_t BKt = 64 / 32;            // 2 (block K in tiles)
+
+      uint32_t n0 = pid_n * BNt;         // pid_n is your block column id
+      uint32_t k_iter = j31;
+      uint32_t k0 = k_iter * BKt;        // k_iter is your 64-wide K block id
+
+      int32_t dst = v42;
+      for (uint32_t r = 0; r < BKt; r++) {
+        for (uint32_t c = 0; c < BNt; c++) {
+        
+        uint32_t tileIndex = (k0 + r) * Nt_tiles + (n0 + c);
+        noc_async_read(v20.get_noc_addr(tileIndex, 0), dst, v18);
+        dst += v18;
+        }
+      }
+#else
       for (int32_t k44 = v3; k44 < v9; k44 += v6) {
         int32_t v45 = v42;
         int32_t v46 = v43;
+        DPRINT << "Reading tile k44=" << k44 << " to L1 addr " << v45 << " from tile id " << v46 << "\n";
         uint64_t temp_405 = v20.get_noc_addr(v46, v3);
         noc_async_read(temp_405, v45, v18);
         v42 = (int32_t) ((uint32_t) v45 + (uint32_t) v18);
         v43 = (int32_t) ((uint32_t) v46 + (uint32_t) v6);
       }
+#endif
       {
       DeviceZoneScopedN("noc_async_read_barrier");
       noc_async_read_barrier();
