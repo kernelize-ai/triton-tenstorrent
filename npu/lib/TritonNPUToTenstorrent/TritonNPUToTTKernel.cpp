@@ -348,7 +348,6 @@ struct ConvertTritonNPUToTTKernelPass
         return;
 
       InitializationHelper initHelper(funcOp);
-      // TODO: re-enable (or delete?)
       initHelper.insertTileRegsAcquireOps();
       initHelper.insertComputeInitializationOps();
     });
