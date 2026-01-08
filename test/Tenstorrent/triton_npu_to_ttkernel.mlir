@@ -30,10 +30,12 @@ module attributes {"ttg.num-ctas" = 1 : i32, "ttg.num-warps" = 1 : i32, ttg.targ
 
     // CHECK: ttkernel.copy_tile_init(%[[X]])
     // CHECK: ttkernel.copy_tile(%[[X]], %[[c0_index]], %[[c0_index]])
+    // CHECK: ttkernel.cb_pop_front(%[[X]], %[[c1_i32]])
 
     // CHECK-DAG: ttkernel.cb_wait_front(%[[Y]], %[[c1_i32]])
     // CHECK: ttkernel.copy_tile_init(%[[Y]])
     // CHECK: ttkernel.copy_tile(%[[Y]], %[[c0_index]], %[[c1_index]])
+    // CHECK: ttkernel.cb_pop_front(%[[Y]], %[[c1_i32]])
 
     // CHECK: ttkernel.add_binary_tile_init()
     // CHECK: ttkernel.add_binary_tile(%[[c0_index]], %[[c1_index]], %[[c2_index]])
