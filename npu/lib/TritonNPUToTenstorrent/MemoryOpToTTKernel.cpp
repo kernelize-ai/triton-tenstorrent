@@ -253,6 +253,10 @@ struct ConvertLocalStoreOp : public OpConversionPattern<gpu::LocalStoreOp> {
         destIndexOffset = tileEncodingAttr.getIndex();
       }
 
+      // commit and wait before packing tiles
+      ttkernel::TileRegsCommitOp::create(rewriter, loc);
+      ttkernel::TileRegsWaitOp::create(rewriter, loc);
+
       for (unsigned i = destIndexOffset;
            i < destIndexOffset + dstCBType.getNumTiles(); ++i) {
         // assume the output CB is always 0-indexed
@@ -260,6 +264,9 @@ struct ConvertLocalStoreOp : public OpConversionPattern<gpu::LocalStoreOp> {
             rewriter, loc, arith::createConstantI32(loc, rewriter, i), dst,
             arith::createConstantI32(loc, rewriter, i - destIndexOffset));
       }
+
+      ttkernel::TileRegsReleaseOp::create(rewriter, loc);
+
       ttkernel::CBPushBackOp::create(rewriter, loc, dst, numPages);
 #else
       // Pack the tile into the cb
