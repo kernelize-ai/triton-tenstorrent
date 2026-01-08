@@ -296,6 +296,7 @@ struct ConvertLocalLoadOp : public OpConversionPattern<gpu::LocalLoadOp> {
     Location loc = op.getLoc();
 
     auto src = adaptor.getSrc();
+    auto srcType = cast<ttkernel::CBType>(src.getType());
 
     LDBG("Converted load src type = " << src.getType() << "\n");
     assert(isa<ttkernel::CBType>(src.getType()) &&
@@ -309,7 +310,8 @@ struct ConvertLocalLoadOp : public OpConversionPattern<gpu::LocalLoadOp> {
     if (!hasDotUser) {
       // Dot ops read directly from cbs and handle their own waits
       // TODO: consider verifying that all users are dot ops?
-      Value numPages = arith::createConstantI32(loc, rewriter, 1);
+      Value numPages =
+          arith::createConstantI32(loc, rewriter, srcType.getNumTiles());
       auto waitFrontOp =
           ttkernel::CBWaitFrontOp::create(rewriter, loc, src, numPages);
     }

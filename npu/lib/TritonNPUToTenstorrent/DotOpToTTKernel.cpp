@@ -49,111 +49,97 @@ struct ConvertDotOp : public OpConversionPattern<triton::DotOp> {
 
     auto aType = cast<RankedTensorType>(op.getA().getType());
     auto bType = cast<RankedTensorType>(op.getB().getType());
+    if (aType.getRank() != 2 || bType.getRank() != 2)
+      return rewriter.notifyMatchFailure(op, "expected 2D dot");
 
-    const int64_t aNumTiles = aType.getShape()[0] / 32;
-    const int64_t bNumTiles = bType.getShape()[1] / 32;
-    // TODO: we should check that aNumTiles * bNumTiles < sizeof(dest)
-    llvm::errs() << "dot op a num tiles: " << aNumTiles << "\n";
-    llvm::errs() << "dot op b num tiles: " << bNumTiles << "\n";
+    int64_t M = aType.getShape()[0];
+    int64_t K = aType.getShape()[1];
+    int64_t N = bType.getShape()[1];
+    llvm::errs() << "dot op M: " << M << ", K: " << K << ", N: " << N << "\n";
 
-    Value aNumTilesVal = arith::createConstantI32(
-        loc, rewriter, static_cast<int32_t>(aNumTiles));
-    Value bNumTilesVal = arith::createConstantI32(
-        loc, rewriter, static_cast<int32_t>(bNumTiles));
+    int64_t mTiles = (M + 31) / 32;
+    int64_t kTiles = (K + 31) / 32;
+    int64_t nTiles = (N + 31) / 32;
+    llvm::errs() << "dot op mTiles: " << mTiles << ", kTiles: " << kTiles
+                 << ", nTiles: " << nTiles << "\n";
+
+    assert(mTiles * kTiles == aCBType.getNumTiles() &&
+           "a cb num tiles does not match a tensor shape");
+    assert(kTiles * nTiles == bCBType.getNumTiles() &&
+           "b cb num tiles does not match b tensor shape");
+
+    Value aNumInputTilesValue = arith::createConstantI32(
+        loc, rewriter, static_cast<int32_t>(aCBType.getNumTiles()));
+    Value bNumInputTilesValue = arith::createConstantI32(
+        loc, rewriter, static_cast<int32_t>(bCBType.getNumTiles()));
 
     ttkernel::CBWaitFrontOp::create(rewriter, loc, adaptor.getA(),
-                                    aNumTilesVal);
+                                    aNumInputTilesValue);
     ttkernel::CBWaitFrontOp::create(rewriter, loc, adaptor.getB(),
-                                    bNumTilesVal);
+                                    bNumInputTilesValue);
 
-    // TODO: will the loop carried value break loop unrolling?
-    Value destRegisterIndex = arith::createIndexConstant(loc, rewriter, 0);
-    scf::ForOp aLoop = scf::ForOp::create(
-        rewriter, loc, arith::createConstantI32(loc, rewriter, 0), aNumTilesVal,
-        arith::createConstantI32(loc, rewriter, 1),
-        ValueRange{destRegisterIndex});
-    rewriter.setInsertionPointToStart(aLoop.getBody());
+    Value zeroI32 = arith::createConstantI32(loc, rewriter, 0);
+    Value oneI32 = arith::createConstantI32(loc, rewriter, 1);
+
+    Value mTilesVal =
+        arith::createConstantI32(loc, rewriter, static_cast<int32_t>(mTiles));
+    Value nTilesVal =
+        arith::createConstantI32(loc, rewriter, static_cast<int32_t>(nTiles));
+    Value kTilesVal =
+        arith::createConstantI32(loc, rewriter, static_cast<int32_t>(kTiles));
+
+    Value destRegisterInitial = arith::createIndexConstant(loc, rewriter, 0);
+    auto mLoop = scf::ForOp::create(rewriter, loc, zeroI32, mTilesVal, oneI32,
+                                    ValueRange{destRegisterInitial});
     {
-      scf::ForOp bLoop = scf::ForOp::create(
-          rewriter, loc, arith::createConstantI32(loc, rewriter, 0),
-          bNumTilesVal, arith::createConstantI32(loc, rewriter, 1),
-          ValueRange{aLoop.getRegionIterArgs()[0]});
+      rewriter.setInsertionPointToStart(mLoop.getBody());
+      Value mIv = mLoop.getInductionVar();
+      Value destRegisterIndexM = mLoop.getRegionIterArgs()[0];
+
+      auto nLoop = scf::ForOp::create(rewriter, loc, zeroI32, nTilesVal, oneI32,
+                                      ValueRange{destRegisterIndexM});
       {
-        rewriter.setInsertionPointToStart(bLoop.getBody());
+        rewriter.setInsertionPointToStart(nLoop.getBody());
 
-        Value aCBTileIndex = aLoop.getInductionVar();
-        Value bCBTileIndex = bLoop.getInductionVar();
+        Value nIv = nLoop.getInductionVar();
+        Value destRegisterIndexN = nLoop.getRegionIterArgs()[0];
 
-        ttkernel::MatmulTilesOp::create(
-            rewriter, loc, adaptor.getA(), adaptor.getB(), aCBTileIndex,
-            bCBTileIndex, bLoop.getRegionIterArgs()[0]);
+        auto kLoop =
+            scf::ForOp::create(rewriter, loc, zeroI32, kTilesVal, oneI32);
+        {
+          rewriter.setInsertionPointToStart(kLoop.getBody());
+          Value kIv = kLoop.getInductionVar();
+
+          // aTile = m * kTiles + k
+          Value aTile = arith::AddIOp::create(
+              rewriter, loc,
+              (arith::MulIOp::create(rewriter, loc, mIv, kTilesVal)), kIv);
+
+          // bTile = k * nTiles + n
+          Value bTile = arith::AddIOp::create(
+              rewriter, loc,
+              (arith::MulIOp::create(rewriter, loc, kIv, nTilesVal)), nIv);
+
+          ttkernel::MatmulTilesOp::create(rewriter, loc, adaptor.getA(),
+                                          adaptor.getB(), aTile, bTile,
+                                          destRegisterIndexN);
+          // scf::YieldOp::create(rewriter, loc);
+        }
+        rewriter.setInsertionPointAfter(kLoop);
         Value nextDestRegisterIndex =
-            arith::AddIOp::create(rewriter, loc, bLoop.getRegionIterArgs()[0],
+            arith::AddIOp::create(rewriter, loc, destRegisterIndexN,
                                   arith::createIndexConstant(loc, rewriter, 1));
         scf::YieldOp::create(rewriter, loc, nextDestRegisterIndex);
       }
-      rewriter.setInsertionPointAfter(bLoop);
-      scf::YieldOp::create(rewriter, loc, bLoop.getResult(0));
+      rewriter.setInsertionPointAfter(nLoop);
+      scf::YieldOp::create(rewriter, loc, nLoop.getResult(0));
     }
-    rewriter.setInsertionPointAfter(aLoop);
+    rewriter.setInsertionPointAfter(mLoop);
 
-#if 0
-#if 1
-    Value dst;
-    {
-      SetVector<Operation *> slice = getSlice(op);
-
-      for (auto *op : slice) {
-        llvm::errs() << "slice op: " << *op << "\n";
-      }
-
-      auto storeOpIt = llvm::find_if(
-          slice, [](Operation *user) { return isa<gpu::LocalStoreOp>(user); });
-      assert(storeOpIt != slice.end() &&
-             "expected to find local store op in forward slice");
-      gpu::LocalStoreOp storeOp = cast<gpu::LocalStoreOp>(*storeOpIt);
-      dst = rewriter.getRemappedValue(storeOp.getDst());
-    }
-    assert(dst && "unable to find output op for dot op");
-    auto dstCBType = cast<ttkernel::CBType>(dst.getType());
-    llvm::errs() << "dst: " << dst << "\n";
-#if 1
-    Value numPages =
-        arith::createConstantI32(loc, rewriter, dstCBType.getNumTiles());
-    ttkernel::CBReserveBackOp::create(rewriter, loc, dst, numPages);
-    for (unsigned i = 0; i < dstCBType.getNumTiles(); ++i) {
-      ttkernel::PackTileOp::create(
-          rewriter, loc, arith::createConstantI32(loc, rewriter, i), dst,
-          arith::createConstantI32(loc, rewriter, i));
-    }
-    ttkernel::CBPushBackOp::create(rewriter, loc, dst, numPages);
-#else
-    // using the loop carried dest counter but really this should be the same as
-    // the number of output tiles. do we need it? can we just use a constant
-    // instead?
-    ttkernel::CBReserveBackOp::create(rewriter, loc, dst, aLoop.getResult(0));
-    scf::ForOp packTileLoop = scf::ForOp::create(
-        rewriter, loc, arith::createConstantI32(loc, rewriter, 0),
-        aLoop.getResult(0), arith::createConstantI32(loc, rewriter, 1),
-        ValueRange{});
-    rewriter.setInsertionPointToStart(packTileLoop.getBody());
-    {
-      ttkernel::PackTileOp::create(rewriter, loc,
-                                   packTileLoop.getInductionVar(), dst,
-                                   packTileLoop.getInductionVar());
-    }
-    rewriter.setInsertionPointAfter(packTileLoop);
-#endif
-#endif
-
-#endif
-
-    ttkernel::CBPopFrontOp::create(
-        rewriter, loc, adaptor.getA(),
-        arith::createConstantI32(loc, rewriter, aCBType.getNumTiles()));
-    ttkernel::CBPopFrontOp::create(
-        rewriter, loc, adaptor.getB(),
-        arith::createConstantI32(loc, rewriter, bCBType.getNumTiles()));
+    ttkernel::CBPopFrontOp::create(rewriter, loc, adaptor.getA(),
+                                   aNumInputTilesValue);
+    ttkernel::CBPopFrontOp::create(rewriter, loc, adaptor.getB(),
+                                   bNumInputTilesValue);
 
     // foward the dot op c operand to the users of the dot op
     rewriter.replaceOp(op, adaptor.getC());
