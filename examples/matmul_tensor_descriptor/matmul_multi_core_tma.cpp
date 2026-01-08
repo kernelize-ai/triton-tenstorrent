@@ -109,7 +109,7 @@ void matmul_multi_core(
 
     // Get the compute grid size to determine how many cores are available
     auto core_grid = mesh_device->compute_with_storage_grid_size();
-    auto num_output_tiles_total = (M * N) / TILE_HW;
+    auto num_output_tiles_total = 1; //(M * N) / TILE_HW;
 
     // Use the split_work_to_cores utility function to distribute matrix multiplication work
     // across available cores for efficient SPMD (Single Program, Multiple Data) execution.
@@ -183,19 +183,19 @@ void matmul_multi_core(
     tt_metal::CreateCircularBuffer(
         program,
         all_cores,  // create on all cores
-        CircularBufferConfig(num_input_tiles * single_tile_size, {{CBIndex::c_0, cb_data_format}})
+        CircularBufferConfig(2 * single_tile_size, {{CBIndex::c_0, cb_data_format}})
             .set_page_size(CBIndex::c_0, single_tile_size));
 
     tt_metal::CreateCircularBuffer(
         program,
         all_cores,  // create on all cores
-        CircularBufferConfig(num_input_tiles * single_tile_size, {{CBIndex::c_1, cb_data_format}})
+        CircularBufferConfig(4 * single_tile_size, {{CBIndex::c_1, cb_data_format}})
             .set_page_size(CBIndex::c_1, single_tile_size));
 
     tt_metal::CreateCircularBuffer(
         program,
         all_cores,  // create on all cores
-        CircularBufferConfig(num_input_tiles * single_tile_size, {{CBIndex::c_16, cb_data_format}})
+        CircularBufferConfig(2 * single_tile_size, {{CBIndex::c_16, cb_data_format}})
             .set_page_size(CBIndex::c_16, single_tile_size));
 
     // Create Kernels (Reader, Writer, Compute)
