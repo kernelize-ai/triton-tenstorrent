@@ -38,11 +38,9 @@ void kernel_main() {
   int32_t v26 = get_arg_val<uint32_t>(33);
   int32_t v27 = (int32_t) ((uint32_t) v15 + (uint32_t) v2) / v4;
   for (int32_t i28 = v26; i28 < v25; i28 += v6) {
-    DPRINT << "Reader outer loop iteration " << i28 << "( of " << v25 << ")\n";
     int32_t v29 = i28 / v27;
     int32_t v30 = (int32_t) ((uint32_t) ((int32_t) ((uint32_t) v14 + (uint32_t) 31) / v5) - (uint32_t) v29) < v6 ? (int32_t) ((uint32_t) ((int32_t) ((uint32_t) v14 + (uint32_t) 31) / v5) - (uint32_t) v29) : v6;
     for (int32_t j31 = v3; j31 < ((int32_t) ((uint32_t) v16 + (uint32_t) v2) / v4); j31 += v6) {
-      DPRINT << " Reader inner loop iteration " << j31 << "( of " << (int32_t) ((uint32_t) v16 + (uint32_t) v2) / v4 << ")\n";
       int32_t v32 = (int32_t) ((uint32_t) j31 * (uint32_t) v4);
       int32_t v33 = v32 / v4;
       int32_t v34 = (int32_t) ((uint32_t) v32 % (uint32_t) v4);
@@ -53,7 +51,6 @@ void kernel_main() {
       v36 = v35;
       v37 = (int32_t) ((uint32_t) ((int32_t) ((uint32_t) ((int32_t) ((uint32_t) ((int32_t) ((uint32_t) ((int32_t) ((uint32_t) ((int32_t) ((uint32_t) ((int32_t) ((uint32_t) ((int32_t) ((uint32_t) v29 + (uint32_t) (i28 % v30))) * (uint32_t) v5) / v5) * (uint32_t) (v11 != (int32_t) ((uint32_t) (v11 / v4) * (uint32_t) v4) & v11 < v3 == v1 ? (int32_t) ((uint32_t) (v11 / v4) + (uint32_t) v6) : v11 / v4))) + (uint32_t) v33)) * (uint32_t) 2048)) + (uint32_t) ((int32_t) ((uint32_t) ((int32_t) ((uint32_t) ((int32_t) ((uint32_t) ((int32_t) ((uint32_t) ((int32_t) ((uint32_t) v29 + (uint32_t) (i28 % v30))) * (uint32_t) v5)) % (uint32_t) v5)) * (uint32_t) v4)) + (uint32_t) v34)))) * (uint32_t) v8)) / (uint32_t) v22);
       for (int32_t k38 = v3; k38 < v8; k38 += v6) {
-        DPRINT << "Reading A tile " << k38 << " of " << v8 << "\n";
         int32_t v39 = v36;
         int32_t v40 = v37;
         uint64_t temp_371 = v24.get_noc_addr(v40, v3);
@@ -66,7 +63,6 @@ void kernel_main() {
       noc_async_read_barrier();
       }
       cb_push_back(get_compile_time_arg_val(0), v8);
-      DPRINT << "A tiles pushed\n";
       cb_reserve_back(get_compile_time_arg_val(1), v9);
       int32_t v41 = get_write_ptr(get_compile_time_arg_val(1));
       int32_t v42;
@@ -74,7 +70,6 @@ void kernel_main() {
       v42 = v41;
       v43 = (int32_t) ((uint32_t) ((int32_t) ((uint32_t) ((int32_t) ((uint32_t) ((int32_t) ((uint32_t) ((int32_t) ((uint32_t) ((int32_t) ((uint32_t) v33 * (uint32_t) (v13 != (int32_t) ((uint32_t) (v13 / v4) * (uint32_t) v4) & v13 < v3 == v1 ? (int32_t) ((uint32_t) (v13 / v4) + (uint32_t) v6) : v13 / v4))) + (uint32_t) ((int32_t) ((uint32_t) ((i28 % v27) / v30) * (uint32_t) v4) / v4))) * (uint32_t) 4096)) + (uint32_t) ((int32_t) ((uint32_t) ((int32_t) ((uint32_t) v34 * (uint32_t) v4)) + (uint32_t) ((int32_t) ((uint32_t) ((int32_t) ((uint32_t) ((i28 % v27) / v30) * (uint32_t) v4)) % (uint32_t) v4)))))) * (uint32_t) v8)) / (uint32_t) v18);
       for (int32_t k44 = v3; k44 < v9; k44 += v6) {
-        DPRINT << "Reading B tile " << k44 << " of " << v9 << "\n";
         int32_t v45 = v42;
         int32_t v46 = v43;
         uint64_t temp_405 = v20.get_noc_addr(v46, v3);
@@ -87,7 +82,6 @@ void kernel_main() {
       noc_async_read_barrier();
       }
       cb_push_back(get_compile_time_arg_val(1), v9);
-      DPRINT << "B tiles pushed\n";
     }
   }
   return;

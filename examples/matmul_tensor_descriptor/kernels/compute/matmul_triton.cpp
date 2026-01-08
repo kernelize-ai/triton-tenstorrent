@@ -54,19 +54,14 @@ void kernel_main() {
   int32_t v7 = get_arg_val<uint32_t>(33);
   for (int32_t i8 = v7; i8 < v6; i8 += v2) {
     tile_regs_acquire();
-    //mm_init_short(get_compile_time_arg_val(0), get_compile_time_arg_val(1));
     for (int32_t j9 = v1; j9 < ((int32_t) ((uint32_t) v5 + (uint32_t) 63) / 64); j9 += v2) {
       {
       DeviceZoneScopedN("cb_wait_front");
-      DPRINT << "Waiting for A CB\n";
       cb_wait_front(get_compile_time_arg_val(0), v3);
-      DPRINT << "Acquired A CB\n";
       }
       {
       DeviceZoneScopedN("cb_wait_front");
-      DPRINT << "Waiting for B CB\n";
       cb_wait_front(get_compile_time_arg_val(1), v4);
-      DPRINT << "Acquired B CB\n";
       }
       size_t v10;
       v10 = 0;
@@ -92,7 +87,6 @@ void kernel_main() {
     tile_regs_release();
     cb_push_back(get_compile_time_arg_val(2), v3);
   }
-  DPRINT << "Matmul kernel done\n";
   return;
 }
 void MAIN { kernel_main(); }
