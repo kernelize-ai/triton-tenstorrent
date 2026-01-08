@@ -8,7 +8,6 @@
 #include "ttmlir/Dialect/TTKernel/IR/TTKernel.h"
 #include "ttmlir/Dialect/TTKernel/IR/TTKernelOps.h"
 
-#include "mlir/Analysis/SliceAnalysis.h"
 #include "llvm/Support/Debug.h"
 
 #include "Utility.h"
@@ -44,9 +43,6 @@ struct ConvertDotOp : public OpConversionPattern<triton::DotOp> {
     ttkernel::CBType aCBType = cast<ttkernel::CBType>(adaptor.getA().getType());
     ttkernel::CBType bCBType = cast<ttkernel::CBType>(adaptor.getB().getType());
 
-    llvm::errs() << "dot op a cb type: " << aCBType << "\n";
-    llvm::errs() << "dot op b cb type: " << bCBType << "\n";
-
     auto aType = cast<RankedTensorType>(op.getA().getType());
     auto bType = cast<RankedTensorType>(op.getB().getType());
     if (aType.getRank() != 2 || bType.getRank() != 2)
@@ -55,13 +51,10 @@ struct ConvertDotOp : public OpConversionPattern<triton::DotOp> {
     int64_t M = aType.getShape()[0];
     int64_t K = aType.getShape()[1];
     int64_t N = bType.getShape()[1];
-    llvm::errs() << "dot op M: " << M << ", K: " << K << ", N: " << N << "\n";
 
     int64_t mTiles = (M + 31) / 32;
     int64_t kTiles = (K + 31) / 32;
     int64_t nTiles = (N + 31) / 32;
-    llvm::errs() << "dot op mTiles: " << mTiles << ", kTiles: " << kTiles
-                 << ", nTiles: " << nTiles << "\n";
 
     assert(mTiles * kTiles == aCBType.getNumTiles() &&
            "a cb num tiles does not match a tensor shape");

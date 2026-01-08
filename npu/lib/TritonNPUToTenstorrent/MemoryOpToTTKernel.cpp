@@ -64,8 +64,6 @@ struct ConvertLoadOp : public OpConversionPattern<triton::LoadOp> {
       return failure();
     }
 
-    LDBG("Converting load op: " << *op << "\n");
-
     Value cb =
         rewriter.getRemappedValue(cast<gpu::LocalStoreOp>(user).getDst());
 
@@ -93,7 +91,6 @@ struct ConvertLoadOp : public OpConversionPattern<triton::LoadOp> {
 
     Value const0 = arith::createConstantI32(loc, rewriter, 0);
 
-    llvm::errs() << "cb type = " << cb.getType() << "\n";
     // determine how many tiles we need to load by converting the shape to tiles
     const int32_t numTiles = cast<ttkernel::CBType>(cb.getType()).getNumTiles();
     Value numPages = arith::createConstantI32(loc, rewriter, numTiles);
@@ -125,10 +122,7 @@ struct ConvertLoadOp : public OpConversionPattern<triton::LoadOp> {
     }
 
     rewriter.setInsertionPointAfter(loadTileLoop);
-
-    // wait until data is read into cbs before pushing back
     ttkernel::NocAsyncReadBarrierOp::create(rewriter, loc);
-    ttkernel::CBPushBackOp::create(rewriter, loc, cb, numPages);
 
     rewriter.eraseOp(op);
     return success();
@@ -240,8 +234,6 @@ struct ConvertLocalStoreOp : public OpConversionPattern<gpu::LocalStoreOp> {
 
     auto srcOp = op.getSrc().getDefiningOp();
     if (!isa<triton::LoadOp>(srcOp)) {
-      // just delete the op and return
-
       // reserve back the cb for pack tile
       ttkernel::CBReserveBackOp::create(rewriter, loc, dst, numPages);
 
@@ -271,11 +263,9 @@ struct ConvertLocalStoreOp : public OpConversionPattern<gpu::LocalStoreOp> {
       return success();
     }
 
-    // disabled this since it is happening too late with changes to load/dot
-    // lowering
-    // ttkernel::CBPushBackOp::create(rewriter, loc, dst, numPages);
+    // store from a load op just signals that the data is ready in the cb
+    ttkernel::CBPushBackOp::create(rewriter, loc, dst, numPages);
     rewriter.eraseOp(op);
-
     return success();
   }
 };

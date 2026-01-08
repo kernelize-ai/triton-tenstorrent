@@ -225,6 +225,7 @@ class CPUBackend(BaseBackend):
         cpu.passes.tenstorrent.add_to_ttkernel_dialect(pm)
         passes.common.add_canonicalizer(pm)
 
+        # TODO(adb): remove this pass
         # cpu.passes.tenstorrent.add_finalize_cb_transactions(pm)
 
         # tt-mlir pipeline
