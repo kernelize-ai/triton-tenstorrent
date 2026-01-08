@@ -12,7 +12,7 @@ class TTTS_Op<string mnemonic, list<Trait> traits = []> :
        !listconcat(traits, [])> {
 }
 
-def TTTS_BinaryComputeOp : TTTS_Op<"binary_compute", [Pure, NoMemoryEffect, SameOperandsAndResultShape]> {
+def TTTS_BinaryComputeOp : TTTS_Op<"binary_compute", [Pure, SameOperandsAndResultShape]> {
   let summary = "Binary compute operation in Tenstorrent compute kernel.";
 
   let arguments = (ins AnyRankedTensor:$lhs,
