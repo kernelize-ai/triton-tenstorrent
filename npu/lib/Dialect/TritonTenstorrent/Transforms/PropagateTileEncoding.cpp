@@ -122,7 +122,7 @@ void TileEncodingPropagation::propagateToLocalLoads() {
         return;
       }
       auto loadEncoding = loadTensorType.getEncoding();
-      auto newLoadEncoding = npu::tt::TileEncodingAttr::get(
+      auto newLoadEncoding = npu::tt::RegisterEncodingAttr::get(
           loadOp.getContext(), index,
           cast<gpu::DistributedEncodingTrait>(loadEncoding));
       LDBG("Propagating new encoding " << newLoadEncoding << " to LoadOp "
@@ -163,7 +163,7 @@ void TileEncodingPropagation::propagateToLocalLoads() {
         return;
       }
       auto storeEncoding = storeTensorType.getEncoding();
-      auto newStoreEncoding = npu::tt::TileEncodingAttr::get(
+      auto newStoreEncoding = npu::tt::RegisterEncodingAttr::get(
           storeOp.getContext(), index,
           cast<gpu::DistributedEncodingTrait>(storeEncoding));
       LDBG("Propagating new encoding " << newStoreEncoding << " to StoreOp "

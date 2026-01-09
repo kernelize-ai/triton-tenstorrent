@@ -18,7 +18,7 @@ def TritonTenstorrentPropagateTileEncoding : Pass<"tritontenstorrent-propagate-t
         Local loads from SRAM to registers need to know which tile register index to load into. This pass propagates the
         register index information from the compute ops (which are users of the tile registers and dicatate placement based
         on use pattern) to local loads, which generically copy data from SRAM into registers. The register index is stored
-        in the TileEncodingAttr attached to the tensor type.
+        in the RegisterEncodingAttr attached to the tensor type.
     }];
 
     let dependentDialects = ["mlir::triton::npu::tt::TritonTenstorrentDialect",

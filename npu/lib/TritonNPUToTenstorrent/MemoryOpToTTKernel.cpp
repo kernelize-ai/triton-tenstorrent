@@ -239,9 +239,9 @@ struct ConvertLocalStoreOp : public OpConversionPattern<gpu::LocalStoreOp> {
 
       auto srcType = cast<RankedTensorType>(op.getSrc().getType());
       unsigned destIndexOffset = 0;
-      if (auto tileEncodingAttr =
-              dyn_cast<npu::tt::TileEncodingAttr>(srcType.getEncoding())) {
-        destIndexOffset = tileEncodingAttr.getIndex();
+      if (auto registerEncodingAttr =
+              dyn_cast<npu::tt::RegisterEncodingAttr>(srcType.getEncoding())) {
+        destIndexOffset = registerEncodingAttr.getIndex();
       }
 
       // commit and wait before packing tiles
@@ -321,8 +321,8 @@ struct ConvertLocalLoadOp : public OpConversionPattern<gpu::LocalLoadOp> {
     // 3. copy data from the cb into DST register
     ttkernel::CopyTileInitOp::create(rewriter, loc, src);
     Value c0 = arith::createIndexConstant(loc, rewriter, 0);
-    npu::tt::TileEncodingAttr loadEncoding =
-        cast<npu::tt::TileEncodingAttr>(dstType.getEncoding());
+    npu::tt::RegisterEncodingAttr loadEncoding =
+        cast<npu::tt::RegisterEncodingAttr>(dstType.getEncoding());
     Value destRegisterIndex =
         arith::createIndexConstant(loc, rewriter, loadEncoding.getIndex());
     ttkernel::CopyTileOp::create(rewriter, loc, src, c0, destRegisterIndex);

@@ -7,11 +7,13 @@ include "npu/include/Dialect/TritonTenstorrent/IR/TritonTenstorrentDialect.td"
 include "triton/Dialect/Triton/IR/TritonInterfaces.td" // might not need this?
 include "triton/Dialect/TritonGPU/IR/TritonGPUAttrDefs.td" // might not need this?
 
-def TileEncodingAttr : AttrDef<TritonTenstorrent_Dialect, "TileEncoding", [DistributedEncodingTrait, LayoutEncodingTrait]> {
-  let mnemonic = "tile_encoding";
+def RegisterEncodingAttr : AttrDef<TritonTenstorrent_Dialect, "RegisterEncoding", [DistributedEncodingTrait, LayoutEncodingTrait]> {
+  let mnemonic = "register_encoding";
 
   let description = [{
-    A wrapper distributed encoding to hold the desired tile register index for tiled tensors in L1/SRAM.
+    A wrapper distributed encoding to hold the desired DEST register index for tiled tensors.
+
+    Instructions using DEST for input/outputs use implicit register indices instead of SSA values to represent register values. This wrapper encoding allows us to track the intended register index for a tensor value.
   }];
 
   let parameters = (

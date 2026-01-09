@@ -13,14 +13,14 @@ module attributes {"ttg.num-ctas" = 1 : i32, "ttg.num-warps" = 1 : i32, ttg.targ
     %3 = tt.splat %arg1 : !tt.ptr<f32> -> tensor<1024x!tt.ptr<f32>, #blocked>
     // CHECK: %[[Y_PTR_OFFSET:.*]] = tt.addptr %[[Y_PTR]],
     %4 = tt.addptr %3, %0 : tensor<1024x!tt.ptr<f32>, #blocked>, tensor<1024xi32, #blocked>
-    // CHECK: %[[X_CVT:.*]] = ttg.convert_layout %[[X_PTR_OFFSET]] : tensor<1024x!tt.ptr<f32>, #blocked> -> tensor<1024x!tt.ptr<f32>, #triton_tenstorrent.tile_encoding<{index = 0, parent = #blocked}>>
-    // CHECK: %[[X:.*]] = tt.load %[[X_CVT]] : tensor<1024x!tt.ptr<f32>, #triton_tenstorrent.tile_encoding<{index = 0, parent = #blocked}>>
+    // CHECK: %[[X_CVT:.*]] = ttg.convert_layout %[[X_PTR_OFFSET]] : tensor<1024x!tt.ptr<f32>, #blocked> -> tensor<1024x!tt.ptr<f32>, #triton_tenstorrent.register_encoding<{index = 0, parent = #blocked}>>
+    // CHECK: %[[X:.*]] = tt.load %[[X_CVT]] : tensor<1024x!tt.ptr<f32>, #triton_tenstorrent.register_encoding<{index = 0, parent = #blocked}>>
     %5 = tt.load %2 : tensor<1024x!tt.ptr<f32>, #blocked>
-    // CHECK: %[[Y_CVT:.*]] = ttg.convert_layout %[[Y_PTR_OFFSET]] : tensor<1024x!tt.ptr<f32>, #blocked> -> tensor<1024x!tt.ptr<f32>, #triton_tenstorrent.tile_encoding<{index = 1, parent = #blocked}>>
-    // CHECK: %[[Y:.*]] = tt.load %[[Y_CVT]] : tensor<1024x!tt.ptr<f32>, #triton_tenstorrent.tile_encoding<{index = 1, parent = #blocked}>>
+    // CHECK: %[[Y_CVT:.*]] = ttg.convert_layout %[[Y_PTR_OFFSET]] : tensor<1024x!tt.ptr<f32>, #blocked> -> tensor<1024x!tt.ptr<f32>, #triton_tenstorrent.register_encoding<{index = 1, parent = #blocked}>>
+    // CHECK: %[[Y:.*]] = tt.load %[[Y_CVT]] : tensor<1024x!tt.ptr<f32>, #triton_tenstorrent.register_encoding<{index = 1, parent = #blocked}>>
     %6 = tt.load %4 : tensor<1024x!tt.ptr<f32>, #blocked>
     // COM: Make sure the binary_compute op uses the new load ops and not an intermediate cvt
-    // CHECK: %[[OUTPUT:.*]] = triton_tenstorrent.binary_compute["arith.addf"] %[[X]], %[[Y]] : {{.*}} -> tensor<1024xf32, #triton_tenstorrent.tile_encoding<{index = 2, parent = #blocked}>>
+    // CHECK: %[[OUTPUT:.*]] = triton_tenstorrent.binary_compute["arith.addf"] %[[X]], %[[Y]] : {{.*}} -> tensor<1024xf32, #triton_tenstorrent.register_encoding<{index = 2, parent = #blocked}>>
     %7 = triton_tenstorrent.binary_compute["arith.addf"] %5, %6 : (tensor<1024xf32, #blocked>, tensor<1024xf32, #blocked>) -> tensor<1024xf32, #blocked>
     %8 = tt.splat %arg2 : !tt.ptr<f32> -> tensor<1024x!tt.ptr<f32>, #blocked>
     %9 = tt.addptr %8, %0 : tensor<1024x!tt.ptr<f32>, #blocked>, tensor<1024xi32, #blocked>
@@ -70,8 +70,8 @@ module attributes {"ttg.num-ctas" = 1 : i32, "ttg.num-warps" = 1 : i32, ttg.targ
     %c_ptrs = tt.splat %c_ptr : !tt.ptr<f16> -> tensor<32x32x!tt.ptr<f16>, #blocked>
     %7 = ttg.convert_layout %c : tensor<32x32xf16, #blocked2> -> tensor<32x32xf16, #blocked>
     // CHECK: %[[OUTPUT_CVT_1:.*]] = ttg.convert_layout %[[OUTPUT]] : tensor<32x32xf16, #blocked1> -> tensor<32x32xf16, #blocked>
-    // CHECK: %[[OUTPUT_CVT_TILE:.*]] = ttg.convert_layout %[[OUTPUT_CVT_1]] : tensor<32x32xf16, #blocked> -> tensor<32x32xf16, #triton_tenstorrent.tile_encoding<{index = 0, parent = #blocked}>>
-    // CHECK: tt.store {{.*}}, %[[OUTPUT_CVT_TILE]] : tensor<32x32x!tt.ptr<f16>, #triton_tenstorrent.tile_encoding<{index = 0, parent = #blocked}>>
+    // CHECK: %[[OUTPUT_CVT_TILE:.*]] = ttg.convert_layout %[[OUTPUT_CVT_1]] : tensor<32x32xf16, #blocked> -> tensor<32x32xf16, #triton_tenstorrent.register_encoding<{index = 0, parent = #blocked}>>
+    // CHECK: tt.store {{.*}}, %[[OUTPUT_CVT_TILE]] : tensor<32x32x!tt.ptr<f16>, #triton_tenstorrent.register_encoding<{index = 0, parent = #blocked}>>
     tt.store %c_ptrs, %7 : tensor<32x32x!tt.ptr<f16>, #blocked>
     tt.return
  }
@@ -107,8 +107,8 @@ module attributes {"ttg.num-ctas" = 1 : i32, "ttg.num-warps" = 1 : i32, ttg.targ
     %c_ptrs = tt.splat %c_ptr : !tt.ptr<f16> -> tensor<32x32x!tt.ptr<f16>, #blocked>
     %7 = ttg.convert_layout %c : tensor<32x32xf16, #blocked2> -> tensor<32x32xf16, #blocked>
     // CHECK: %[[OUTPUT_CVT_1:.*]] = ttg.convert_layout %[[OUTPUT]] : tensor<32x32xf16, #blocked1> -> tensor<32x32xf16, #blocked>
-    // CHECK: %[[OUTPUT_CVT_TILE:.*]] = ttg.convert_layout %[[OUTPUT_CVT_1]] : tensor<32x32xf16, #blocked> -> tensor<32x32xf16, #triton_tenstorrent.tile_encoding<{index = 0, parent = #blocked}>>
-    // CHECK: tt.store {{.*}}, %[[OUTPUT_CVT_TILE]] : tensor<32x32x!tt.ptr<f16>, #triton_tenstorrent.tile_encoding<{index = 0, parent = #blocked}>>
+    // CHECK: %[[OUTPUT_CVT_TILE:.*]] = ttg.convert_layout %[[OUTPUT_CVT_1]] : tensor<32x32xf16, #blocked> -> tensor<32x32xf16, #triton_tenstorrent.register_encoding<{index = 0, parent = #blocked}>>
+    // CHECK: tt.store {{.*}}, %[[OUTPUT_CVT_TILE]] : tensor<32x32x!tt.ptr<f16>, #triton_tenstorrent.register_encoding<{index = 0, parent = #blocked}>>
     tt.store %c_ptrs, %7 : tensor<32x32x!tt.ptr<f16>, #blocked>
     tt.return
  }
