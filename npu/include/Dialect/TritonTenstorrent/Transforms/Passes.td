@@ -3,6 +3,19 @@
 
 include "mlir/Pass/PassBase.td"
 
+def TritonTenstorrentAccelerateMatmul : Pass<"tritontenstorrent-accelerate-matmul",  "mlir::ModuleOp"> {
+    let summary = "accelerate matmul";
+
+    let description =[{
+        Optimize the input/output layout of `dot` instruction to make them compatible for Tenstorrent hardware accelerators.
+    }];
+
+    let dependentDialects = ["mlir::triton::npu::tt::TritonTenstorrentDialect",
+                             "mlir::triton::gpu::TritonGPUDialect",
+                             "mlir::triton::TritonDialect"
+                            ];
+}
+
 def TritonTenstorrentConvertTensorDescToLoadStore : Pass<"tritontenstorrent-convert-tensor-desc", "mlir::ModuleOp"> {
     let summary = "Convert Triton tensor descriptors to Triton load/store operations";
 

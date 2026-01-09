@@ -19,6 +19,59 @@ using namespace mlir::triton::npu;
 
 namespace mlir::triton::npu::tt {
 
+// TODO: refactor to shared header
+
+static LogicalResult parseIntAttrValue(AsmParser &parser, Attribute attr,
+                                       unsigned &value, StringRef desc) {
+  auto intAttr = mlir::dyn_cast<IntegerAttr>(attr);
+  if (!intAttr) {
+    parser.emitError(parser.getNameLoc(), "expected an integer type in ")
+        << desc;
+    return failure();
+  }
+  if (intAttr.getType().isSignedInteger()) {
+    int64_t attrVal = intAttr.getSInt();
+    if (attrVal < 0) {
+      parser.emitError(parser.getNameLoc(),
+                       "expected an unsigned integer value in ")
+          << desc;
+      return failure();
+    }
+    value = attrVal;
+  } else if (intAttr.getType().isSignlessInteger()) {
+    int64_t attrVal = intAttr.getInt();
+    if (attrVal < 0) {
+      parser.emitError(parser.getNameLoc(),
+                       "expected an unsigned integer value in ")
+          << desc;
+      return failure();
+    }
+    value = attrVal;
+  } else {
+    value = intAttr.getUInt();
+  }
+  return success();
+}
+
+// parse an array of integers
+static LogicalResult parseIntArrayAttr(AsmParser &parser,
+                                       const NamedAttribute &attr,
+                                       SmallVector<unsigned> &res,
+                                       StringRef desc) {
+  auto arrayAttr = mlir::dyn_cast<ArrayAttr>(attr.getValue());
+  if (!arrayAttr) {
+    parser.emitError(parser.getNameLoc(), "expected an array for ") << desc;
+    return failure();
+  }
+  for (Attribute i : arrayAttr) {
+    unsigned value;
+    if (parseIntAttrValue(parser, i, value, desc).failed())
+      return failure();
+    res.push_back(value);
+  }
+  return success();
+};
+
 Attribute RegisterEncodingAttr::parse(AsmParser &parser, Type type) {
   if (parser.parseLess().failed())
     return {};
@@ -54,32 +107,22 @@ Attribute TiledEncodingAttr::parse(AsmParser &parser, Type type) {
   if (parser.parseGreater().failed())
     return {};
 
-  // TODO: 
-    for (const NamedAttribute &attr : dict) {
-#if 1
-    if (false) {
-#else
-    if (attr.getName() == "sizePerThread") {
-      if (parseIntArrayAttr(parser, attr, sizePerThread,
-                            "number of elements per thread")
-              .failed())
-        return {};
-    } else if (attr.getName() == "threadsPerWarp") {
-      if (parseIntArrayAttr(parser, attr, threadsPerWarp,
-                            "number of threads per warp")
-              .failed())
-        return {};
-    } else if (attr.getName() == "warpsPerCTA") {
-      if (parseIntArrayAttr(parser, attr, warpsPerCTA,
-                            "number of warps per CTA")
+  SmallVector<unsigned> tilesPerCore;
+  SmallVector<unsigned> order;
+  SmallVector<unsigned> tileShape;
+
+  for (const NamedAttribute &attr : dict) {
+    if (attr.getName() == "tilesPerCore") {
+      if (parseIntArrayAttr(parser, attr, tilesPerCore,
+                            "number of tiles per Tensix core")
               .failed())
         return {};
     } else if (attr.getName() == "order") {
       if (parseIntArrayAttr(parser, attr, order, "order").failed())
         return {};
-    } else if (attr.getName() == "CGALayout") {
-      ctaAttr = attr.getValue();
-#endif
+    } else if (attr.getName() == "tileShape") {
+      if (parseIntArrayAttr(parser, attr, tileShape, "tile shape").failed())
+        return {};
     } else {
       parser.emitError(parser.getNameLoc(), "unexpected key: ")
           << attr.getName().strref();
@@ -87,23 +130,165 @@ Attribute TiledEncodingAttr::parse(AsmParser &parser, Type type) {
     }
   }
 
-  return parser.getChecked<TiledEncodingAttr>(parser.getContext(), /*REMOVE*/0u);
+  // Assume CTALayout is always default in textual IR -- TODO: consider parsing
+  // if we make parseCTAAttr shared
+  unsigned rank = order.size();
+  auto CTALayout = gpu::CTAEncodingAttr::getDefault(parser.getContext(), rank);
+
+  return parser.getChecked<TiledEncodingAttr>(parser.getContext(), tilesPerCore,
+                                              order, tileShape, CTALayout);
 }
 
 void TiledEncodingAttr::print(AsmPrinter &printer) const {
+  // TODO: print CTALayout?
   printer << "<{"
-          << "ADB TODO" << "}>";
+          << "tilesPerCore = [" << getTilesPerCore() << "]"
+          << ", order = [" << getOrder() << "]"
+          << ", tileShape = [" << getTileShape() << "]"
+          << "}>";
 }
 
-gpu::CTAEncodingAttr TiledEncodingAttr::getCTALayout() const {
-  MLIRContext *ctx = getContext();
-  StringAttr kBlock = StringAttr::get(ctx, "block");
+struct TritonTenstorrentInferLayoutInterface
+    : public triton::DialectInferLayoutInterface {
+  using DialectInferLayoutInterface::DialectInferLayoutInterface;
 
-  LinearLayout layout = LinearLayout::empty();
-  // TODO: make identity 
+  static DialectInferLayoutInterface *
+  getTritonGPULayoutInterface(MLIRContext *ctx) {
+    auto interface =
+        ctx->getOrLoadDialect<gpu::TritonGPUDialect>()
+            ->getRegisteredInterface<DialectInferLayoutInterface>();
+    assert(interface && "TritonGPU dialect must register a layout interface");
+    return interface;
+  }
 
-  return gpu::CTAEncodingAttr::get(ctx, layout);
-}
+  LogicalResult
+  inferReduceOpEncoding(Attribute operandEncoding, unsigned axis,
+                        Attribute &resultEncoding,
+                        std::optional<Location> loc) const override {
+    return getTritonGPULayoutInterface(getContext())
+        ->inferReduceOpEncoding(operandEncoding, axis, resultEncoding, loc);
+  }
+
+  LogicalResult
+  inferTransOpEncoding(Attribute operandEncoding, ArrayRef<int64_t> shape,
+                       ArrayRef<int32_t> order, Attribute &resultEncoding,
+                       std::optional<Location> loc) const override {
+    return getTritonGPULayoutInterface(getContext())
+        ->inferTransOpEncoding(operandEncoding, shape, order, resultEncoding,
+                               loc);
+  }
+
+  LogicalResult
+  inferExpandDimsOpEncoding(Attribute operandEncoding, unsigned axis,
+                            Attribute &resultEncoding,
+                            std::optional<Location> loc) const override {
+    return getTritonGPULayoutInterface(getContext())
+        ->inferExpandDimsOpEncoding(operandEncoding, axis, resultEncoding, loc);
+  }
+
+  LogicalResult
+  inferDotOpEncoding(Attribute operandEncoding, unsigned opIdx,
+                     Attribute retEncoding,
+                     std::optional<Location> location) const override {
+#if 1
+    // TODO: opIdx verification
+    auto tiledEnc = dyn_cast_or_null<TiledEncodingAttr>(operandEncoding);
+    if (!tiledEnc)
+      return emitOptionalError(
+          location, "Dot's a/b's encoding should be of TiledEncodingAttr");
+#else
+    if (auto dotOpEnc =
+            mlir::dyn_cast<gpu::DotOperandEncodingAttr>(operandEncoding)) {
+      if (opIdx != dotOpEnc.getOpIdx())
+        return emitOptionalError(location, "Wrong opIdx");
+      if (retEncoding != dotOpEnc.getParent())
+        return emitOptionalError(location, "Incompatible parent encoding");
+    } else
+      return emitOptionalError(
+          location, "Dot's a/b's encoding should be of DotOperandEncodingAttr");
+#endif
+    return success();
+  }
+
+  LogicalResult
+  verifyDotOpEncodingCompatibility(Operation *op, Attribute operandEncodingA,
+                                   Attribute operandEncodingB) const override {
+#if 1
+    auto tiledAEncoding = dyn_cast_or_null<TiledEncodingAttr>(operandEncodingA);
+    auto tiledBEncoding = dyn_cast_or_null<TiledEncodingAttr>(operandEncodingB);
+#else
+    auto aEncoding =
+        mlir::dyn_cast<triton::gpu::DotOperandEncodingAttr>(operandEncodingA);
+    auto bEncoding =
+        mlir::dyn_cast<triton::gpu::DotOperandEncodingAttr>(operandEncodingB);
+    if (!aEncoding && !bEncoding)
+      return mlir::success();
+    if (!aEncoding || !bEncoding)
+      return op->emitError("mismatching encoding between A and B operands");
+
+    // Verify that the encodings are valid.
+    auto tiledAEncoding =
+        dyn_cast_or_null<TiledEncodingAttr>(aEncoding.getParent());
+    auto tiledBEncoding =
+        dyn_cast_or_null<TiledEncodingAttr>(bEncoding.getParent());
+#endif
+    auto dotOp = cast<DotOp>(op);
+    auto resEnc = dotOp.getResult().getType().getEncoding();
+    auto tiledResEncoding = dyn_cast<TiledEncodingAttr>(resEnc);
+
+    if (tiledAEncoding || tiledBEncoding || tiledResEncoding) {
+      if (!tiledAEncoding || !tiledBEncoding || !tiledResEncoding)
+        return op->emitError("mismatching tiled encoding");
+
+      //  auto tiledBEncoding = cast<TiledEncodingAttr>(bEncoding.getParent());
+      if (tiledAEncoding.getTileShape() != tiledBEncoding.getTileShape() ||
+          tiledAEncoding.getTileShape() != tiledResEncoding.getTileShape()) {
+        return op->emitError("mismatched tiled sizes.");
+      }
+    }
+    return success();
+  }
+
+  LogicalResult
+  verifyLayoutsAreEqual(ArrayRef<int64_t> shape, Attribute expected,
+                        Attribute got,
+                        std::optional<Location> loc) const override {
+    return getTritonGPULayoutInterface(getContext())
+        ->verifyLayoutsAreEqual(shape, expected, got, loc);
+  }
+
+  LogicalResult
+  inferReshapeOpEncoding(ArrayRef<int64_t> srcShape, Attribute srcEnc,
+                         ArrayRef<int64_t> dstShape, Attribute &dstEnc,
+                         std::optional<Location> loc) const override {
+    return getTritonGPULayoutInterface(getContext())
+        ->inferReshapeOpEncoding(srcShape, srcEnc, dstShape, dstEnc, loc);
+  }
+
+  LogicalResult
+  inferDefaultJoinOpEncoding(Attribute srcEnc, Attribute &dstEnc,
+                             ArrayRef<int64_t> shape,
+                             std::optional<Location> loc) const override {
+    return getTritonGPULayoutInterface(getContext())
+        ->inferDefaultJoinOpEncoding(srcEnc, dstEnc, shape, loc);
+  }
+
+  LogicalResult
+  inferSplitOpEncoding(Attribute srcEnc, Attribute &dstEnc,
+                       ArrayRef<int64_t> shape,
+                       std::optional<Location> loc) const override {
+    return getTritonGPULayoutInterface(getContext())
+        ->inferSplitOpEncoding(srcEnc, dstEnc, shape, loc);
+  }
+
+  LogicalResult
+  inferFp4ToFpOpEncoding(ArrayRef<int64_t> shape, int axis, Attribute inEnc,
+                         Attribute &outEnc, bool fwdInference,
+                         std::optional<Location> loc) const override {
+    return getTritonGPULayoutInterface(getContext())
+        ->inferFp4ToFpOpEncoding(shape, axis, inEnc, outEnc, fwdInference, loc);
+  }
+};
 
 void TritonTenstorrentDialect::initialize() {
   addAttributes<
@@ -114,6 +299,7 @@ void TritonTenstorrentDialect::initialize() {
 #define GET_OP_LIST
 #include "npu/include/Dialect/TritonTenstorrent/IR/Ops.cpp.inc"
       >();
+  addInterfaces<TritonTenstorrentInferLayoutInterface>();
 }
 
 } // namespace mlir::triton::npu::tt
