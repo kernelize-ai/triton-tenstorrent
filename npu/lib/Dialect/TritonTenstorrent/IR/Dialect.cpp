@@ -44,6 +44,67 @@ void RegisterEncodingAttr::print(AsmPrinter &printer) const {
           << "parent = " << getParent() << "}>";
 }
 
+Attribute TiledEncodingAttr::parse(AsmParser &parser, Type type) {
+  if (parser.parseLess().failed())
+    return {};
+  // Parse the data as a dictionary
+  DictionaryAttr dict;
+  if (parser.parseAttribute(dict).failed())
+    return {};
+  if (parser.parseGreater().failed())
+    return {};
+
+  // TODO: 
+    for (const NamedAttribute &attr : dict) {
+#if 1
+    if (false) {
+#else
+    if (attr.getName() == "sizePerThread") {
+      if (parseIntArrayAttr(parser, attr, sizePerThread,
+                            "number of elements per thread")
+              .failed())
+        return {};
+    } else if (attr.getName() == "threadsPerWarp") {
+      if (parseIntArrayAttr(parser, attr, threadsPerWarp,
+                            "number of threads per warp")
+              .failed())
+        return {};
+    } else if (attr.getName() == "warpsPerCTA") {
+      if (parseIntArrayAttr(parser, attr, warpsPerCTA,
+                            "number of warps per CTA")
+              .failed())
+        return {};
+    } else if (attr.getName() == "order") {
+      if (parseIntArrayAttr(parser, attr, order, "order").failed())
+        return {};
+    } else if (attr.getName() == "CGALayout") {
+      ctaAttr = attr.getValue();
+#endif
+    } else {
+      parser.emitError(parser.getNameLoc(), "unexpected key: ")
+          << attr.getName().strref();
+      return {};
+    }
+  }
+
+  return parser.getChecked<TiledEncodingAttr>(parser.getContext(), /*REMOVE*/0u);
+}
+
+void TiledEncodingAttr::print(AsmPrinter &printer) const {
+  printer << "<{"
+          << "ADB TODO" << "}>";
+}
+
+gpu::CTAEncodingAttr TiledEncodingAttr::getCTALayout() const {
+  MLIRContext *ctx = getContext();
+  StringAttr kBlock = StringAttr::get(ctx, "block");
+
+  LinearLayout layout = LinearLayout::empty();
+  // TODO: make identity 
+
+  return gpu::CTAEncodingAttr::get(ctx, layout);
+}
+
 void TritonTenstorrentDialect::initialize() {
   addAttributes<
 #define GET_ATTRDEF_LIST

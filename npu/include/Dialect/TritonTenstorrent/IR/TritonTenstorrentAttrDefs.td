@@ -38,4 +38,33 @@ def RegisterEncodingAttr : AttrDef<TritonTenstorrent_Dialect, "RegisterEncoding"
   }];
 }
 
+// TODO: terrible name conflicts ahead
+def TiledEncodingAttr : AttrDef<TritonTenstorrent_Dialect, "TiledEncoding", [DistributedEncodingTrait, LayoutEncodingTrait]> {
+  let mnemonic = "tiled_encoding";
+
+  let description = [{
+    A distributed encoding to represent tiled tensors in L1/SRAM.
+  }];
+
+  let parameters = (
+    ins
+    "unsigned":$tileSize
+  );
+  let hasCustomAssemblyFormat = 1;
+
+  let extraClassDeclaration = [{
+    SmallVector<unsigned> getRepOrder() const {
+        // TODO 
+        return {}; 
+    }
+
+    gpu::CTAEncodingAttr getCTALayout() const;
+
+    LinearLayout toLinearLayout(ArrayRef<int64_t> shape) const {
+        // TODO
+        return LinearLayout::empty();
+    }
+  }];
+}
+
 #endif // TRITONTENSTORRENT_ATTRDEFS
