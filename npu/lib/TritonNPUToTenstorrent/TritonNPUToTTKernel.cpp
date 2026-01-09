@@ -191,6 +191,25 @@ private:
   const bool addMMInit;
 };
 
+inline SmallVector<int64_t, 2>
+convertShapeToTileShape(ArrayRef<int64_t> shape) {
+  if (shape.size() == 1) {
+    return SmallVector<int64_t, 2>{shape[0] / (32 * 32)};
+  }
+  SmallVector<int64_t, 2> tileShape;
+  tileShape.reserve(shape.size());
+  for (unsigned i = 0; i < shape.size(); ++i) {
+    if (shape[i] == 1) {
+      tileShape.push_back(1);
+      continue;
+    }
+    assert(shape[i] % 32 == 0 &&
+           "expecting shape dimensions to be multiple of 32");
+    tileShape.push_back(shape[i] / 32);
+  }
+  return tileShape;
+}
+
 } // namespace
 
 struct ConvertTritonNPUToTTKernelPass
@@ -204,10 +223,7 @@ struct ConvertTritonNPUToTTKernelPass
     typeConverter.addConversion([](Type type) { return type; });
     typeConverter.addConversion([](gpu::MemDescType memdesc) {
       // convert memdesc to memref
-      // TODO: this currently blindly changes the shape from 1024 to the
-      // ttcore::TileSize, but we should encode that info into the layout and
-      // use the Triton memdesc provided shape instead.
-      auto shape = SmallVector<int64_t>(2, 1);
+      auto shape = convertShapeToTileShape(memdesc.getShape());
       auto ttcoreTileType = ttcore::TileType::get(
           memdesc.getContext(), ttcore::TileType::getDefaultShape(),
           ttcore::elementTypeToDataType(memdesc.getElementType()));
@@ -224,8 +240,7 @@ struct ConvertTritonNPUToTTKernelPass
         return IntegerType::get(type.getContext(), 32);
       }
       if (isa<npu::tt::TileEncodingAttr>(type.getEncoding())) {
-        // TODO: same caveats as above re:ttts layout
-        auto shape = SmallVector<int64_t>(1, 1);
+        auto shape = convertShapeToTileShape(type.getShape());
         auto ttcoreTileType = ttcore::TileType::get(
             type.getContext(), ttcore::TileType::getDefaultShape(),
             ttcore::elementTypeToDataType(etype));
@@ -235,10 +250,13 @@ struct ConvertTritonNPUToTTKernelPass
                                          ttcore::MemorySpace::DeviceL1));
         return ttkernel::CBType::get(cbMemRefType);
       }
-      if (isa<triton::gpu::DotOperandEncodingAttr>(type.getEncoding())) {
+      if (auto dotOperandEncoding =
+              dyn_cast<triton::gpu::DotOperandEncodingAttr>(
+                  type.getEncoding())) {
         // dot operands read directly from cbs, so convert to cb type
-        // TODO: same caveats as above re:ttts layout
-        auto shape = SmallVector<int64_t>(1, 1);
+        assert(type.getShape().size() == 2 &&
+               "expecting rank 2 tensor for dot operand");
+        auto shape = convertShapeToTileShape(type.getShape());
         auto ttcoreTileType = ttcore::TileType::get(
             type.getContext(), ttcore::TileType::getDefaultShape(),
             ttcore::elementTypeToDataType(etype));

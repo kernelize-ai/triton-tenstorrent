@@ -64,8 +64,6 @@ struct ConvertLoadOp : public OpConversionPattern<triton::LoadOp> {
       return failure();
     }
 
-    LDBG("Converting load op: " << *op << "\n");
-
     Value cb =
         rewriter.getRemappedValue(cast<gpu::LocalStoreOp>(user).getDst());
 
@@ -80,34 +78,50 @@ struct ConvertLoadOp : public OpConversionPattern<triton::LoadOp> {
     auto dataFormat = ttkernel::GetDataFormatOp::create(rewriter, loc, cb);
     auto pageSize = ttkernel::GetTileSizeOp::create(rewriter, loc, cb);
 
-    Value c1bit = arith::createConstantI1(loc, rewriter, 1);
+    Value trueVal = arith::createConstantI1(loc, rewriter, 1);
     Value addrGen = ttkernel::GetInterleavedAddrGenFastOp::create(
-        rewriter, loc, c1bit, baseAddr, pageSize, dataFormat);
+        rewriter, loc, /*dram=*/trueVal, baseAddr, pageSize, dataFormat);
 
     rewriter.restoreInsertionPoint(opInsertionPt);
 
     // convert bytes offset to tile index
     Value offset = adaptor.getPtr();
-    Value tile_id = arith::DivUIOp::create(rewriter, loc, offset, pageSize);
+    Value baseTileIndex =
+        arith::DivUIOp::create(rewriter, loc, offset, pageSize);
 
-    Value const1 = arith::createConstantI32(loc, rewriter, 1);
     Value const0 = arith::createConstantI32(loc, rewriter, 0);
 
-    Value nocAddr = ttkernel::InterleavedAddrGenFastGetNocAddrOp::create(
-        rewriter, loc, addrGen, tile_id, const0, Value());
+    // determine how many tiles we need to load by converting the shape to tiles
+    const int32_t numTiles = cast<ttkernel::CBType>(cb.getType()).getNumTiles();
+    Value numPages = arith::createConstantI32(loc, rewriter, numTiles);
+    ttkernel::CBReserveBackOp::create(rewriter, loc, cb, numPages);
 
-    ttkernel::CBReserveBackOp::create(rewriter, loc, cb, const1);
-
-    // 3. get L1 address
-    //       %11 = ttkernel.get_write_ptr(%0)
     Value l1Addr = ttkernel::GetWritePtrOp::create(rewriter, loc, cb);
 
-    // 4. async read from noc to l1, size in bytes
-    //       ttkernel.noc_async_read(%10, %13, %c4096_i32)
-    ttkernel::NocAsyncReadOp::create(rewriter, loc, nocAddr, l1Addr, pageSize);
+    scf::ForOp loadTileLoop = scf::ForOp::create(
+        rewriter, loc, arith::createConstantI32(loc, rewriter, 0), numPages,
+        arith::createConstantI32(loc, rewriter, 1),
+        ValueRange{l1Addr, baseTileIndex});
+    {
+      rewriter.setInsertionPointToStart(loadTileLoop.getBody());
+      Value crtL1Address = loadTileLoop.getRegionIterArgs()[0];
+      Value crtTileIndex = loadTileLoop.getRegionIterArgs()[1];
+      // TODO: should the offset be const0 here? the only examples we have are
+      // TensorAccessor...
+      Value nocAddr = ttkernel::InterleavedAddrGenFastGetNocAddrOp::create(
+          rewriter, loc, addrGen, crtTileIndex, const0, Value());
+      ttkernel::NocAsyncReadOp::create(rewriter, loc, nocAddr, crtL1Address,
+                                       pageSize);
+      Value nextL1Address =
+          arith::AddIOp::create(rewriter, loc, crtL1Address, pageSize);
+      Value nextTileIndex =
+          arith::AddIOp::create(rewriter, loc, crtTileIndex,
+                                arith::createConstantI32(loc, rewriter, 1));
+      scf::YieldOp::create(rewriter, loc,
+                           ValueRange{nextL1Address, nextTileIndex});
+    }
 
-    // 5. barrier to ensure data is read from noc to l1
-    //       ttkernel.noc_async_read_barrier() : () -> ()
+    rewriter.setInsertionPointAfter(loadTileLoop);
     ttkernel::NocAsyncReadBarrierOp::create(rewriter, loc);
 
     rewriter.eraseOp(op);
@@ -147,27 +161,57 @@ struct ConvertStoreOp : public OpConversionPattern<triton::StoreOp> {
     auto dataFormat = ttkernel::GetDataFormatOp::create(rewriter, loc, cb);
     auto pageSize = ttkernel::GetTileSizeOp::create(rewriter, loc, cb);
 
-    Value c1bit = arith::createConstantI1(loc, rewriter, 1);
+    Value trueVal = arith::createConstantI1(loc, rewriter, 1);
     Value addrGen = ttkernel::GetInterleavedAddrGenFastOp::create(
-        rewriter, loc, c1bit, baseAddr, pageSize, dataFormat);
+        rewriter, loc, /*dram=*/trueVal, baseAddr, pageSize, dataFormat);
 
     rewriter.restoreInsertionPoint(opInsertionPt);
 
     // convert bytes offset to tile index
     Value offset = adaptor.getPtr();
-    Value tile_id = arith::DivUIOp::create(rewriter, loc, offset, pageSize);
+    Value baseTileIndex =
+        arith::DivUIOp::create(rewriter, loc, offset, pageSize);
 
-    Value const1 = arith::createConstantI32(loc, rewriter, 1);
     Value const0 = arith::createConstantI32(loc, rewriter, 0);
 
-    Value nocAddr = ttkernel::InterleavedAddrGenFastGetNocAddrOp::create(
-        rewriter, loc, addrGen, tile_id, const0, Value());
+    auto storeType = cast<RankedTensorType>(op.getValue().getType());
+    // determine how many tiles we need to load by converting the shape to tiles
+    const int32_t numTiles = cast<ttkernel::CBType>(cb.getType()).getNumTiles();
+    Value numPages = arith::createConstantI32(loc, rewriter, numTiles);
 
     Value l1Addr = ttkernel::GetReadPtrOp::create(rewriter, loc, cb);
-    ttkernel::NocAsyncWriteOp::create(rewriter, loc, l1Addr, nocAddr, pageSize);
+
+    scf::ForOp storeTileLoop = scf::ForOp::create(
+        rewriter, loc, arith::createConstantI32(loc, rewriter, 0), numPages,
+        arith::createConstantI32(loc, rewriter, 1),
+        ValueRange{l1Addr, baseTileIndex});
+    {
+      rewriter.setInsertionPointToStart(storeTileLoop.getBody());
+
+      Value crtL1Address = storeTileLoop.getRegionIterArgs()[0];
+      Value crtTileIndex = storeTileLoop.getRegionIterArgs()[1];
+
+      // TODO: should the offset be const0 here? the only examples we have are
+      // TensorAccessor..
+      Value nocAddr = ttkernel::InterleavedAddrGenFastGetNocAddrOp::create(
+          rewriter, loc, addrGen, crtTileIndex, const0, Value());
+
+      ttkernel::NocAsyncWriteOp::create(rewriter, loc, crtL1Address, nocAddr,
+                                        pageSize);
+
+      Value nextL1Address =
+          arith::AddIOp::create(rewriter, loc, crtL1Address, pageSize);
+      Value nextTileIndex =
+          arith::AddIOp::create(rewriter, loc, crtTileIndex,
+                                arith::createConstantI32(loc, rewriter, 1));
+      scf::YieldOp::create(rewriter, loc,
+                           ValueRange{nextL1Address, nextTileIndex});
+    }
+    rewriter.setInsertionPointAfter(storeTileLoop);
+
     ttkernel::NocAsyncWriteBarrierOp::create(rewriter, loc);
-    Value numPages = arith::createConstantI32(loc, rewriter, 1);
     ttkernel::CBPopFrontOp::create(rewriter, loc, cb, numPages);
+
     rewriter.eraseOp(op);
     return success();
   }
@@ -184,32 +228,44 @@ struct ConvertLocalStoreOp : public OpConversionPattern<gpu::LocalStoreOp> {
     Location loc = op.getLoc();
 
     auto dst = adaptor.getDst();
-    auto srcOp = op.getSrc().getDefiningOp();
+    auto dstCBType = cast<ttkernel::CBType>(dst.getType());
+    Value numPages =
+        arith::createConstantI32(loc, rewriter, dstCBType.getNumTiles());
 
+    auto srcOp = op.getSrc().getDefiningOp();
     if (!isa<triton::LoadOp>(srcOp)) {
-      // reserve back the cb for the store
-      Value numPages = arith::createConstantI32(loc, rewriter, 1);
+      // reserve back the cb for pack tile
       ttkernel::CBReserveBackOp::create(rewriter, loc, dst, numPages);
 
-      // Pack the tile into the cb
-      // TODO: hard code the dest register index as 2 for now, but we should set
-      // this more explicitly based on all the ops in the kernel
-      Value destRegisterIndex = arith::createIndexConstant(loc, rewriter, 2);
-      Value outIndex = arith::createIndexConstant(loc, rewriter, 0);
-      ttkernel::PackTileOp::create(rewriter, loc, destRegisterIndex, dst,
-                                   outIndex,
-                                   /*outOfOrder=*/true);
+      auto srcType = cast<RankedTensorType>(op.getSrc().getType());
+      unsigned destIndexOffset = 0;
+      if (auto tileEncodingAttr =
+              dyn_cast<npu::tt::TileEncodingAttr>(srcType.getEncoding())) {
+        destIndexOffset = tileEncodingAttr.getIndex();
+      }
 
+      // commit and wait before packing tiles
+      ttkernel::TileRegsCommitOp::create(rewriter, loc);
+      ttkernel::TileRegsWaitOp::create(rewriter, loc);
+
+      for (unsigned i = destIndexOffset;
+           i < destIndexOffset + dstCBType.getNumTiles(); ++i) {
+        // assume the output CB is always 0-indexed
+        ttkernel::PackTileOp::create(
+            rewriter, loc, arith::createConstantI32(loc, rewriter, i), dst,
+            arith::createConstantI32(loc, rewriter, i - destIndexOffset));
+      }
+
+      ttkernel::TileRegsReleaseOp::create(rewriter, loc);
+
+      ttkernel::CBPushBackOp::create(rewriter, loc, dst, numPages);
       rewriter.eraseOp(op);
       return success();
     }
 
-    Value const1 = arith::createConstantI32(loc, rewriter, 1);
-    //       ttkernel.cb_push_back(%0, %c1_i32)
-    ttkernel::CBPushBackOp::create(rewriter, loc, dst, const1);
-
+    // store from a load op just signals that the data is ready in the cb
+    ttkernel::CBPushBackOp::create(rewriter, loc, dst, numPages);
     rewriter.eraseOp(op);
-
     return success();
   }
 };
@@ -223,15 +279,26 @@ struct ConvertLocalLoadOp : public OpConversionPattern<gpu::LocalLoadOp> {
     Location loc = op.getLoc();
 
     auto src = adaptor.getSrc();
+    auto srcType = cast<ttkernel::CBType>(src.getType());
+    Value numPages =
+        arith::createConstantI32(loc, rewriter, srcType.getNumTiles());
 
     LDBG("Converted load src type = " << src.getType() << "\n");
     assert(isa<ttkernel::CBType>(src.getType()) &&
            "expected memref type for type converted load src");
 
+    const bool hasDotUser = llvm::any_of(op->getUsers(), [](Operation *user) {
+      return isa<triton::DotOp>(user);
+    });
+
     // 1. wait front on the cb to know data is ready
-    Value numPages = arith::createConstantI32(loc, rewriter, 1);
-    auto waitFrontOp =
-        ttkernel::CBWaitFrontOp::create(rewriter, loc, src, numPages);
+    if (!hasDotUser) {
+      // Dot ops read directly from cbs and handle their own waits
+      // TODO: consider verifying that all users are dot ops?
+      // TODO: could we sink this into last block (3. copy data...)?
+      auto waitFrontOp =
+          ttkernel::CBWaitFrontOp::create(rewriter, loc, src, numPages);
+    }
 
     // 2. for ops that operate directly on data in cbs, just replace the load op
     // with its ptr
@@ -259,6 +326,7 @@ struct ConvertLocalLoadOp : public OpConversionPattern<gpu::LocalLoadOp> {
     Value destRegisterIndex =
         arith::createIndexConstant(loc, rewriter, loadEncoding.getIndex());
     ttkernel::CopyTileOp::create(rewriter, loc, src, c0, destRegisterIndex);
+    ttkernel::CBPopFrontOp::create(rewriter, loc, src, numPages);
     rewriter.replaceOp(op, src);
     return success();
   }

@@ -48,6 +48,7 @@ if [[ -z "${NO_TTMLIR_RUNTIME:-}" ]]; then
 
     cmake -G Ninja -B build \
         -DCMAKE_C_COMPILER=$CC -DCMAKE_CXX_COMPILER=$CXX \
+        -DCMAKE_BUILD_TYPE=RelWithDebInfo \
         -DMLIR_DIR="$MLIR_DIR" -DLLVM_DIR="$LLVM_DIR" \
         -DCMAKE_BUILD_WITH_INSTALL_RPATH=ON \
         -DCMAKE_INSTALL_RPATH='$ORIGIN' \

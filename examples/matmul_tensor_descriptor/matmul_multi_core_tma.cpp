@@ -101,6 +101,13 @@ void matmul_multi_core(
         N,
         TILE_HW);
 
+    uint32_t BM = 32;  // block M in elements
+    uint32_t BN = 64;  // block N in elements
+    uint32_t BK = 64;  // block K in elements
+
+    TT_ASSERT(BM % TILE_HEIGHT == 0 && BN % TILE_WIDTH == 0 && BK % TILE_WIDTH == 0,
+          "Block sizes must be tile-multiple (32).");
+
     // Set up mesh command queue, workload, device range, and program for multi-core execution
     distributed::MeshCommandQueue& cq = mesh_device->mesh_command_queue();
     distributed::MeshWorkload workload;
@@ -109,7 +116,22 @@ void matmul_multi_core(
 
     // Get the compute grid size to determine how many cores are available
     auto core_grid = mesh_device->compute_with_storage_grid_size();
-    auto num_output_tiles_total = (M * N) / TILE_HW;
+    auto ceil_div = [](uint32_t a, uint32_t b) { return (a + b - 1) / b; };
+
+    // Extracting Matrix dimensions from input/output vectors and converting to tile coordinates.
+    // The accelerator works with 32x32 tiles, so we need to convert from element dimensions
+    // to tile dimensions for proper addressing and computation.
+    const uint32_t Mt = M / TILE_HEIGHT;  // Number of tiles in M dimension
+    const uint32_t Kt = K / TILE_WIDTH;   // Number of tiles in K dimension
+    const uint32_t Nt = N / TILE_WIDTH;   // Number of tiles in N dimension
+
+    const uint32_t BMt = BM / TILE_HEIGHT; // tiles per block in M
+    const uint32_t BNt = BN / TILE_WIDTH;  // tiles per block in N
+    const uint32_t BKt = BK / TILE_WIDTH;  // tiles per block in K
+
+    const uint32_t grid_m = ceil_div(Mt, BMt);
+    const uint32_t grid_n = ceil_div(Nt, BNt);
+    const uint32_t num_output_blocks_total = grid_m * grid_n;
 
     // Use the split_work_to_cores utility function to distribute matrix multiplication work
     // across available cores for efficient SPMD (Single Program, Multiple Data) execution.
@@ -120,10 +142,10 @@ void matmul_multi_core(
     // The secondary group is empty if the work can be evenly distributed across all cores. This
     // approach minimizes workload imbalance between cores for optimal performance.
     auto [num_cores, all_cores, core_group_1, core_group_2, work_per_core1, work_per_core2] =
-        split_work_to_cores(core_grid, num_output_tiles_total);
+        split_work_to_cores(core_grid, num_output_blocks_total);
     fmt::print(
         "Distributing {} output tiles across {} cores: {} cores ({}) x {} tiles/core + {} cores ({}) x {} tiles/core\n",
-        num_output_tiles_total,
+        num_output_blocks_total,
         num_cores,
         core_group_1.num_cores(),
         core_group_1.str(),
@@ -133,12 +155,6 @@ void matmul_multi_core(
         work_per_core2);
     fmt::print("All cores: {}\n", all_cores.str());
 
-    // Extracting Matrix dimensions from input/output vectors and converting to tile coordinates.
-    // The accelerator works with 32x32 tiles, so we need to convert from element dimensions
-    // to tile dimensions for proper addressing and computation.
-    const uint32_t Mt = M / TILE_HEIGHT;  // Number of tiles in M dimension
-    const uint32_t Kt = K / TILE_WIDTH;   // Number of tiles in K dimension
-    const uint32_t Nt = N / TILE_WIDTH;   // Number of tiles in N dimension
     fmt::print(
         "Matrix A: {}x{} ({} tiles), Matrix B: {}x{} ({} tiles), Output C: {}x{} ({} tiles)\n",
         M,
@@ -178,24 +194,33 @@ void matmul_multi_core(
     // the compute kernel is using the other tile). This number can be adjusted based on the use case, but generally
     // diminishing returns are observed after several tiles.
     // input tiles count is = 2 so one tile can be read while the other is being processed
+    const uint32_t A_tiles_per_block = BMt * BKt;
+    const uint32_t B_tiles_per_block = BKt * BNt;
+    const uint32_t C_tiles_per_block = BMt * BNt;
+    fmt::print(
+        "Circular Buffer Config: A tiles per block={}, B tiles per block={}, C tiles per block={}\n",
+        A_tiles_per_block,
+        B_tiles_per_block,
+        C_tiles_per_block);
+
     const auto cb_data_format = tt::DataFormat::Float16_b;
-    uint32_t num_input_tiles = 2;
+    uint32_t cb_buffer_depth = 2; 
     tt_metal::CreateCircularBuffer(
         program,
         all_cores,  // create on all cores
-        CircularBufferConfig(num_input_tiles * single_tile_size, {{CBIndex::c_0, cb_data_format}})
+        CircularBufferConfig(A_tiles_per_block * cb_buffer_depth * single_tile_size, {{CBIndex::c_0, cb_data_format}})
             .set_page_size(CBIndex::c_0, single_tile_size));
 
     tt_metal::CreateCircularBuffer(
         program,
         all_cores,  // create on all cores
-        CircularBufferConfig(num_input_tiles * single_tile_size, {{CBIndex::c_1, cb_data_format}})
+        CircularBufferConfig(B_tiles_per_block * cb_buffer_depth * single_tile_size, {{CBIndex::c_1, cb_data_format}})
             .set_page_size(CBIndex::c_1, single_tile_size));
 
     tt_metal::CreateCircularBuffer(
         program,
         all_cores,  // create on all cores
-        CircularBufferConfig(num_input_tiles * single_tile_size, {{CBIndex::c_16, cb_data_format}})
+        CircularBufferConfig(C_tiles_per_block * cb_buffer_depth * single_tile_size, {{CBIndex::c_16, cb_data_format}})
             .set_page_size(CBIndex::c_16, single_tile_size));
 
     // Create Kernels (Reader, Writer, Compute)

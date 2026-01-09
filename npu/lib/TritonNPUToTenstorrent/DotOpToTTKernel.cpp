@@ -40,11 +40,99 @@ struct ConvertDotOp : public OpConversionPattern<triton::DotOp> {
     Location loc = op.getLoc();
     auto typeConverter = getTypeConverter();
 
-    Value c0 = arith::createIndexConstant(loc, rewriter, 0);
-    // Note that this must match the dest register index for PackTile
-    Value destRegisterIndex = arith::createIndexConstant(loc, rewriter, 2);
-    ttkernel::MatmulTilesOp::create(rewriter, loc, adaptor.getA(),
-                                    adaptor.getB(), c0, c0, destRegisterIndex);
+    ttkernel::CBType aCBType = cast<ttkernel::CBType>(adaptor.getA().getType());
+    ttkernel::CBType bCBType = cast<ttkernel::CBType>(adaptor.getB().getType());
+
+    auto aType = cast<RankedTensorType>(op.getA().getType());
+    auto bType = cast<RankedTensorType>(op.getB().getType());
+    if (aType.getRank() != 2 || bType.getRank() != 2)
+      return rewriter.notifyMatchFailure(op, "expected 2D dot");
+
+    int64_t M = aType.getShape()[0];
+    int64_t K = aType.getShape()[1];
+    int64_t N = bType.getShape()[1];
+
+    int64_t mTiles = (M + 31) / 32;
+    int64_t kTiles = (K + 31) / 32;
+    int64_t nTiles = (N + 31) / 32;
+
+    assert(mTiles * kTiles == aCBType.getNumTiles() &&
+           "a cb num tiles does not match a tensor shape");
+    assert(kTiles * nTiles == bCBType.getNumTiles() &&
+           "b cb num tiles does not match b tensor shape");
+
+    Value aNumInputTilesValue = arith::createConstantI32(
+        loc, rewriter, static_cast<int32_t>(aCBType.getNumTiles()));
+    Value bNumInputTilesValue = arith::createConstantI32(
+        loc, rewriter, static_cast<int32_t>(bCBType.getNumTiles()));
+
+    ttkernel::CBWaitFrontOp::create(rewriter, loc, adaptor.getA(),
+                                    aNumInputTilesValue);
+    ttkernel::CBWaitFrontOp::create(rewriter, loc, adaptor.getB(),
+                                    bNumInputTilesValue);
+
+    Value zeroI32 = arith::createConstantI32(loc, rewriter, 0);
+    Value oneI32 = arith::createConstantI32(loc, rewriter, 1);
+
+    Value mTilesVal =
+        arith::createConstantI32(loc, rewriter, static_cast<int32_t>(mTiles));
+    Value nTilesVal =
+        arith::createConstantI32(loc, rewriter, static_cast<int32_t>(nTiles));
+    Value kTilesVal =
+        arith::createConstantI32(loc, rewriter, static_cast<int32_t>(kTiles));
+
+    Value destRegisterInitial = arith::createIndexConstant(loc, rewriter, 0);
+    auto mLoop = scf::ForOp::create(rewriter, loc, zeroI32, mTilesVal, oneI32,
+                                    ValueRange{destRegisterInitial});
+    {
+      rewriter.setInsertionPointToStart(mLoop.getBody());
+      Value mIv = mLoop.getInductionVar();
+      Value destRegisterIndexM = mLoop.getRegionIterArgs()[0];
+
+      auto nLoop = scf::ForOp::create(rewriter, loc, zeroI32, nTilesVal, oneI32,
+                                      ValueRange{destRegisterIndexM});
+      {
+        rewriter.setInsertionPointToStart(nLoop.getBody());
+
+        Value nIv = nLoop.getInductionVar();
+        Value destRegisterIndexN = nLoop.getRegionIterArgs()[0];
+
+        auto kLoop =
+            scf::ForOp::create(rewriter, loc, zeroI32, kTilesVal, oneI32);
+        {
+          rewriter.setInsertionPointToStart(kLoop.getBody());
+          Value kIv = kLoop.getInductionVar();
+
+          // aTile = m * kTiles + k
+          Value aTile = arith::AddIOp::create(
+              rewriter, loc,
+              (arith::MulIOp::create(rewriter, loc, mIv, kTilesVal)), kIv);
+
+          // bTile = k * nTiles + n
+          Value bTile = arith::AddIOp::create(
+              rewriter, loc,
+              (arith::MulIOp::create(rewriter, loc, kIv, nTilesVal)), nIv);
+
+          ttkernel::MatmulTilesOp::create(rewriter, loc, adaptor.getA(),
+                                          adaptor.getB(), aTile, bTile,
+                                          destRegisterIndexN);
+          // scf::YieldOp::create(rewriter, loc);
+        }
+        rewriter.setInsertionPointAfter(kLoop);
+        Value nextDestRegisterIndex =
+            arith::AddIOp::create(rewriter, loc, destRegisterIndexN,
+                                  arith::createIndexConstant(loc, rewriter, 1));
+        scf::YieldOp::create(rewriter, loc, nextDestRegisterIndex);
+      }
+      rewriter.setInsertionPointAfter(nLoop);
+      scf::YieldOp::create(rewriter, loc, nLoop.getResult(0));
+    }
+    rewriter.setInsertionPointAfter(mLoop);
+
+    ttkernel::CBPopFrontOp::create(rewriter, loc, adaptor.getA(),
+                                   aNumInputTilesValue);
+    ttkernel::CBPopFrontOp::create(rewriter, loc, adaptor.getB(),
+                                   bNumInputTilesValue);
 
     // foward the dot op c operand to the users of the dot op
     rewriter.replaceOp(op, adaptor.getC());
