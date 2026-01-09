@@ -239,7 +239,7 @@ struct ConvertTritonNPUToTTKernelPass
       if (isa<triton::PointerType>(etype)) {
         return IntegerType::get(type.getContext(), 32);
       }
-      if (isa<npu::tt::TileEncodingAttr>(type.getEncoding())) {
+      if (isa<npu::tt::RegisterEncodingAttr>(type.getEncoding())) {
         auto shape = convertShapeToTileShape(type.getShape());
         auto ttcoreTileType = ttcore::TileType::get(
             type.getContext(), ttcore::TileType::getDefaultShape(),

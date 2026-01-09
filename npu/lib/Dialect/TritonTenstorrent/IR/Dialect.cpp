@@ -19,7 +19,7 @@ using namespace mlir::triton::npu;
 
 namespace mlir::triton::npu::tt {
 
-Attribute TileEncodingAttr::parse(AsmParser &parser, Type type) {
+Attribute RegisterEncodingAttr::parse(AsmParser &parser, Type type) {
   if (parser.parseLess().failed())
     return {};
   NamedAttrList attrs;
@@ -34,11 +34,11 @@ Attribute TileEncodingAttr::parse(AsmParser &parser, Type type) {
                      "expected a distributed encoding trait");
     return {};
   }
-  return parser.getChecked<TileEncodingAttr>(parser.getContext(), index,
-                                             parent);
+  return parser.getChecked<RegisterEncodingAttr>(parser.getContext(), index,
+                                                 parent);
 }
 
-void TileEncodingAttr::print(AsmPrinter &printer) const {
+void RegisterEncodingAttr::print(AsmPrinter &printer) const {
   printer << "<{"
           << "index = " << getIndex() << ", "
           << "parent = " << getParent() << "}>";
