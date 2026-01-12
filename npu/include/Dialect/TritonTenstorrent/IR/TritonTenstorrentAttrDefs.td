@@ -87,10 +87,7 @@ def TiledEncodingAttr : AttrDef<TritonTenstorrent_Dialect, "TiledEncoding", [Dis
         return SmallVector<unsigned>(getOrder());
     }
 
-    LinearLayout toLinearLayout(ArrayRef<int64_t> shape) const {
-        // TODO
-        return LinearLayout::empty();
-    }
+    LinearLayout toLinearLayout(ArrayRef<int64_t> shape) const;
   }];
 }
 
@@ -117,10 +114,7 @@ def TiledDotOperandEncodingAttr : AttrDef<TritonTenstorrent_Dialect, "TiledDotOp
         return cast<npu::tt::TiledEncodingAttr>(getParent()).getCTALayout();
     }
 
-    LinearLayout toLinearLayout(ArrayRef<int64_t> shape) const {
-        // TODO
-        return LinearLayout::empty();
-    }
+    LinearLayout toLinearLayout(ArrayRef<int64_t> shape) const;
   }];
 }
 
