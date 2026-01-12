@@ -148,6 +148,32 @@ void TiledEncodingAttr::print(AsmPrinter &printer) const {
           << "}>";
 }
 
+SmallVector<unsigned> TiledDotOperandEncodingAttr::getRepOrder() const {
+  if (auto parentTiled = dyn_cast<TiledEncodingAttr>(getParent())) {
+    return llvm::to_vector(parentTiled.getOrder());
+  }
+  llvm::report_fatal_error(
+      "getRepOrder not implemented for TiledDotOperandEncodingAttr");
+  return {};
+}
+
+LogicalResult TiledDotOperandEncodingAttr::verify(
+    ::llvm::function_ref<::mlir::InFlightDiagnostic()> emitError,
+    unsigned opIdx, Attribute parent) {
+  if (opIdx != 0 && opIdx != 1) {
+    return emitError()
+           << "tttg.tiled_dot_op opIdx parameter can be 0 or 1, got: " << opIdx;
+  }
+  if (!parent) {
+    return emitError() << "tttg.tiled_dot_op parent parameter cannot be null";
+  }
+  if (!isa<TiledEncodingAttr>(parent)) {
+    return emitError()
+           << "tttg.tiled_dot_op parent parameter must be a TiledEncodingAttr";
+  }
+  return success();
+}
+
 struct TritonTenstorrentInferLayoutInterface
     : public triton::DialectInferLayoutInterface {
   using DialectInferLayoutInterface::DialectInferLayoutInterface;
@@ -190,7 +216,7 @@ struct TritonTenstorrentInferLayoutInterface
   inferDotOpEncoding(Attribute operandEncoding, unsigned opIdx,
                      Attribute retEncoding,
                      std::optional<Location> location) const override {
-#if 1
+#if 0
     // TODO: opIdx verification
     auto tiledEnc = dyn_cast_or_null<TiledEncodingAttr>(operandEncoding);
     if (!tiledEnc)
@@ -198,14 +224,22 @@ struct TritonTenstorrentInferLayoutInterface
           location, "Dot's a/b's encoding should be of TiledEncodingAttr");
 #else
     if (auto dotOpEnc =
-            mlir::dyn_cast<gpu::DotOperandEncodingAttr>(operandEncoding)) {
+            mlir::dyn_cast<TiledDotOperandEncodingAttr>(operandEncoding)) {
       if (opIdx != dotOpEnc.getOpIdx())
         return emitOptionalError(location, "Wrong opIdx");
+#if 0
       if (retEncoding != dotOpEnc.getParent())
         return emitOptionalError(location, "Incompatible parent encoding");
+#else
+      if (!isa<TiledEncodingAttr>(retEncoding))
+        return emitOptionalError(location,
+                                 "Dot with tiled operand encoding's result "
+                                 "encoding should be of TiledEncodingAttr");
+#endif
     } else
       return emitOptionalError(
-          location, "Dot's a/b's encoding should be of DotOperandEncodingAttr");
+          location,
+          "Dot's a/b's encoding should be of TiledDotOperandEncodingAttr");
 #endif
     return success();
   }
@@ -213,14 +247,14 @@ struct TritonTenstorrentInferLayoutInterface
   LogicalResult
   verifyDotOpEncodingCompatibility(Operation *op, Attribute operandEncodingA,
                                    Attribute operandEncodingB) const override {
-#if 1
+#if 0
     auto tiledAEncoding = dyn_cast_or_null<TiledEncodingAttr>(operandEncodingA);
     auto tiledBEncoding = dyn_cast_or_null<TiledEncodingAttr>(operandEncodingB);
 #else
     auto aEncoding =
-        mlir::dyn_cast<triton::gpu::DotOperandEncodingAttr>(operandEncodingA);
+        mlir::dyn_cast<TiledDotOperandEncodingAttr>(operandEncodingA);
     auto bEncoding =
-        mlir::dyn_cast<triton::gpu::DotOperandEncodingAttr>(operandEncodingB);
+        mlir::dyn_cast<TiledDotOperandEncodingAttr>(operandEncodingB);
     if (!aEncoding && !bEncoding)
       return mlir::success();
     if (!aEncoding || !bEncoding)

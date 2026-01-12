@@ -251,7 +251,7 @@ struct ConvertTritonNPUToTTKernelPass
         return ttkernel::CBType::get(cbMemRefType);
       }
       if (auto dotOperandEncoding =
-              dyn_cast<triton::gpu::DotOperandEncodingAttr>(
+              dyn_cast<npu::tt::TiledDotOperandEncodingAttr>(
                   type.getEncoding())) {
         // dot operands read directly from cbs, so convert to cb type
         assert(type.getShape().size() == 2 &&
