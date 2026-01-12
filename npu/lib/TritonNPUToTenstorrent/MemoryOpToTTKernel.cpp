@@ -311,7 +311,7 @@ struct ConvertLocalLoadOp : public OpConversionPattern<gpu::LocalLoadOp> {
 
     auto dst = op.getResult();
     auto dstType = cast<RankedTensorType>(dst.getType());
-    if (isa<gpu::DotOperandEncodingAttr>(dstType.getEncoding())) {
+    if (isa<npu::tt::TiledDotOperandEncodingAttr>(dstType.getEncoding())) {
       // Dot ops read directly from cbs, so skip the copy tile and just replace
       // the load with its cb src
       rewriter.replaceOp(op, src);

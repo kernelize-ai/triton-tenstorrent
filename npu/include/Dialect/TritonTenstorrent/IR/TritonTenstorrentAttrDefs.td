@@ -94,4 +94,34 @@ def TiledEncodingAttr : AttrDef<TritonTenstorrent_Dialect, "TiledEncoding", [Dis
   }];
 }
 
+def TiledDotOperandEncodingAttr : AttrDef<TritonTenstorrent_Dialect, "TiledDotOperandEncoding", [DistributedEncodingTrait, LayoutEncodingTrait]> {
+  let mnemonic = "tiled_dot_op";
+
+  let description = [{
+    Idential to TritonGPU::DotOperandEncodingAttr but for Tiled parent attrs.
+  }];
+
+  let parameters = (
+    ins
+    "unsigned":$opIdx,
+    "Attribute":$parent
+  );
+
+  let assemblyFormat = "`<` `{` struct(params) `}` `>`";
+  let genVerifyDecl = 1;
+
+  let extraClassDeclaration = [{
+    SmallVector<unsigned> getRepOrder() const;
+
+    gpu::CTAEncodingAttr getCTALayout() const {
+        return cast<npu::tt::TiledEncodingAttr>(getParent()).getCTALayout();
+    }
+
+    LinearLayout toLinearLayout(ArrayRef<int64_t> shape) const {
+        // TODO
+        return LinearLayout::empty();
+    }
+  }];
+}
+
 #endif // TRITONTENSTORRENT_ATTRDEFS
