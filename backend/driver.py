@@ -12,6 +12,11 @@ from triton.runtime.build import compile_module_from_src
 from triton.backends.driver import DriverBase
 from triton.backends.compiler import GPUTarget
 
+try:
+    from triton.runtime.jit import TensorDescriptor
+except ImportError:
+    from triton.tools.tensor_descriptor import TensorDescriptor
+
 
 @functools.lru_cache()
 def is_macos():
@@ -133,10 +138,8 @@ class CPULauncher(object):
         launch_enter_hook = args[2]
         launch_exit_hook = args[3]
 
-        print(f"Driver: 0")
         schedule = self.device.create_schedule()
         command = schedule.create_command(function)
-        print(f"Driver: 1")
         import torch
         ## TODO: Get CB depth from TuningConfig
         cb_depth = 1
@@ -144,24 +147,59 @@ class CPULauncher(object):
         sig_types = list(self.signature.values())
         idx = 0
         cb_idx = 0
-        for arg in args[4:]:
-            ty = sig_types[idx]
+        for i, arg in enumerate(args[4:]):
+            ty = sig_types[i]
             if ty == "constexpr":
                 continue
             if isinstance(arg, torch.Tensor) or isinstance(arg, nexus.buffer):
                 command.set_const(cb_idx, cb_depth, "CB", nexus.get_data_type(arg))
                 cb_idx += 1
                 arg = self.device.create_buffer(arg)
+                command.set_arg(idx, arg)
+                idx += 1
                 buffers.append(arg)
-            command.set_arg(idx, arg)
-            idx += 1
-        print(f"Driver: 2")
+            elif isinstance(arg, TensorDescriptor):
+                arg_base = arg.base
+                command.set_const(cb_idx, cb_depth, "CB", nexus.get_data_type(arg_base))
+                cb_idx += 1
+                arg_buf = self.device.create_buffer(arg.base)
+                command.set_arg(idx, arg_buf)
+                idx += 1
+                # signed?
+                #command.set_arg(idx, 0 if not arg_base.dtype.is_signed else 1)
+                #idx += 1
+                # shape flattened
+                for dim in arg.shape:
+                    command.set_arg(idx, dim)
+                    idx += 1
+                # strides flattened
+                for stride in arg.strides:
+                    command.set_arg(idx, stride)
+                    idx += 1
+                padded = 1 # arg.padding == "nan"
+                command.set_arg(idx, padded)
+                idx += 1
+                ##  Repeat since the tensor descriptor is lowered with redundant information
+                # shape flattened
+                for dim in arg.shape:
+                    command.set_arg(idx, dim)
+                    idx += 1
+                # strides flattened
+                for stride in arg.strides:
+                    command.set_arg(idx, stride)
+                    idx += 1
+                # block shape
+                # command.set_arg(idx+4, arg.block_shape)
+                # command.set_arg(idx+5, arg.padding)
+                buffers.append(arg_buf)
+            else:
+                command.set_arg(idx, arg)
+                idx += 1
+
         command.finalize([gridX, gridY, gridZ], [num_warps, 1, 1], shared_memory)
         if launch_enter_hook is not None:
             launch_enter_hook(launch_metadata)
-        print(f"Driver: 3")
         schedule.run()
-        print(f"Driver: 4")
         if launch_exit_hook is not None:
             launch_exit_hook(launch_metadata)
 

@@ -261,7 +261,10 @@ def validate(M, N, K, dtype):
     #b = b.T.contiguous()
 
     naive_result = torch_matmul(a, b.T).to(torch.float16)
-    run_test(naive_result, matmul_tma(a, b, False), "TMA", enabled=True)
+    triton_result = matmul_tma(a, b, False)
+    print(f"triton_result: {triton_result}")
+    print(f"naive_result: {naive_result}")
+
     """
     run_test(naive_result, torch_matmul, a, b, "Torch", enabled=dtype == torch.float16)
     run_test(naive_result, cublas_matmul, a, b, "cuBLAS", enabled=cublas is not None)

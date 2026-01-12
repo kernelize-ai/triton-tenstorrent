@@ -99,7 +99,6 @@ class CPUBackend(BaseBackend):
 
     @staticmethod
     def make_ttir(mod, metadata, options):
-        print(f"make_ttir: 0")
         pm = ir.pass_manager(mod.context)
         pm.enable_debug()
         passes.common.add_inliner(pm)
