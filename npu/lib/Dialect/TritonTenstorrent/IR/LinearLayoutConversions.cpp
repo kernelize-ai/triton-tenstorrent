@@ -90,9 +90,24 @@ LinearLayout tt::TiledEncodingAttr::toLinearLayout(ArrayRef<int64_t> shape) cons
     SmallVector<StringAttr> outDimNames = standardOutDimNames(ctx, rank);
     
 #if 1
-    LinearLayout ret = identityStandardND(S("register"), getTileShape(), order) *
-                             identityStandardND(S("tile"), getTilesPerCore(), order) *
-                             identityStandardND(S("block"), /*todo size of rank*/{1, 1}, order);
+    LinearLayout ret = identityStandardND(S("register"), getTileShape(), order);
+    llvm::errs() << "reg layout: " << ret << "\n";
+#if 1
+    LinearLayout tile = identityStandardND(S("tile"), getTilesPerCore(), order);
+#else
+    LinearLayout tile = LinearLayout::empty();
+    assert(rank == getTilesPerCore().size());
+    assert(rank <= getTileShape().size()); // should be ok as long as order is valid
+    for (unsigned i = 0; i < rank; i++) {
+        auto dim = order[i];
+        tile *= LinearLayout::strided1D(getTilesPerCore()[dim], getTileShape()[dim], S("tile"), outDimNames[dim]);
+    }
+#endif
+    llvm::errs() << "tile layout: " << tile << "\n";
+
+    // currently not splitting blocks 
+    SmallVector<unsigned> blockShape(rank, 1);
+    ret *= tile * identityStandardND(S("block"), blockShape, order);
 #else
     SmallVector<StringAttr> outDimNames = standardOutDimNames(ctx, rank);
 

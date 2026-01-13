@@ -84,7 +84,7 @@ TEST_F(LinearLayoutConversionsTest, Tiled_MultiTile) {
     auto layout = toLinearLayout({64, 64}, enc);
     llvm::errs() << "layout = " << layout << "\n";
 
-#if 1
+#if 0
     applyLayoutAndPrint(layout, {{S("register"), 0}, {S("tile"), 0}, {S("block"), 0}});
     applyLayoutAndPrint(layout, {{S("register"), 16}, {S("tile"), 0}, {S("block"), 0}});
     applyLayoutAndPrint(layout, {{S("register"), 31}, {S("tile"), 0}, {S("block"), 0}});
@@ -103,6 +103,13 @@ TEST_F(LinearLayoutConversionsTest, Tiled_MultiTile) {
     // applyLayoutAndPrint(layout, {{S("register"), 31}, {S("tile"), 1}, {S("block"), 0}});
     // applyLayoutAndPrint(layout, {{S("register"), 31}, {S("tile"), 0}, {S("block"), 1}});
 #endif 
+
+    EXPECT_EQ(layout, LinearLayout({
+        {S("register"), {{0, 1}, {0, 2}, {0, 4}, {0, 8}, {0, 16}, {1, 0}, {2, 0}, {4, 0}, {8, 0}, {16, 0}}},
+        {S("tile"), {{0, 32}, {32, 0}}},
+        {S("block"), {}},
+    }, {S("dim0"), S("dim1")}));
+
 }
 
 }
