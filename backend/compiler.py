@@ -214,9 +214,9 @@ class CPUBackend(BaseBackend):
         passes.ttgpuir.add_remove_layout_conversions(pm)
 
         cpu.passes.tenstorrent.add_accelerate_matmul(pm)
-        passes.ttgpuir.add_remove_layout_conversions(
-            pm)  # TODO: can we propagate register indices + accelerate then remove layout conversions?
-
+        passes.ttgpuir.add_remove_layout_conversions(pm)
+        cpu.passes.tenstorrent.add_remove_dot_load_layout_conversions(pm)
+        passes.ttgpuir.add_remove_layout_conversions(pm)
         cpu.passes.tenstorrent.remove_redundant_masks(pm)
         passes.common.add_canonicalizer(pm)
 
