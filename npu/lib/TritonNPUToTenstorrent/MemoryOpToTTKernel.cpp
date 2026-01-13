@@ -153,16 +153,18 @@ struct ConvertLoadOp : public OpConversionPattern<triton::LoadOp> {
 
         Value byteOffsetVal =
             arith::createConstantI32(loc, rewriter, byteOffset);
+        // broken, we can't offset like this 
         Value crtByteOffset =
             arith::AddIOp::create(rewriter, loc, offset, byteOffsetVal);
         Value crtTileIndex =
             arith::DivUIOp::create(rewriter, loc, crtByteOffset, pageSize);
-
+        
+        Value localTileIndex = arith::createConstantI32(loc, rewriter, i);
+        Value localTileIndexOffset = arith::MulIOp::create(
+            rewriter, loc, localTileIndex,
+            pageSize);
         Value crtL1Address =
-            arith::AddIOp::create(rewriter, loc, l1Addr, byteOffsetVal);
-        // Value localTileIndex = arith::createConstantI32(loc, rewriter, i);
-        // Value crtTileIndex =
-        // arith::AddIOp::create(rewriter, loc, baseTileIndex, localTileIndex);
+            arith::AddIOp::create(rewriter, loc, l1Addr, localTileIndexOffset);
         // TODO: should the offset be const0 here? the only examples we have are
         // TensorAccessor...
         Value nocAddr = ttkernel::InterleavedAddrGenFastGetNocAddrOp::create(
