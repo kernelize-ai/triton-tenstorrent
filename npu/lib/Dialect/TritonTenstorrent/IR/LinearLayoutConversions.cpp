@@ -1,7 +1,7 @@
 #include <vector>
 
-#include "triton/Tools/LinearLayout.h"
 #include "triton/Tools/LayoutUtils.h"
+#include "triton/Tools/LinearLayout.h"
 
 #include "npu/include/Dialect/TritonTenstorrent/IR/Attributes.h"
 #include "npu/include/Dialect/TritonTenstorrent/IR/Dialect.h"
@@ -14,7 +14,7 @@ namespace {
 
 #define S(v) StringAttr::get(ctx, (v))
 
-// TODO: de-dupe with upstream 
+// TODO: de-dupe with upstream
 /// Function to generate lane and warp layout for dot operands.
 static LinearLayout broadcastedDotOperandLayout(MLIRContext *ctx,
                                                 ArrayRef<unsigned> shape,
@@ -65,107 +65,59 @@ SmallVector<StringAttr> permuteDimNames(const SmallVector<StringAttr> &names,
   return ret;
 }
 
-}
+} // namespace
 
-LinearLayout tt::TiledEncodingAttr::toLinearLayout(ArrayRef<int64_t> shape) const {
+LinearLayout
+tt::TiledEncodingAttr::toLinearLayout(ArrayRef<int64_t> shape) const {
   MLIRContext *ctx = getContext();
   auto order = getOrder();
   assert(shape.size() == order.size());
   auto rank = shape.size();
-  // (block, tile, register) -> (x, y) 
+  // (block, tile, register) -> (x, y)
 
-#if 1
-    // TODO: use nfaces for accurate register mapping inside a tile (for now we only operate on register granularity so this is fine)
-    SmallVector<unsigned> normalizedShape(shape.begin(), shape.end());
-#if 1
-    for (int i = 0; i < shape.size(); i++) {
-        normalizedShape[i] = normalizedShape[i] / getTilesPerCore()[i];
-    }
-#endif 
-    llvm::errs() << "normalizedShape = ";
-    for (auto v : normalizedShape) {
-        llvm::errs() << v << ", ";
-    }
-    llvm::errs() << "\n";
-    SmallVector<StringAttr> outDimNames = standardOutDimNames(ctx, rank);
-    
-#if 1
-    LinearLayout ret = identityStandardND(S("register"), getTileShape(), order);
-    llvm::errs() << "reg layout: " << ret << "\n";
-#if 1
-    LinearLayout tile = identityStandardND(S("tile"), getTilesPerCore(), order);
-#else
-    LinearLayout tile = LinearLayout::empty();
-    assert(rank == getTilesPerCore().size());
-    assert(rank <= getTileShape().size()); // should be ok as long as order is valid
-    for (unsigned i = 0; i < rank; i++) {
-        auto dim = order[i];
-        tile *= LinearLayout::strided1D(getTilesPerCore()[dim], getTileShape()[dim], S("tile"), outDimNames[dim]);
-    }
-#endif
-    llvm::errs() << "tile layout: " << tile << "\n";
-
-    // currently not splitting blocks 
-    SmallVector<unsigned> blockShape(rank, 1);
-    ret *= tile * identityStandardND(S("block"), blockShape, order);
-#else
-    SmallVector<StringAttr> outDimNames = standardOutDimNames(ctx, rank);
-
-    LinearLayout reg = LinearLayout::empty();
-    reg *= LinearLayout::identity1D(getTileShape()[order[0]], S("register"), outDimNames[order[0]]);
-    llvm::errs() << "reg checkpoint 1: " << reg << "\n";
-    reg *= LinearLayout::identity1D(getTileShape()[order[1]], S("register"), outDimNames[order[1]]);
-    llvm::errs() << "reg checkpoint 2: " << reg << "\n";
-
-    LinearLayout ret = reg *
-                             identityStandardND(S("tile"), getTilesPerCore(), order) *
-                             identityStandardND(S("block"), normalizedShape, order);
-#endif 
-    //llvm::errs() << "TiledEncodingAttr toLinearLayout: " << ret << "\n";
-#else
-
-  assert(shape.size() == order.size());
-  auto rank = shape.size();
   SmallVector<StringAttr> outDimNames = standardOutDimNames(ctx, rank);
 
-  LinearLayout ctaLayout = LinearLayout::empty();
-  for (int i = 0; i < rank; i++) {
-    // Start with the most-minor dimension, which is order[0].
-    int dim = order[i];
-    // TODO: use nfaces for accurate register mapping inside a tile (for now we only operate on register granularity so this is fine)
-    ctaLayout *= LinearLayout::identity1D(getRegistersPerTile()[dim], S("register"),
-                                          outDimNames[dim]);
-    ctaLayout *= LinearLayout::identity1D(getTilesPerCore()[dim], S("tile"),
-                                          outDimNames[dim]);
-    ctaLayout *= LinearLayout::identity1D(shape[dim], S("block"), outDimNames[dim]);
-  }
+  // TODO: use nfaces for accurate register mapping inside a tile (for now we
+  // only operate on register granularity so this is fine)
+  LinearLayout registerLayout =
+      identityStandardND(S("register"), getTileShape(), order);
+  LinearLayout tileLayout =
+      identityStandardND(S("tile"), getTilesPerCore(), order);
 
-  llvm::errs() << "TiledEncodingAttr toLinearLayout: " << ctaLayout << "\n";
-#endif
+  // currently not splitting blocks
+  SmallVector<unsigned> blockShape(rank, 1);
+  LinearLayout ret = registerLayout * tileLayout *
+                     identityStandardND(S("block"), blockShape, order);
+
   return ret.transposeOuts(outDimNames);
 }
 
-LinearLayout tt::TiledDotOperandEncodingAttr::toLinearLayout(ArrayRef<int64_t> shape) const {
-    int rank = shape.size();
-    auto tiled = cast<tt::TiledEncodingAttr>(getParent());
-    MLIRContext *ctx = getContext();
+LinearLayout
+tt::TiledDotOperandEncodingAttr::toLinearLayout(ArrayRef<int64_t> shape) const {
+  MLIRContext *ctx = getContext();
 
-    auto kDimIdx = getOpIdx() == 0 ? rank - 1 : rank - 2;
+  auto tiled = cast<tt::TiledEncodingAttr>(getParent());
+  auto order = tiled.getOrder();
+  auto dotOrder = gpu::getOrderForDotOperand(getOpIdx(), shape.size(),
+                                             /*kContig=*/true);
+  assert(order.size() == dotOrder.size());
+  auto rank = order.size();
 
-    auto tileSizes = llvm::to_vector(tiled.getTilesPerCore());
-    tileSizes[kDimIdx] = shape[kDimIdx] / tiled.getTileShape()[kDimIdx];
-    
-    auto order = llvm::to_vector(tiled.getOrder());
-    SmallVector<StringAttr> repDimNames =
-      permuteDimNames(standardOutDimNames(ctx, rank), order);
+  SmallVector<StringAttr> outDimNames = standardOutDimNames(ctx, rank);
 
-    auto registersLayout = identityStandardND(S("register"), tiled.getTileShape(), order)
-                                 * identityStandardND(S("tile"), tileSizes, order);
+  LinearLayout registerLayout =
+      identityStandardND(S("register"), tiled.getTileShape(), order);
+  LinearLayout tileLayout =
+      identityStandardND(S("tile"), tiled.getTilesPerCore(), dotOrder);
 
-    // TODO: definitely wrong
-    return registersLayout; 
+  // currently not splitting blocks
+  SmallVector<unsigned> blockShape(rank, 1);
+  LinearLayout ret = registerLayout * tileLayout *
+                     identityStandardND(S("block"), blockShape, order);
+
+  return ret.transposeOuts(outDimNames);
 }
-    
-}
-}
-}
+
+} // namespace npu
+} // namespace triton
+} // namespace mlir
