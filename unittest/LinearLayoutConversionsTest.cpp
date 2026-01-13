@@ -77,6 +77,8 @@ TEST_F(LinearLayoutConversionsTest, Tiled_OneTile) {
                               {8, 0},
                               {16, 0}}},
                             {S("tile"), {}},
+                            {S("lane"), {}},
+                            {S("warp"), {}},
                             {S("block"), {}},
                         },
                         {S("dim0"), S("dim1")}));
@@ -100,6 +102,8 @@ TEST_F(LinearLayoutConversionsTest, Tiled_MultiTile) {
                               {8, 0},
                               {16, 0}}},
                             {S("tile"), {{0, 32}, {32, 0}}},
+                            {S("lane"), {}},
+                            {S("warp"), {}},
                             {S("block"), {}},
                         },
                         {S("dim0"), S("dim1")}));
@@ -124,6 +128,8 @@ TEST_F(LinearLayoutConversionsTest, Tiled_Dot_Lhs) {
                               {8, 0},
                               {16, 0}}},
                             {S("tile"), {{0, 32}, {32, 0}, {64, 0}, {128, 0}}},
+                            {S("lane"), {}},
+                            {S("warp"), {}},
                             {S("block"), {}},
                         },
                         {S("dim0"), S("dim1")}));
@@ -148,6 +154,8 @@ TEST_F(LinearLayoutConversionsTest, Tiled_Dot_Rhs) {
                               {8, 0},
                               {16, 0}}},
                             {S("tile"), {{32, 0}, {0, 32}, {0, 64}}},
+                            {S("lane"), {}},
+                            {S("warp"), {}},
                             {S("block"), {}},
                         },
                         {S("dim0"), S("dim1")}));
