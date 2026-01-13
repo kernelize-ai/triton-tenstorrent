@@ -26,6 +26,8 @@ namespace npu {
 
 namespace {
 
+#define S(v) StringAttr::get(context, (v))
+
 static int64_t findAllocIdx(Operation *op) {
   if (auto localLoadOp = dyn_cast<gpu::LocalLoadOp>(op)) {
     return findAllocIdx(localLoadOp.getSrc().getDefiningOp());
@@ -53,6 +55,8 @@ struct ConvertLoadOp : public OpConversionPattern<triton::LoadOp> {
                   ConversionPatternRewriter &rewriter) const override {
     Location loc = op.getLoc();
     auto typeConverter = getTypeConverter();
+
+    MLIRContext *context = getContext();
 
     if (!op->hasOneUse()) {
       LDBG("Load op has multiple uses, cannot convert\n");
@@ -92,36 +96,112 @@ struct ConvertLoadOp : public OpConversionPattern<triton::LoadOp> {
     Value const0 = arith::createConstantI32(loc, rewriter, 0);
 
     // determine how many tiles we need to load by converting the shape to tiles
-    const int32_t numTiles = cast<ttkernel::CBType>(cb.getType()).getNumTiles();
-    Value numPages = arith::createConstantI32(loc, rewriter, numTiles);
+    const int32_t numCbTiles =
+        cast<ttkernel::CBType>(cb.getType()).getNumTiles();
+    LDBG("Loading from CB of size " << numCbTiles << " tiles");
+    Value numPages = arith::createConstantI32(loc, rewriter, numCbTiles);
     ttkernel::CBReserveBackOp::create(rewriter, loc, cb, numPages);
 
     Value l1Addr = ttkernel::GetWritePtrOp::create(rewriter, loc, cb);
 
-    scf::ForOp loadTileLoop = scf::ForOp::create(
-        rewriter, loc, arith::createConstantI32(loc, rewriter, 0), numPages,
-        arith::createConstantI32(loc, rewriter, 1),
-        ValueRange{l1Addr, baseTileIndex});
-    {
-      rewriter.setInsertionPointToStart(loadTileLoop.getBody());
-      Value crtL1Address = loadTileLoop.getRegionIterArgs()[0];
-      Value crtTileIndex = loadTileLoop.getRegionIterArgs()[1];
-      // TODO: should the offset be const0 here? the only examples we have are
-      // TensorAccessor...
-      Value nocAddr = ttkernel::InterleavedAddrGenFastGetNocAddrOp::create(
-          rewriter, loc, addrGen, crtTileIndex, const0, Value());
-      ttkernel::NocAsyncReadOp::create(rewriter, loc, nocAddr, crtL1Address,
-                                       pageSize);
-      Value nextL1Address =
-          arith::AddIOp::create(rewriter, loc, crtL1Address, pageSize);
-      Value nextTileIndex =
-          arith::AddIOp::create(rewriter, loc, crtTileIndex,
-                                arith::createConstantI32(loc, rewriter, 1));
-      scf::YieldOp::create(rewriter, loc,
-                           ValueRange{nextL1Address, nextTileIndex});
+    auto loadResultType = cast<RankedTensorType>(op.getResult().getType());
+    const int32_t elementSize =
+        loadResultType.getElementType().getIntOrFloatBitWidth() / 8;
+    if (auto dotOpEncoding = dyn_cast<npu::tt::TiledDotOperandEncodingAttr>(
+            loadResultType.getEncoding())) {
+      LDBG("Lowering load op with encoding " << dotOpEncoding << "\n");
+      auto layout =
+          gpu::toLinearLayout(loadResultType.getShape(), dotOpEncoding);
+      layout = layout.sublayout({S("register"), S("tile")},
+                                llvm::to_vector(layout.getOutDimNames()));
+      LDBG("Register/Tile layout:\n" << layout << "\n");
+
+      auto numTiles = layout.getInDimSize(S("tile"));
+      assert(numTiles == numCbTiles &&
+             "number of tiles in layout must match number of tiles in CB");
+      LDBG("Generating " << numTiles << " tile loads");
+
+      auto outDimNames = llvm::to_vector(layout.getOutDimNames());
+      auto tiledParent =
+          cast<npu::tt::TiledEncodingAttr>(dotOpEncoding.getParent());
+      auto tileShape = tiledParent.getTileShape();
+      auto fastChangeDim = outDimNames[1];
+      unsigned numFastChangeDimTiles =
+          layout.getOutDimSize(fastChangeDim) / tileShape[1];
+      LDBG("Fast changing dim: " << fastChangeDim << " with "
+                                 << numFastChangeDimTiles << " tiles");
+
+      // auto registerIndexLayout = layout.flattenOuts();
+      for (int32_t i = 0; i < numTiles; ++i) {
+        auto crtIndex = layout.apply({{S("tile"), i}, {S("register"), 0}});
+        assert(crtIndex.size() == 2);
+        LLVM_DEBUG({
+          DBGS() << "Tile " << i << " has start index: ";
+          for (auto [dim, idx] : crtIndex) {
+            DBGS() << dim.getValue() << ": " << idx << ", ";
+          }
+          DBGS() << "\n";
+        });
+        // linearize tensor index into tiled byte offset
+        int32_t byteOffsetIndex =
+            (crtIndex[0].second / tileShape[0]) * numFastChangeDimTiles +
+            (crtIndex[1].second / tileShape[1]);
+        int32_t byteOffset =
+            byteOffsetIndex * tileShape[0] * tileShape[1] * elementSize;
+        LDBG("Emitting load for tile " << i << " at byte offset "
+                                       << byteOffset);
+
+        Value byteOffsetVal =
+            arith::createConstantI32(loc, rewriter, byteOffset);
+        Value crtByteOffset =
+            arith::AddIOp::create(rewriter, loc, offset, byteOffsetVal);
+        Value crtTileIndex =
+            arith::DivUIOp::create(rewriter, loc, crtByteOffset, pageSize);
+
+        Value crtL1Address =
+            arith::AddIOp::create(rewriter, loc, l1Addr, byteOffsetVal);
+        // Value localTileIndex = arith::createConstantI32(loc, rewriter, i);
+        // Value crtTileIndex =
+        // arith::AddIOp::create(rewriter, loc, baseTileIndex, localTileIndex);
+        // TODO: should the offset be const0 here? the only examples we have are
+        // TensorAccessor...
+        Value nocAddr = ttkernel::InterleavedAddrGenFastGetNocAddrOp::create(
+            rewriter, loc, addrGen, crtTileIndex, const0, Value());
+        ttkernel::NocAsyncReadOp::create(rewriter, loc, nocAddr, crtL1Address,
+                                         pageSize);
+      }
     }
 
-    rewriter.setInsertionPointAfter(loadTileLoop);
+    else if (auto tiledEncoding = dyn_cast<npu::tt::TiledEncodingAttr>(
+                 loadResultType.getEncoding())) {
+      llvm::errs() << "load op has tiled encoding\n";
+      assert(false && "Tiled encoding load lowering not yet supported.");
+    } else {
+      scf::ForOp loadTileLoop = scf::ForOp::create(
+          rewriter, loc, arith::createConstantI32(loc, rewriter, 0), numPages,
+          arith::createConstantI32(loc, rewriter, 1),
+          ValueRange{l1Addr, baseTileIndex});
+      {
+        rewriter.setInsertionPointToStart(loadTileLoop.getBody());
+        Value crtL1Address = loadTileLoop.getRegionIterArgs()[0];
+        Value crtTileIndex = loadTileLoop.getRegionIterArgs()[1];
+        // TODO: should the offset be const0 here? the only examples we have are
+        // TensorAccessor...
+        Value nocAddr = ttkernel::InterleavedAddrGenFastGetNocAddrOp::create(
+            rewriter, loc, addrGen, crtTileIndex, const0, Value());
+        ttkernel::NocAsyncReadOp::create(rewriter, loc, nocAddr, crtL1Address,
+                                         pageSize);
+        Value nextL1Address =
+            arith::AddIOp::create(rewriter, loc, crtL1Address, pageSize);
+        Value nextTileIndex =
+            arith::AddIOp::create(rewriter, loc, crtTileIndex,
+                                  arith::createConstantI32(loc, rewriter, 1));
+        scf::YieldOp::create(rewriter, loc,
+                             ValueRange{nextL1Address, nextTileIndex});
+      }
+
+      rewriter.setInsertionPointAfter(loadTileLoop);
+    }
     ttkernel::NocAsyncReadBarrierOp::create(rewriter, loc);
 
     rewriter.eraseOp(op);
