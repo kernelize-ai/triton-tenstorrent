@@ -65,6 +65,14 @@ SmallVector<StringAttr> permuteDimNames(const SmallVector<StringAttr> &names,
   return ret;
 }
 
+// Tenstorrent-specific helpers
+LinearLayout unitDimGpuStandard(MLIRContext *ctx, ArrayRef<unsigned> order) {
+  SmallVector<unsigned> unitShape(order.size(), 1);
+  return identityStandardND(S("lane"), unitShape, order) *
+         identityStandardND(S("warp"), unitShape, order) *
+         identityStandardND(S("block"), unitShape, order);
+}
+
 } // namespace
 
 LinearLayout
@@ -85,9 +93,8 @@ tt::TiledEncodingAttr::toLinearLayout(ArrayRef<int64_t> shape) const {
       identityStandardND(S("tile"), getTilesPerCore(), order);
 
   // currently not splitting blocks
-  SmallVector<unsigned> blockShape(rank, 1);
-  LinearLayout ret = registerLayout * tileLayout *
-                     identityStandardND(S("block"), blockShape, order);
+  LinearLayout ret =
+      registerLayout * tileLayout * unitDimGpuStandard(ctx, order);
 
   return ret.transposeOuts(outDimNames);
 }
@@ -111,9 +118,8 @@ tt::TiledDotOperandEncodingAttr::toLinearLayout(ArrayRef<int64_t> shape) const {
       identityStandardND(S("tile"), tiled.getTilesPerCore(), dotOrder);
 
   // currently not splitting blocks
-  SmallVector<unsigned> blockShape(rank, 1);
-  LinearLayout ret = registerLayout * tileLayout *
-                     identityStandardND(S("block"), blockShape, order);
+  LinearLayout ret =
+      registerLayout * tileLayout * unitDimGpuStandard(ctx, order);
 
   return ret.transposeOuts(outDimNames);
 }
