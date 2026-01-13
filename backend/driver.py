@@ -119,6 +119,7 @@ class CPULauncher(object):
     def __init__(self, src, metadata):
         runtime = get_nexus_runtime()
         self.device = runtime.get_device(0)
+        self.schedule = None
         constants = src.constants if hasattr(src, "constants") else dict()
         arg_idx = lambda x: (src.fn.arg_names.index(x), ) if isinstance(x, str) else x
         self.constants = {arg_idx(idx): value for idx, value in constants.items()}
@@ -138,68 +139,59 @@ class CPULauncher(object):
         launch_enter_hook = args[2]
         launch_exit_hook = args[3]
 
-        schedule = self.device.create_schedule()
-        command = schedule.create_command(function)
-        import torch
-        ## TODO: Get CB depth from TuningConfig
-        cb_depth = 1
-        buffers = []
-        sig_types = list(self.signature.values())
-        idx = 0
-        cb_idx = 0
-        for i, arg in enumerate(args[4:]):
-            ty = sig_types[i]
-            if ty == "constexpr":
-                continue
-            if isinstance(arg, torch.Tensor) or isinstance(arg, nexus.buffer):
-                command.set_const(cb_idx, cb_depth, "CB", nexus.get_data_type(arg))
-                cb_idx += 1
-                arg = self.device.create_buffer(arg)
-                command.set_arg(idx, arg)
-                idx += 1
-                buffers.append(arg)
-            elif isinstance(arg, TensorDescriptor):
-                arg_base = arg.base
-                command.set_const(cb_idx, cb_depth, "CB", nexus.get_data_type(arg_base))
-                cb_idx += 1
-                arg_buf = self.device.create_buffer(arg.base)
-                command.set_arg(idx, arg_buf)
-                idx += 1
-                # signed?
-                #command.set_arg(idx, 0 if not arg_base.dtype.is_signed else 1)
-                #idx += 1
-                # shape flattened
-                for dim in arg.shape:
-                    command.set_arg(idx, dim)
-                    idx += 1
-                # strides flattened
-                for stride in arg.strides:
-                    command.set_arg(idx, stride)
-                    idx += 1
-                padded = 1 # arg.padding == "nan"
-                command.set_arg(idx, padded)
-                idx += 1
-                ##  Repeat since the tensor descriptor is lowered with redundant information
-                # shape flattened
-                for dim in arg.shape:
-                    command.set_arg(idx, dim)
-                    idx += 1
-                # strides flattened
-                for stride in arg.strides:
-                    command.set_arg(idx, stride)
-                    idx += 1
-                # block shape
-                # command.set_arg(idx+4, arg.block_shape)
-                # command.set_arg(idx+5, arg.padding)
-                buffers.append(arg_buf)
-            else:
-                command.set_arg(idx, arg)
-                idx += 1
+        if self.schedule is None:
+            self.schedule = self.device.create_schedule()
+            schedule = self.schedule
+            command = schedule.create_command(function)
+            import torch
+            ## TODO: Get CB depth from TuningConfig
+            cb_depth = 1
+            buffers = []
+            sig_types = list(self.signature.values())
+            idx = 0
+            add_arg = lambda arg: (command.set_arg(idx, arg), idx + 1)
+            cb_idx = 0
+            for i, arg in enumerate(args[4:]):
+                ty = sig_types[i]
+                if ty == "constexpr":
+                    continue
+                if isinstance(arg, torch.Tensor) or isinstance(arg, nexus.buffer):
+                    command.set_const(cb_idx, cb_depth, "CB", nexus.get_data_type(arg))
+                    cb_idx += 1
+                    arg = self.device.create_buffer(arg)
+                    _, idx = add_arg(arg)
+                    buffers.append(arg)
+                elif isinstance(arg, TensorDescriptor):
+                    arg_base = arg.base
+                    command.set_const(cb_idx, cb_depth, "CB", nexus.get_data_type(arg_base))
+                    cb_idx += 1
+                    arg_buf = self.device.create_buffer(arg.base)
+                    _, idx = add_arg(arg_buf)
+                    # shape flattened
+                    for dim in arg.shape:
+                        _, idx = add_arg(dim)
+                    # strides flattened
+                    for stride in arg.strides:
+                        _, idx = add_arg(stride)
+                    padded = 1 # arg.padding == "nan"
+                    _, idx = add_arg(padded)
+                    ##  Repeat since the tensor descriptor is lowered with redundant information
+                    # shape flattened
+                    for dim in arg.shape:
+                        _, idx = add_arg(dim)
+                    # strides flattened
+                    for stride in arg.strides:
+                        _, idx = add_arg(stride)
+                    # block shape? Not used by kernel
+                    buffers.append(arg_buf)
+                else:
+                    _, idx = add_arg(arg)
 
-        command.finalize([gridX, gridY, gridZ], [num_warps, 1, 1], shared_memory)
+            command.finalize([gridX, gridY, gridZ], [num_warps, 1, 1], shared_memory)
+
         if launch_enter_hook is not None:
             launch_enter_hook(launch_metadata)
-        schedule.run()
+        self.schedule.run()
         if launch_exit_hook is not None:
             launch_exit_hook(launch_metadata)
 
@@ -263,6 +255,8 @@ class CPUDriver(DriverBase):
 
     @staticmethod
     def is_active():
+        # Always active so the off-line compiler doesn't complain
+        # TODO: Fix the off-line compiler
         return True
         try:
             return bool(CPUDriver.get_device())

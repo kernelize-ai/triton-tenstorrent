@@ -319,6 +319,7 @@ if __name__ == "__main__":
         torch.manual_seed(0)
 
         validate(64, 32, 64, dtype)
+        validate(1024, 1024, 1024, dtype)
         
         """
         validate(8192, 8192, args.K_range[0], dtype)
