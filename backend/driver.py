@@ -67,25 +67,26 @@ def get_nexus_runtime():
 
 class CpuUtils(object):
 
-    def __init__(self, device):
-        self.device = device
+    def __init__(self, runtime):
+        self.runtime = runtime
 
     def load_binary(self, name, kernel, shared_mem, device):
         ## TODO: change to load_library from kernel string so the tmp files are not needed
         ## tmpfile must be persistent since the file will be jit compiled on the first run
+        device = self.runtime.get_device(device)
         with tempfile.NamedTemporaryFile(mode="wb", suffix=".cpp", delete=False) as f:
             f.write(kernel)
             f.flush()
             os.fsync(f.fileno())
             os.stat(f.name)
-            lib = self.device.load_library(f.name)
+            lib = device.load_library(f.name)
             kernel = lib.get_kernel(name)
             # TODO: properly handle num registers / max number threads
             return (lib, kernel, 1, shared_mem, 2**12)
 
     def get_device_properties(self, *args):
-        import nexus
-        core_count = self.device.get_property_int(nexus.property.Size)
+        # import nexus
+        core_count = 130  # self.device.get_property_int(nexus.property.Size)
         return {
             "max_num_regs": core_count * 4, "max_shared_mem": 1024 * 1024 * 1024, "multiprocessor_count": core_count,
             "warpSize": 1
@@ -263,16 +264,14 @@ class CPUDriver(DriverBase):
         except ImportError:
             return False
 
-    @staticmethod
-    def get_device():
-        import nexus
-        runtime = get_nexus_runtime()
-        device = runtime.get_device(0)
-        return device
+    def get_device(self, device_id=0):
+        if self.runtime is None:
+            self.runtime = get_nexus_runtime()
+        return self.runtime.get_device(device_id)
 
     def __init__(self):
-        self.device = CPUDriver.get_device()
-        self.utils = CpuUtils(self.device)
+        self.runtime = None
+        self.utils = CpuUtils(self)
         import torch
         self.get_current_stream = lambda idx: torch.cpu.Stream()
         self.launcher_cls = CPULauncher
@@ -297,10 +296,10 @@ class CPUDriver(DriverBase):
 
     def get_empty_device_buffer(self, size, dtype):
         import nexus
-        return self.device.create_buffer(size, nexus.get_data_type(dtype))
+        return self.get_device().create_buffer(size, nexus.get_data_type(dtype))
 
     def get_device_buffer(self, torch_buffer):
-        return self.device.create_buffer(torch_buffer)
+        return self.get_device().create_buffer(torch_buffer)
 
     def copy_buffer_to_host(self, device_buffer, host_buffer):
         return device_buffer.copy(host_buffer)
