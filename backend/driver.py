@@ -173,7 +173,7 @@ class CPULauncher(object):
                     # strides flattened
                     for stride in arg.strides:
                         _, idx = add_arg(stride)
-                    padded = 1 # arg.padding == "nan"
+                    padded = 1  # arg.padding == "nan"
                     _, idx = add_arg(padded)
                     ##  Repeat since the tensor descriptor is lowered with redundant information
                     # shape flattened
