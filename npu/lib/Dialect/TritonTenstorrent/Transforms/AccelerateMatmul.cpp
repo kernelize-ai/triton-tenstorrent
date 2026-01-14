@@ -41,19 +41,12 @@ public:
     auto oldAType = cast<RankedTensorType>(a.getType());
     auto oldBType = cast<RankedTensorType>(b.getType());
     auto oldCType = cast<RankedTensorType>(c.getType());
-#if 0
-    if (isa<npu::tt::TiledEncodingAttr>(oldAType.getEncoding()) &&
-        isa<npu::tt::TiledEncodingAttr>(oldBType.getEncoding()) &&
-        isa<npu::tt::TiledEncodingAttr>(oldCType.getEncoding())) {
-      return failure();
-    }
-#else
+
     if (isa<npu::tt::TiledDotOperandEncodingAttr>(oldAType.getEncoding()) &&
         isa<npu::tt::TiledDotOperandEncodingAttr>(oldBType.getEncoding()) &&
         isa<npu::tt::TiledEncodingAttr>(oldCType.getEncoding())) {
       return failure();
     }
-#endif
 
     auto oldRetType = cast<RankedTensorType>(op.getType());
 
@@ -71,15 +64,8 @@ public:
                                     RankedTensorType newRetType,
                                     PatternRewriter &rewriter) {
       auto vType = cast<RankedTensorType>(v.getType());
-#if 0
-      // TODO: DotOperandEncodingAttr fails on our new encoding. For now only
-      // dot ops use the TileEncoding, but we may need our own custom
-      // DotOperandEncodingAttr later.
-      auto newVEncoding = newRetType.getEncoding();
-#else
       auto newVEncoding = npu::tt::TiledDotOperandEncodingAttr::get(
           v.getContext(), opIdx, newRetType.getEncoding());
-#endif
       auto newVType = vType.cloneWithEncoding(newVEncoding);
       return gpu::ConvertLayoutOp::create(rewriter, v.getLoc(), newVType, v);
     };
