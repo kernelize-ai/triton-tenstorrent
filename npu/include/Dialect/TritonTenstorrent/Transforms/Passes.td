@@ -3,6 +3,41 @@
 
 include "mlir/Pass/PassBase.td"
 
+def TritonTenstorrentAccelerateMatmul : Pass<"tritontenstorrent-accelerate-matmul",  "mlir::ModuleOp"> {
+    let summary = "accelerate matmul";
+
+    let description =[{
+        Optimize the input/output layout of `dot` instruction to make them compatible for Tenstorrent hardware accelerators.
+    }];
+
+    let dependentDialects = ["mlir::triton::npu::tt::TritonTenstorrentDialect",
+                             "mlir::triton::gpu::TritonGPUDialect",
+                             "mlir::triton::TritonDialect"
+                            ];
+}
+
+def TritonTenstorrentRemoveDotLoadLayoutConversions : Pass<"tritontenstorrent-remove-dot-load-layout-conversions", "mlir::ModuleOp"> {
+    let summary = "Push the dot operand layout into parent loads";
+
+    let description = [{
+        The upstream Triton Remove Layout Conversions pass does not pick dot operand
+        loads as anchor layouts for load ops. For Tenstorrent we want to push the dot
+        operand layout into parent load ops to ensure the tile order for the dot
+        operand is correct. This light weight pass iterates over and selectively
+        removes ConvertLayoutOp ops that take a load layout and convert it to a tiled
+        dot operand layout.
+
+        We introduce a separate pass vs doing this at the end of Accelerate Matmul so
+        that we can take advantage of the rest of the RemoveLayoutConversions
+        functionality from upstream.
+    }];
+
+    let dependentDialects = ["mlir::triton::npu::tt::TritonTenstorrentDialect",
+                             "mlir::triton::gpu::TritonGPUDialect",
+                             "mlir::triton::TritonDialect"
+                            ];
+}
+
 def TritonTenstorrentConvertTensorDescToLoadStore : Pass<"tritontenstorrent-convert-tensor-desc", "mlir::ModuleOp"> {
     let summary = "Convert Triton tensor descriptors to Triton load/store operations";
 

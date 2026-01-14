@@ -26,6 +26,8 @@ namespace npu {
 
 namespace {
 
+#define S(v) StringAttr::get(context, (v))
+
 static int64_t findAllocIdx(Operation *op) {
   if (auto localLoadOp = dyn_cast<gpu::LocalLoadOp>(op)) {
     return findAllocIdx(localLoadOp.getSrc().getDefiningOp());
@@ -311,7 +313,8 @@ struct ConvertLocalLoadOp : public OpConversionPattern<gpu::LocalLoadOp> {
 
     auto dst = op.getResult();
     auto dstType = cast<RankedTensorType>(dst.getType());
-    if (isa<gpu::DotOperandEncodingAttr>(dstType.getEncoding())) {
+    if (isa<npu::tt::TiledDotOperandEncodingAttr>(dstType.getEncoding()) ||
+        isa<gpu::DotOperandEncodingAttr>(dstType.getEncoding())) {
       // Dot ops read directly from cbs, so skip the copy tile and just replace
       // the load with its cb src
       rewriter.replaceOp(op, src);

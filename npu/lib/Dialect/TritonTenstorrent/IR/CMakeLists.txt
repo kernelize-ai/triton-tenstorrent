@@ -1,5 +1,6 @@
 add_triton_library(TritonTenstorrentIR
   Dialect.cpp
+  LinearLayoutConversions.cpp
   Ops.cpp
 
   DEPENDS
