@@ -216,41 +216,24 @@ struct TritonTenstorrentInferLayoutInterface
   inferDotOpEncoding(Attribute operandEncoding, unsigned opIdx,
                      Attribute retEncoding,
                      std::optional<Location> location) const override {
-#if 0
-    // TODO: opIdx verification
-    auto tiledEnc = dyn_cast_or_null<TiledEncodingAttr>(operandEncoding);
-    if (!tiledEnc)
-      return emitOptionalError(
-          location, "Dot's a/b's encoding should be of TiledEncodingAttr");
-#else
     if (auto dotOpEnc =
             mlir::dyn_cast<TiledDotOperandEncodingAttr>(operandEncoding)) {
       if (opIdx != dotOpEnc.getOpIdx())
         return emitOptionalError(location, "Wrong opIdx");
-#if 0
-      if (retEncoding != dotOpEnc.getParent())
-        return emitOptionalError(location, "Incompatible parent encoding");
-#else
       if (!isa<TiledEncodingAttr>(retEncoding))
         return emitOptionalError(location,
                                  "Dot with tiled operand encoding's result "
                                  "encoding should be of TiledEncodingAttr");
-#endif
     } else
       return emitOptionalError(
           location,
           "Dot's a/b's encoding should be of TiledDotOperandEncodingAttr");
-#endif
     return success();
   }
 
   LogicalResult
   verifyDotOpEncodingCompatibility(Operation *op, Attribute operandEncodingA,
                                    Attribute operandEncodingB) const override {
-#if 0
-    auto tiledAEncoding = dyn_cast_or_null<TiledEncodingAttr>(operandEncodingA);
-    auto tiledBEncoding = dyn_cast_or_null<TiledEncodingAttr>(operandEncodingB);
-#else
     auto aEncoding =
         mlir::dyn_cast<TiledDotOperandEncodingAttr>(operandEncodingA);
     auto bEncoding =
@@ -265,7 +248,6 @@ struct TritonTenstorrentInferLayoutInterface
         dyn_cast_or_null<TiledEncodingAttr>(aEncoding.getParent());
     auto tiledBEncoding =
         dyn_cast_or_null<TiledEncodingAttr>(bEncoding.getParent());
-#endif
     auto dotOp = cast<DotOp>(op);
     auto resEnc = dotOp.getResult().getType().getEncoding();
     auto tiledResEncoding = dyn_cast<TiledEncodingAttr>(resEnc);

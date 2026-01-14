@@ -50,15 +50,6 @@ public:
 
         OpBuilder builder(loadOp);
 
-#if 0
-        auto newLoad = builder.clone(*loadOp);
-        newLoad->getResult(0).setType(cvtResultType);
-        cvtOp.replaceAllUsesWith(newLoad->getResult(0));
-        cvtOp.erase();
-        loadOp.replaceAllUsesWith(newLoad->getResult(0));
-        loadOp.erase();
-#else
-
         IRMapping mapping;
         for (auto operand : loadOp->getOperands()) {
           RankedTensorType operandTensorType =
@@ -81,7 +72,6 @@ public:
         cvtOp.erase();
         loadOp.replaceAllUsesWith(newLoadOp->getResult(0));
         loadOp.erase();
-#endif
       }
     });
   }
