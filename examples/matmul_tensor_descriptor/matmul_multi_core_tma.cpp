@@ -14,6 +14,8 @@
 #include <tt-metalium/device.hpp>
 #include <fmt/core.h>
 
+#include <omp.h>
+
 using namespace tt::constants;
 using namespace std;
 using namespace tt;
@@ -47,11 +49,10 @@ void golden_matmul(
             idx_a = i * K;
             idx_b = j;
             c_f = 0;
+            #pragma omp parallel for reduction(+:c_f) private(float_tmp)
             for (int k_m = 0; k_m < K; k_m++) {
-                float_tmp = static_cast<float>(a[idx_a]) * static_cast<float>(b[idx_b]);
+                float_tmp = static_cast<float>(a[idx_a + k_m]) * static_cast<float>(b[idx_b + k_m * N]);
                 c_f += float_tmp;
-                idx_a += 1;
-                idx_b += N;
             }
             output.at(idx_c) = bfloat16(c_f);
         }

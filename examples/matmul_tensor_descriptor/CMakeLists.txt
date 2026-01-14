@@ -11,9 +11,15 @@ target_sources(metal_example_matmul_multi_core_tma PRIVATE matmul_multi_core_tma
 if(NOT TARGET TT::Metalium)
     find_package(TT-Metalium REQUIRED)
 endif()
+
+find_package(OpenMP REQUIRED)
+
+target_compile_options(metal_example_matmul_multi_core_tma PRIVATE ${OpenMP_CXX_FLAGS})
+
 target_link_libraries(
     metal_example_matmul_multi_core_tma
     PRIVATE
         TT::Metalium
         Matmul::Common
+        OpenMP::OpenMP_CXX
 )
