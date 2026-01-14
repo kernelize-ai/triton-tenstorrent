@@ -213,8 +213,9 @@ class CPUBackend(BaseBackend):
         cpu.passes.tenstorrent.add_propagate_register_indices(pm)
         passes.ttgpuir.add_remove_layout_conversions(pm)
 
-        cpu.passes.tenstorrent.add_accelerate_matmul(pm)
-        passes.ttgpuir.add_remove_layout_conversions(pm)
+        # TODO(adb): re-enable once memory op to ttkernel supports the new layouts
+        #cpu.passes.tenstorrent.add_accelerate_matmul(pm)
+        #passes.ttgpuir.add_remove_layout_conversions(pm)
         cpu.passes.tenstorrent.add_remove_dot_load_layout_conversions(pm)
         passes.ttgpuir.add_remove_layout_conversions(pm)
         cpu.passes.tenstorrent.remove_redundant_masks(pm)
