@@ -306,6 +306,22 @@ struct TritonTenstorrentInferLayoutInterface
   }
 };
 
+struct TritonTenstorrentAsmInterface : public OpAsmDialectInterface {
+public:
+  using OpAsmDialectInterface::OpAsmDialectInterface;
+
+  AliasResult getAlias(Attribute attr, raw_ostream &os) const override {
+    if (auto regEnc = dyn_cast<RegisterEncodingAttr>(attr)) {
+      os << "reg";
+      return AliasResult::FinalAlias;
+    } else if (auto tiledEnc = dyn_cast<TiledEncodingAttr>(attr)) {
+      os << "tiled";
+      return AliasResult::FinalAlias;
+    }
+    return OpAsmDialectInterface::getAlias(attr, os);
+  }
+};
+
 void TritonTenstorrentDialect::initialize() {
   addAttributes<
 #define GET_ATTRDEF_LIST
@@ -316,6 +332,7 @@ void TritonTenstorrentDialect::initialize() {
 #include "npu/include/Dialect/TritonTenstorrent/IR/Ops.cpp.inc"
       >();
   addInterfaces<TritonTenstorrentInferLayoutInterface>();
+  addInterfaces<TritonTenstorrentAsmInterface>();
 }
 
 } // namespace mlir::triton::npu::tt

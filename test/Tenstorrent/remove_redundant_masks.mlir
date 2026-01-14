@@ -1,5 +1,8 @@
 // RUN: triton-opt %s -split-input-file --tritontenstorrent-remove-redundant-masks | FileCheck %s
 
+// CHECK-DAG: #[[REG0:.+]] = #triton_tenstorrent.register_encoding<{index = 0, parent = #blocked}>
+// CHECK-DAG: #[[REG1:.+]] = #triton_tenstorrent.register_encoding<{index = 1, parent = #blocked}>
+// CHECK-DAG: #[[REG2:.+]] = #triton_tenstorrent.register_encoding<{index = 2, parent = #blocked}>
 #blocked = #ttg.blocked<{sizePerThread = [1024], threadsPerWarp = [1], warpsPerCTA = [1], order = [0]}>
 module attributes {"ttg.num-ctas" = 1 : i32, "ttg.num-warps" = 1 : i32, ttg.target = "cpu", "ttg.threads-per-warp" = 1 : i32} {
   tt.func public @add_kernel(%x_ptr: !tt.ptr<f32> {tt.divisibility = 8 : i32}, %y_ptr: !tt.ptr<f32> {tt.divisibility = 8 : i32}, %output_ptr: !tt.ptr<f32> {tt.divisibility = 8 : i32}, %n_elements: i32 {tt.divisibility = 8 : i32}) attributes {noinline = false} {
@@ -24,19 +27,19 @@ module attributes {"ttg.num-ctas" = 1 : i32, "ttg.num-warps" = 1 : i32, ttg.targ
     %x = tt.splat %x_ptr : !tt.ptr<f32> -> tensor<1024x!tt.ptr<f32>, #triton_tenstorrent.register_encoding<{index = 0, parent = #blocked}>>
     // CHECK: %[[X:.*]] = tt.addptr
     %x_13 = tt.addptr %x, %offsets_5 : tensor<1024x!tt.ptr<f32>, #triton_tenstorrent.register_encoding<{index = 0, parent = #blocked}>>, tensor<1024xi32, #triton_tenstorrent.register_encoding<{index = 0, parent = #blocked}>>
-    // CHECK: tt.load %[[X]] : tensor<1024x!tt.ptr<f32>, #triton_tenstorrent.register_encoding<{index = 0, parent = #blocked}>>
+    // CHECK: tt.load %[[X]] : tensor<1024x!tt.ptr<f32>, #[[REG0]]>
     %x_14 = tt.load %x_13, %mask_10 : tensor<1024x!tt.ptr<f32>, #triton_tenstorrent.register_encoding<{index = 0, parent = #blocked}>>
     %y = tt.splat %y_ptr : !tt.ptr<f32> -> tensor<1024x!tt.ptr<f32>, #triton_tenstorrent.register_encoding<{index = 1, parent = #blocked}>>
     // CHECK: %[[Y:.*]] = tt.addptr
     %y_15 = tt.addptr %y, %offsets_6 : tensor<1024x!tt.ptr<f32>, #triton_tenstorrent.register_encoding<{index = 1, parent = #blocked}>>, tensor<1024xi32, #triton_tenstorrent.register_encoding<{index = 1, parent = #blocked}>>
-    // CHECK: tt.load %[[Y]] : tensor<1024x!tt.ptr<f32>, #triton_tenstorrent.register_encoding<{index = 1, parent = #blocked}>>
+    // CHECK: tt.load %[[Y]] : tensor<1024x!tt.ptr<f32>, #[[REG1]]>
     %y_16 = tt.load %y_15, %mask_11 : tensor<1024x!tt.ptr<f32>, #triton_tenstorrent.register_encoding<{index = 1, parent = #blocked}>>
     // CHECK: %[[OUTPUT:.*]] = triton_tenstorrent.binary_compute["arith.addf"]
     %output = triton_tenstorrent.binary_compute["arith.addf"] %x_14, %y_16 : (tensor<1024xf32, #triton_tenstorrent.register_encoding<{index = 0, parent = #blocked}>>, tensor<1024xf32, #triton_tenstorrent.register_encoding<{index = 1, parent = #blocked}>>) -> tensor<1024xf32, #triton_tenstorrent.register_encoding<{index = 2, parent = #blocked}>>
     %0 = tt.splat %output_ptr : !tt.ptr<f32> -> tensor<1024x!tt.ptr<f32>, #triton_tenstorrent.register_encoding<{index = 2, parent = #blocked}>>
     // CHECK: %[[OUTPUT_PTR:.*]] = tt.addptr
     %1 = tt.addptr %0, %offsets_7 : tensor<1024x!tt.ptr<f32>, #triton_tenstorrent.register_encoding<{index = 2, parent = #blocked}>>, tensor<1024xi32, #triton_tenstorrent.register_encoding<{index = 2, parent = #blocked}>>
-    // CHECK: tt.store %[[OUTPUT_PTR]], %[[OUTPUT]] : tensor<1024x!tt.ptr<f32>, #triton_tenstorrent.register_encoding<{index = 2, parent = #blocked}>>
+    // CHECK: tt.store %[[OUTPUT_PTR]], %[[OUTPUT]] : tensor<1024x!tt.ptr<f32>, #[[REG2]]>
     tt.store %1, %output, %mask_12 : tensor<1024x!tt.ptr<f32>, #triton_tenstorrent.register_encoding<{index = 2, parent = #blocked}>>
     tt.return
   }
