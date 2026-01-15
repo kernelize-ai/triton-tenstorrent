@@ -7,6 +7,7 @@ add_triton_library(TritonTenstorrentTransforms
     PropagateTileEncoding.cpp
     RemoveDotLoadLayoutConversions.cpp
     RemoveRedundantMasks.cpp
+    Utility.cpp
 
     DEPENDS
     TritonTenstorrentTransformsIncGen
