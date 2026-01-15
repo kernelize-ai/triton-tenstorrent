@@ -1,3 +1,5 @@
+#include "npu/include/Dialect/TritonTenstorrent/Transforms/Passes.h"
+
 #include "mlir/IR/BuiltinAttributes.h"
 #include "mlir/IR/Matchers.h"
 #include "mlir/IR/PatternMatch.h"
@@ -7,18 +9,15 @@
 #include "triton/Analysis/Utility.h"
 #include "triton/Dialect/Triton/IR/Dialect.h"
 
-#include "cpu/include/Dialect/TritonCPU/IR/Dialect.h"
+using namespace mlir;
+using namespace mlir::triton;
 
 namespace mlir {
 namespace triton {
-namespace cpu {
-#define GEN_PASS_DEF_CORESPECIALIZE
-#include "cpu/include/TritonCPUToLLVM/Passes.h.inc"
-} // namespace cpu
-} // namespace triton
-} // namespace mlir
+namespace npu {
 
-using namespace mlir;
+#define GEN_PASS_DEF_CORESPECIALIZE
+#include "npu/include/Dialect/TritonTenstorrent/Transforms/Passes.h.inc"
 
 namespace {
 
@@ -314,8 +313,9 @@ public:
 };
 
 } // namespace
+
 class CoreSpecializePass
-    : public triton::cpu::impl::CoreSpecializeBase<CoreSpecializePass> {
+    : public npu::impl::CoreSpecializeBase<CoreSpecializePass> {
 public:
   void runOnOperation() override {
     ModuleOp m = getOperation();
@@ -330,3 +330,7 @@ public:
     m.walk([&](Operation *op) { op->removeAttr(kAllocIdxAttrName); });
   }
 };
+
+} // namespace npu
+} // namespace triton
+} // namespace mlir
