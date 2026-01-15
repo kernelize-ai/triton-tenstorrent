@@ -116,10 +116,9 @@ public:
     auto computeFunc = makeCompute(func);
     auto writerFunc = makeWriter(func);
 
-    // Insert clones before the original for stable ordering.
-    readerFunc->moveBefore(func);
-    computeFunc->moveBefore(func);
-    writerFunc->moveBefore(func);
+    m.insert(func, readerFunc);
+    m.insert(func, computeFunc);
+    m.insert(func, writerFunc);
   }
 
   ~Specializer() {
