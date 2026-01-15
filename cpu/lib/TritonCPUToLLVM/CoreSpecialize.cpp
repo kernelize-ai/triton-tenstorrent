@@ -198,10 +198,16 @@ public:
       triton::gpu::LocalStoreOp::create(b, loc, op->getResult(0), alloc);
     });
 
-    // Erase all stores
+    // Erase all stores and compute ops
     f.walk([&](Operation *op) {
-      if (isStoreLike(op) && getAllocIdx(op))
+      if (isStoreLike(op) && getAllocIdx(op)) {
         op->erase();
+      } else if (auto dotOp = dyn_cast<triton::DotOp>(op)) {
+        // Erase the dot op in the reader, forwarding the accumulator value to
+        // its users. Because the dot op uses a loop carried accumulator it is
+        // not sufficient to just erase the store.
+        dotOp.getD().replaceAllUsesWith(dotOp.getC());
+      }
     });
   }
 
@@ -277,6 +283,15 @@ public:
       auto lload = triton::gpu::LocalLoadOp::create(
           b, loc, getStoreLikeValue(op).getType(), alloc);
       setStoreLikeValue(op, lload.getResult());
+    });
+
+    f.walk([&](Operation *op) {
+      if (auto dotOp = dyn_cast<triton::DotOp>(op)) {
+        // Erase the dot op in the writer, forwarding the accumulator value to
+        // its users. Because the dot op uses a loop carried accumulator it is
+        // not sufficient to only change the input to the store.
+        dotOp.getD().replaceAllUsesWith(dotOp.getC());
+      }
     });
   }
 
