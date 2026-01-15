@@ -17,15 +17,23 @@ public:
   Value generateMask(OpBuilder &builder, const Location &loc,
                      ArrayRef<int64_t> blockShape);
 
-  Value getPtr() const { return base; }
+  Value generateBasePtr(OpBuilder &builder, const Location &loc,
+                        ArrayRef<int64_t> blockShape);
+
+  Value generateBaseBlockOffset(OpBuilder &builder, Location loc,
+                                ArrayRef<int64_t> blockShape,
+                                ValueRange tileBaseOffsets);
+
+  Value generateOffsets(OpBuilder &builder, const Location &loc,
+                        ArrayRef<int64_t> blockShape, ValueRange offsets);
 
   ValueRange getShape() const { return shape; }
 
 protected:
-  Value generatePtrFromOffsetRanges(OpBuilder &builder, Location loc,
-                                    ArrayRef<int64_t> blockShape,
-                                    ValueRange tileBaseOffsets,
-                                    ValueRange offsetRanges);
+  Value generateOffsetsFromOffsetRanges(OpBuilder &builder, Location loc,
+                                        ArrayRef<int64_t> blockShape,
+                                        ValueRange tileBaseOffsets,
+                                        ValueRange offsetRanges);
 
   Value base;
   ValueRange shape;
