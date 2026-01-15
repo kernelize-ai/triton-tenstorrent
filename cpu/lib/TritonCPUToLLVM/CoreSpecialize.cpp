@@ -121,13 +121,6 @@ public:
     m.insert(func, writerFunc);
   }
 
-  ~Specializer() {
-    allocs.clear();
-    loads.clear();
-    stores.clear();
-    func.erase();
-  }
-
   // Create a global tensor shared-buffer that is externally visible
   //
   void createSharedBuffer(Operation *op, Type type, int64_t idx) {
@@ -327,13 +320,10 @@ public:
   void runOnOperation() override {
     ModuleOp m = getOperation();
 
-    SmallVector<triton::FuncOp> funcOps;
-    for (auto func : m.getOps<triton::FuncOp>()) {
-      funcOps.push_back(func);
-    }
-
-    for (auto func : funcOps) {
-      Specializer(m, func);
+    for (triton::FuncOp func :
+         llvm::make_early_inc_range(m.getOps<triton::FuncOp>())) {
+      Specializer spec(m, func);
+      func.erase();
     }
 
     // remove all temporary attributes
