@@ -320,6 +320,8 @@ public:
     for (auto func : funcOps) {
       Specializer(m, func);
     }
-    return;
+
+    // remove all temporary attributes
+    m.walk([&](Operation *op) { op->removeAttr(kAllocIdxAttrName); });
   }
 };
