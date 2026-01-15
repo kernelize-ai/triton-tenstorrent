@@ -100,8 +100,60 @@ struct ConvertTritonFunc : public OpConversionPattern<triton::FuncOp> {
 
       SmallVector<Value> argReplacements;
       argReplacements.reserve(oldEntry.getNumArguments());
+#if 1
+
+      auto getArg = [&](const unsigned idx, Type newType) -> Value {
+        Value indexVal = arith::createIndexConstant(loc, rewriter, idx);
+        Value getArgVal = ttkernel::GetArgValOp::create(
+            rewriter, loc, rewriter.getIntegerType(32), indexVal);
+        if (isa<IntegerType>(newType) && newType.getIntOrFloatBitWidth() < 32) {
+          getArgVal =
+              arith::TruncIOp::create(rewriter, loc, newType, getArgVal);
+        }
+        return getArgVal;
+      };
+
+      unsigned idx = 0;
+      for (auto arg : oldEntry.getArguments()) {
+        Type oldType = arg.getType();
+        if (isa<TensorDescType>(oldType)) {
+          SmallVector<Type> unpacked;
+          assert(typeConverter->convertType(oldType, unpacked).succeeded() &&
+                 "failed to convert tensor descriptor type");
+
+          for (unsigned i = 0; i < unpacked.size(); i++) {
+            Type t = unpacked[i];
+            LDBG("Replacing arg " << idx << " of type " << oldType
+                                  << " with type " << t);
+            if (i == 0)
+              argReplacements.push_back(getArg(idx, t));
+            idx++;
+          }
+        } else {
+          Type newType = typeConverter->convertType(oldType);
+
+          LDBG("Replacing arg " << idx << " of type " << oldType
+                                << " with type " << newType);
+
+          argReplacements.push_back(getArg(idx, newType));
+          idx++;
+        }
+      }
+#else
       for (auto [idx, arg] : llvm::enumerate(oldEntry.getArguments())) {
         Type oldType = arg.getType();
+        if (isa<TensorDescType>(oldType)) {
+          SmallVector<Type> unpacked;
+          assert(typeConverter->convertType(oldType, unpacked).succeeded() &&
+                 "failed to convert tensor descriptor type");
+
+          for (auto v : unpacked) {
+            llvm::errs() << "unpacked val: " << v << "\n";
+          }
+
+          llvm::errs() << "uh oh: " << oldType << "\n";
+          assert(false && "TODO");
+        }
         Type newType = typeConverter->convertType(oldType);
 
         LDBG("Replacing arg " << idx << " of type " << oldType << " with type "
@@ -116,6 +168,7 @@ struct ConvertTritonFunc : public OpConversionPattern<triton::FuncOp> {
         }
         argReplacements.push_back(getArgVal);
       }
+#endif
       rewriter.mergeBlocks(&oldEntry, newEntry, argReplacements);
     }
 
