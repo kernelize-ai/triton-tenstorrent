@@ -71,13 +71,9 @@ Value buildIntraTileLinearOffsets(OpBuilder &builder, Location loc,
 
 } // namespace
 
-Value TensorDescriptorUnpacked::generatePtrFromOffsetRanges(
+Value TensorDescriptorUnpacked::generateBaseBlockOffset(
     OpBuilder &builder, Location loc, ArrayRef<int64_t> blockShape,
-    ValueRange tileBaseOffsets, ValueRange offsetRanges) {
-  assert(blockShape.size() == shape.size());
-  assert(blockShape.size() == offsetRanges.size());
-  assert(blockShape.size() == tileBaseOffsets.size());
-
+    ValueRange tileBaseOffsets) {
   auto i32Ty = builder.getI32Type();
 
   SmallVector<Value, 4> blockShapeValues;
@@ -118,6 +114,21 @@ Value TensorDescriptorUnpacked::generatePtrFromOffsetRanges(
       arith::ConstantOp::create(builder, loc, i32Ty,
                                 IntegerAttr::get(i32Ty, numElems)));
 
+  return tileElemOffset;
+}
+
+Value TensorDescriptorUnpacked::generateOffsetsFromOffsetRanges(
+    OpBuilder &builder, Location loc, ArrayRef<int64_t> blockShape,
+    ValueRange tileBaseOffsets, ValueRange offsetRanges) {
+  assert(blockShape.size() == shape.size());
+  assert(blockShape.size() == offsetRanges.size());
+  assert(blockShape.size() == tileBaseOffsets.size());
+
+  auto i32Ty = builder.getI32Type();
+
+  Value tileElemOffset =
+      generateBaseBlockOffset(builder, loc, blockShape, tileBaseOffsets);
+
   // build intra-tile linear offsets tensors
   Value intraTileOffsets =
       buildIntraTileLinearOffsets(builder, loc, blockShape, offsetRanges);
@@ -129,20 +140,23 @@ Value TensorDescriptorUnpacked::generatePtrFromOffsetRanges(
       triton::SplatOp::create(builder, loc, indexTensorType, tileElemOffset);
   Value elemOffsets = arith::AddIOp::create(builder, loc, tileElemOffsetSplat,
                                             intraTileOffsets);
+  return elemOffsets;
+}
 
+Value TensorDescriptorUnpacked::generateBasePtr(OpBuilder &builder,
+                                                const Location &loc,
+                                                ArrayRef<int64_t> blockShape) {
   auto ptrType = cast<triton::PointerType>(base.getType());
   auto ptrTensorType = RankedTensorType::get(blockShape, ptrType);
   Value basePtrSplat =
       triton::SplatOp::create(builder, loc, ptrTensorType, base);
-  Value ptrs = triton::AddPtrOp::create(builder, loc, ptrTensorType,
-                                        basePtrSplat, elemOffsets);
-  return ptrs;
+  return basePtrSplat;
 }
 
-Value TensorDescriptorUnpacked::generatePtr(OpBuilder &builder,
-                                            const Location &loc,
-                                            ArrayRef<int64_t> blockShape,
-                                            ValueRange offsets) {
+Value TensorDescriptorUnpacked::generateOffsets(OpBuilder &builder,
+                                                const Location &loc,
+                                                ArrayRef<int64_t> blockShape,
+                                                ValueRange offsets) {
   assert(blockShape.size() == shape.size());
   assert(blockShape.size() == offsets.size());
 
@@ -153,8 +167,22 @@ Value TensorDescriptorUnpacked::generatePtr(OpBuilder &builder,
     offsetRanges.push_back(offsetWithRange);
   }
 
-  return generatePtrFromOffsetRanges(builder, loc, blockShape, offsets,
-                                     offsetRanges);
+  Value elemOffsets = generateOffsetsFromOffsetRanges(builder, loc, blockShape,
+                                                      offsets, offsetRanges);
+  return elemOffsets;
+}
+
+Value TensorDescriptorUnpacked::generatePtr(OpBuilder &builder,
+                                            const Location &loc,
+                                            ArrayRef<int64_t> blockShape,
+                                            ValueRange offsets) {
+
+  Value elemOffsets = generateOffsets(builder, loc, blockShape, offsets);
+  Value basePtrSplat = generateBasePtr(builder, loc, blockShape);
+
+  Value ptrs = triton::AddPtrOp::create(builder, loc, basePtrSplat.getType(),
+                                        basePtrSplat, elemOffsets);
+  return ptrs;
 }
 
 Value TensorDescriptorUnpacked::generateMask(OpBuilder &builder,

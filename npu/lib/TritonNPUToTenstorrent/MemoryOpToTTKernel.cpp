@@ -160,9 +160,8 @@ struct ConvertTensorDescLoadOp
         rewriter.getRemappedValue(cast<gpu::LocalStoreOp>(user).getDst());
 
     auto descTy = op.getDesc().getType();
+    const auto blockShape = descTy.getBlockType().getShape();
     auto desc = TensorDescriptorUnpacked(descTy, adaptor.getDesc());
-    Value baseAddr = desc.getPtr();
-    llvm::errs() << "base addr = " << baseAddr << "\n";
 
     // compute noc address
     auto opInsertionPt = rewriter.saveInsertionPoint();
@@ -172,19 +171,21 @@ struct ConvertTensorDescLoadOp
     auto pageSize = ttkernel::GetTileSizeOp::create(rewriter, loc, cb);
 
     Value trueVal = arith::createConstantI1(loc, rewriter, 1);
+    Value baseAddr = desc.generateBasePtr(rewriter, loc, blockShape);
+    llvm::errs() << "base addr = " << baseAddr << "\n";
     Value addrGen = ttkernel::GetInterleavedAddrGenFastOp::create(
         rewriter, loc, /*dram=*/trueVal, baseAddr, pageSize, dataFormat);
 
     rewriter.restoreInsertionPoint(opInsertionPt);
 
     // convert bytes offset to tile index
-    const auto blockShape = op.getDesc().getType().getBlockType().getShape();
     auto offsets = op.getIndices();
 
     // TODO: this generates a nice ptr chain but unfortunately we need the
     // version without the addptr stuff... probably need to add that to the desc
     // class.
-    Value offset = desc.generatePtr(rewriter, loc, blockShape, offsets);
+    Value offset =
+        desc.generateBaseBlockOffset(rewriter, loc, blockShape, offsets);
 
     llvm::errs() << "offset = " << offset << "\n";
     Value baseTileIndex =
