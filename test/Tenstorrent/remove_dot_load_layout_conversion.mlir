@@ -29,3 +29,25 @@ module attributes {"ttg.num-ctas" = 1 : i32, "ttg.num-warps" = 1 : i32, "ttg.thr
     tt.return
   }
 }
+
+// -----
+
+// CHECK-NOT: {{.*}} = #ttg.blocked
+// CHECK-DAG: #[[TILED:.+]] = #triton_tenstorrent.tiled_encoding<{tilesPerCore = [1, 2], order = [1, 0], tileShape = [32, 32]}>
+// CHECK-DAG: #[[TILED1:.+]] = #triton_tenstorrent.tiled_encoding<{tilesPerCore = [2, 2], order = [1, 0], tileShape = [32, 32]}>
+#blocked = #ttg.blocked<{sizePerThread = [1, 8], threadsPerWarp = [1, 1], warpsPerCTA = [1, 1], order = [1, 0]}>
+#tiled = #triton_tenstorrent.tiled_encoding<{tilesPerCore = [1, 2], order = [1, 0], tileShape = [32, 32]}>
+#tiled1 = #triton_tenstorrent.tiled_encoding<{tilesPerCore = [2, 2], order = [1, 0], tileShape = [32, 32]}>
+module attributes {"ttg.num-ctas" = 1 : i32, "ttg.num-warps" = 1 : i32, "ttg.threads-per-warp" = 1 : i32} {
+   tt.func public @matmul_kernel_tma(%arg0: !tt.tensordesc<tensor<32x64xf16>>, %arg5: !tt.tensordesc<tensor<64x64xf16>>, %offs_am:  i32, %offs_k: i32, %offs_bn: i32, %arg20: tensor<32x64xf32, #tiled>) -> tensor<32x64xf32, #tiled> {
+      // CHECK-DAG: %[[A:.*]] = tt.descriptor_load %{{.*}} : !tt.tensordesc<tensor<32x64xf16>> -> tensor<32x64xf16, #triton_tenstorrent.tiled_dot_op<{opIdx = 0, parent = #[[TILED]]}>>
+      // CHECK-DAG: %[[B:.*]] = tt.descriptor_load %{{.*}} : !tt.tensordesc<tensor<64x64xf16>> -> tensor<64x64xf16, #triton_tenstorrent.tiled_dot_op<{opIdx = 1, parent = #[[TILED1]]}>>
+      // CHECK: tt.dot %[[A]], %[[B]]
+      %a = tt.descriptor_load %arg0[%offs_am, %offs_k] : !tt.tensordesc<tensor<32x64xf16>> -> tensor<32x64xf16, #blocked>
+      %b = tt.descriptor_load %arg5[%offs_k, %offs_bn] : !tt.tensordesc<tensor<64x64xf16>> -> tensor<64x64xf16, #blocked>
+      %a_7 = ttg.convert_layout %a : tensor<32x64xf16, #blocked> -> tensor<32x64xf16, #triton_tenstorrent.tiled_dot_op<{opIdx = 0, parent = #tiled}>>
+      %b_8 = ttg.convert_layout %b : tensor<64x64xf16, #blocked> -> tensor<64x64xf16, #triton_tenstorrent.tiled_dot_op<{opIdx = 1, parent = #tiled1}>>
+      %accumulator_9 = tt.dot %a_7, %b_8, %arg20 : tensor<32x64xf16, #triton_tenstorrent.tiled_dot_op<{opIdx = 0, parent = #tiled}>> * tensor<64x64xf16, #triton_tenstorrent.tiled_dot_op<{opIdx = 1, parent = #tiled1}>> -> tensor<32x64xf32, #tiled>
+      tt.return %accumulator_9 : tensor<32x64xf32, #tiled>
+   }
+}
