@@ -38,6 +38,18 @@ def TritonTenstorrentRemoveDotLoadLayoutConversions : Pass<"tritontenstorrent-re
                             ];
 }
 
+def CoreSpecialize : Pass<"core-specialize", "mlir::ModuleOp"> {
+  let summary = "Convert TritonNPU to LLVM";
+  let description = [{
+        The `convert-triton-npu-to-llvm` pass converts Triton NPU operations
+        into LLVM operations, enabling further optimizations and code generation.
+    }];
+
+  let dependentDialects = ["mlir::arith::ArithDialect",
+                           "mlir::triton::TritonDialect",
+                            "mlir::triton::gpu::TritonGPUDialect"];
+}
+
 def TritonTenstorrentConvertTensorDescToLoadStore : Pass<"tritontenstorrent-convert-tensor-desc", "mlir::ModuleOp"> {
     let summary = "Convert Triton tensor descriptors to Triton load/store operations";
 
