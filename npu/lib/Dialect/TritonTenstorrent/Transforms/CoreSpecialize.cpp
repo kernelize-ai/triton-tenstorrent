@@ -1,5 +1,7 @@
 #include "npu/include/Dialect/TritonTenstorrent/Transforms/Passes.h"
 
+#include "npu/include/Dialect/TritonTenstorrent/Transforms/Utility.h"
+
 #include "mlir/IR/BuiltinAttributes.h"
 #include "mlir/IR/Matchers.h"
 #include "mlir/IR/PatternMatch.h"
@@ -23,14 +25,6 @@ namespace {
 
 static constexpr llvm::StringLiteral kAllocIdxAttrName =
     "__core_specialize.alloc_idx";
-
-static bool isLoadLike(Operation *op) {
-  return isa<triton::LoadOp, triton::DescriptorLoadOp>(op);
-}
-
-static bool isStoreLike(Operation *op) {
-  return isa<triton::StoreOp, triton::DescriptorStoreOp>(op);
-}
 
 static Type getLoadLikeResultType(Operation *op) {
   if (auto l = dyn_cast<triton::LoadOp>(op))
