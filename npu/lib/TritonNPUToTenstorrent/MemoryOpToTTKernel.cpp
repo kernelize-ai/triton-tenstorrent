@@ -143,7 +143,6 @@ struct ConvertTensorDescLoadOp
                   ConversionPatternRewriter &rewriter) const override {
     MLIRContext *context = getContext();
     Location loc = op.getLoc();
-    auto typeConverter = getTypeConverter();
 
     if (!op->hasOneUse()) {
       LDBG("Load op has multiple uses, cannot convert\n");
@@ -172,7 +171,6 @@ struct ConvertTensorDescLoadOp
 
     Value trueVal = arith::createConstantI1(loc, rewriter, 1);
     Value baseAddr = desc.generateBasePtr(rewriter, loc, blockShape);
-    llvm::errs() << "base addr = " << baseAddr << "\n";
     Value addrGen = ttkernel::GetInterleavedAddrGenFastOp::create(
         rewriter, loc, /*dram=*/trueVal, baseAddr, pageSize, dataFormat);
 
@@ -181,15 +179,8 @@ struct ConvertTensorDescLoadOp
     // convert bytes offset to tile index
     auto offsets = op.getIndices();
 
-    // TODO: this generates a nice ptr chain but unfortunately we need the
-    // version without the addptr stuff... probably need to add that to the desc
-    // class.
     Value offset =
         desc.generateBaseBlockOffset(rewriter, loc, blockShape, offsets);
-
-    llvm::errs() << "offset = " << offset << "\n";
-    Value baseTileIndex =
-        arith::DivUIOp::create(rewriter, loc, offset, pageSize);
 
     auto i32Ty = rewriter.getI32Type();
     auto shape = desc.getShape();
@@ -494,6 +485,91 @@ struct ConvertLocalLoadOp : public OpConversionPattern<gpu::LocalLoadOp> {
     return success();
   }
 };
+struct ConvertTensorDescStoreOp
+    : public OpConversionPattern<triton::DescriptorStoreOp> {
+  using OpConversionPattern<triton::DescriptorStoreOp>::OpConversionPattern;
+
+  LogicalResult
+  matchAndRewrite(triton::DescriptorStoreOp op, OneToNOpAdaptor adaptor,
+                  ConversionPatternRewriter &rewriter) const override {
+    MLIRContext *context = getContext();
+    Location loc = op.getLoc();
+
+    Value cb = adaptor.getSrc().front();
+    LDBG("Descriptor store op value: " << cb
+                                       << "\nwith type: " << cb.getType());
+    assert(isa<ttkernel::CBType>(cb.getType()) && "expected cb type");
+
+    auto descTy = op.getDesc().getType();
+    const auto blockShape = descTy.getBlockType().getShape();
+    auto desc = TensorDescriptorUnpacked(descTy, adaptor.getDesc());
+
+    // compute noc address
+    auto opInsertionPt = rewriter.saveInsertionPoint();
+    rewriter.setInsertionPointAfterValue(cb);
+
+    auto dataFormat = ttkernel::GetDataFormatOp::create(rewriter, loc, cb);
+    auto pageSize = ttkernel::GetTileSizeOp::create(rewriter, loc, cb);
+
+    Value trueVal = arith::createConstantI1(loc, rewriter, 1);
+    Value baseAddr = desc.generateBasePtr(rewriter, loc, blockShape);
+    Value addrGen = ttkernel::GetInterleavedAddrGenFastOp::create(
+        rewriter, loc, /*dram=*/trueVal, baseAddr, pageSize, dataFormat);
+
+    rewriter.restoreInsertionPoint(opInsertionPt);
+
+    // convert bytes offset to tile index
+    auto offsets = op.getIndices();
+
+    Value offset =
+        desc.generateBaseBlockOffset(rewriter, loc, blockShape, offsets);
+    Value baseTileIndex =
+        arith::DivUIOp::create(rewriter, loc, offset, pageSize);
+
+    auto storeType = cast<RankedTensorType>(op.getSrc().getType());
+    // determine how many tiles we need to load by converting the shape to tiles
+    const int32_t numTiles = cast<ttkernel::CBType>(cb.getType()).getNumTiles();
+    Value numPages = arith::createConstantI32(loc, rewriter, numTiles);
+
+    Value l1Addr = ttkernel::GetReadPtrOp::create(rewriter, loc, cb);
+
+    Value const0 = arith::createConstantI32(loc, rewriter, 0);
+    // TODO: make this loop layout aware
+    scf::ForOp storeTileLoop = scf::ForOp::create(
+        rewriter, loc, arith::createConstantI32(loc, rewriter, 0), numPages,
+        arith::createConstantI32(loc, rewriter, 1),
+        ValueRange{l1Addr, baseTileIndex});
+    {
+      rewriter.setInsertionPointToStart(storeTileLoop.getBody());
+
+      Value crtL1Address = storeTileLoop.getRegionIterArgs()[0];
+      Value crtTileIndex = storeTileLoop.getRegionIterArgs()[1];
+
+      // TODO: should the offset be const0 here? the only examples we have are
+      // TensorAccessor..
+      Value nocAddr = ttkernel::InterleavedAddrGenFastGetNocAddrOp::create(
+          rewriter, loc, addrGen, crtTileIndex, const0, Value());
+
+      ttkernel::NocAsyncWriteOp::create(rewriter, loc, crtL1Address, nocAddr,
+                                        pageSize);
+
+      Value nextL1Address =
+          arith::AddIOp::create(rewriter, loc, crtL1Address, pageSize);
+      Value nextTileIndex =
+          arith::AddIOp::create(rewriter, loc, crtTileIndex,
+                                arith::createConstantI32(loc, rewriter, 1));
+      scf::YieldOp::create(rewriter, loc,
+                           ValueRange{nextL1Address, nextTileIndex});
+    }
+    rewriter.setInsertionPointAfter(storeTileLoop);
+
+    ttkernel::NocAsyncWriteBarrierOp::create(rewriter, loc);
+    ttkernel::CBPopFrontOp::create(rewriter, loc, cb, numPages);
+
+    rewriter.eraseOp(op);
+    return success();
+  }
+};
 
 struct ConvertLocalAllocOp : public OpConversionPattern<gpu::LocalAllocOp> {
   using OpConversionPattern<gpu::LocalAllocOp>::OpConversionPattern;
@@ -532,6 +608,7 @@ void populateMemoryOpConversionPattern(
   patterns.add<ConvertTensorDescLoadOp>(typeConverter, patterns.getContext());
   patterns.add<ConvertStoreOp>(typeConverter, pointerInfoAnalysis,
                                patterns.getContext());
+  patterns.add<ConvertTensorDescStoreOp>(typeConverter, patterns.getContext());
   patterns.add<ConvertLocalStoreOp>(typeConverter, patterns.getContext());
   patterns.add<ConvertLocalLoadOp>(typeConverter, patterns.getContext());
   patterns.add<ConvertLocalAllocOp>(typeConverter, patterns.getContext());
