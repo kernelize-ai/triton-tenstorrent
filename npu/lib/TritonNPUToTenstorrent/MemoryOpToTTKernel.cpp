@@ -392,7 +392,7 @@ struct ConvertLocalStoreOp : public OpConversionPattern<gpu::LocalStoreOp> {
         arith::createConstantI32(loc, rewriter, dstCBType.getNumTiles());
 
     auto srcOp = op.getSrc().getDefiningOp();
-    if (!isa<triton::LoadOp>(srcOp)) {
+    if (!isLoadLike(srcOp)) {
       // reserve back the cb for pack tile
       ttkernel::CBReserveBackOp::create(rewriter, loc, dst, numPages);
 
