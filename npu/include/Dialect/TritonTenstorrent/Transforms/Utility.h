@@ -15,6 +15,10 @@ inline bool isStoreLike(Operation *op) {
   return isa<triton::StoreOp, triton::DescriptorStoreOp>(op);
 }
 
+Value getStoreLikeValue(Operation *op);
+
+void setStoreLikeValue(Operation *op, Value v);
+
 class TensorDescriptorUnpacked {
 public:
   TensorDescriptorUnpacked(TensorDescType type, ValueRange pack);

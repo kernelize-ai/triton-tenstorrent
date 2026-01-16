@@ -4,6 +4,26 @@ namespace mlir {
 namespace triton {
 namespace npu {
 
+Value getStoreLikeValue(Operation *op) {
+  if (auto s = dyn_cast<triton::StoreOp>(op))
+    return s.getValue();
+  if (auto s = dyn_cast<triton::DescriptorStoreOp>(op))
+    return s.getSrc();
+  llvm_unreachable("not a store-like op");
+}
+
+void setStoreLikeValue(Operation *op, Value v) {
+  if (auto s = dyn_cast<triton::StoreOp>(op)) {
+    s.getValueMutable().assign(v);
+    return;
+  }
+  if (auto s = dyn_cast<triton::DescriptorStoreOp>(op)) {
+    s.getSrcMutable().assign(v);
+    return;
+  }
+  llvm_unreachable("not a store-like op");
+}
+
 namespace {
 
 Value expandOffsets(OpBuilder &builder, Location loc,
