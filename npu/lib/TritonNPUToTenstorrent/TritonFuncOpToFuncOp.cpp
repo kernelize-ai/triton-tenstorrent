@@ -121,22 +121,25 @@ struct ConvertTritonFunc : public OpConversionPattern<triton::FuncOp> {
           assert(typeConverter->convertType(oldType, unpacked).succeeded() &&
                  "failed to convert tensor descriptor type");
 
+          SmallVector<Value> unpackedValues;
+          unpackedValues.reserve(unpacked.size());
           for (unsigned i = 0; i < unpacked.size(); i++) {
             Type t = unpacked[i];
             LDBG("Replacing arg " << idx << " of type " << oldType
                                   << " with type " << t);
-            if (i == 0)
-              argReplacements.push_back(getArg(idx, t));
-            idx++;
+            unpackedValues.push_back(getArg(idx++, t));
           }
+          Value packed = UnrealizedConversionCastOp::create(
+                             rewriter, loc, oldType, unpackedValues)
+                             .getResult(0);
+          argReplacements.push_back(packed);
         } else {
           Type newType = typeConverter->convertType(oldType);
 
           LDBG("Replacing arg " << idx << " of type " << oldType
                                 << " with type " << newType);
 
-          argReplacements.push_back(getArg(idx, newType));
-          idx++;
+          argReplacements.push_back(getArg(idx++, newType));
         }
       }
 #else

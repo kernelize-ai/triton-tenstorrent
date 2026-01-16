@@ -160,7 +160,12 @@ struct ConvertTensorDescLoadOp
 
     auto descTy = op.getDesc().getType();
     const auto blockShape = descTy.getBlockType().getShape();
-    auto desc = TensorDescriptorUnpacked(descTy, adaptor.getDesc());
+    auto descOp = op.getDesc().getDefiningOp();
+    ValueRange descValues =
+        isa<UnrealizedConversionCastOp>(descOp)
+            ? cast<UnrealizedConversionCastOp>(descOp).getInputs()
+            : adaptor.getDesc();
+    auto desc = TensorDescriptorUnpacked(descTy, descValues);
 
     // compute noc address
     auto opInsertionPt = rewriter.saveInsertionPoint();
@@ -170,7 +175,8 @@ struct ConvertTensorDescLoadOp
     auto pageSize = ttkernel::GetTileSizeOp::create(rewriter, loc, cb);
 
     Value trueVal = arith::createConstantI1(loc, rewriter, 1);
-    Value baseAddr = desc.generateBasePtr(rewriter, loc, blockShape);
+    Value baseAddr =
+        /* desc.generateBasePtr(rewriter, loc, blockShape);*/ desc.getPtr();
     Value addrGen = ttkernel::GetInterleavedAddrGenFastOp::create(
         rewriter, loc, /*dram=*/trueVal, baseAddr, pageSize, dataFormat);
 
@@ -502,7 +508,12 @@ struct ConvertTensorDescStoreOp
 
     auto descTy = op.getDesc().getType();
     const auto blockShape = descTy.getBlockType().getShape();
-    auto desc = TensorDescriptorUnpacked(descTy, adaptor.getDesc());
+    auto descOp = op.getDesc().getDefiningOp();
+    ValueRange descValues =
+        isa<UnrealizedConversionCastOp>(descOp)
+            ? cast<UnrealizedConversionCastOp>(descOp).getInputs()
+            : adaptor.getDesc();
+    auto desc = TensorDescriptorUnpacked(descTy, descValues);
 
     // compute noc address
     auto opInsertionPt = rewriter.saveInsertionPoint();
@@ -512,7 +523,8 @@ struct ConvertTensorDescStoreOp
     auto pageSize = ttkernel::GetTileSizeOp::create(rewriter, loc, cb);
 
     Value trueVal = arith::createConstantI1(loc, rewriter, 1);
-    Value baseAddr = desc.generateBasePtr(rewriter, loc, blockShape);
+    // Value baseAddr = desc.generateBasePtr(rewriter, loc, blockShape);
+    Value baseAddr = desc.getPtr();
     Value addrGen = ttkernel::GetInterleavedAddrGenFastOp::create(
         rewriter, loc, /*dram=*/trueVal, baseAddr, pageSize, dataFormat);
 

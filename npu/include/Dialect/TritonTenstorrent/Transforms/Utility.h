@@ -41,6 +41,8 @@ public:
 
   ValueRange getShape() const { return shape; }
 
+  Value getPtr() const { return base; }
+
 protected:
   Value generateOffsetsFromOffsetRanges(OpBuilder &builder, Location loc,
                                         ArrayRef<int64_t> blockShape,
