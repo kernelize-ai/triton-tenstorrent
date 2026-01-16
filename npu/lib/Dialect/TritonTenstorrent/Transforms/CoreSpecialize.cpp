@@ -34,26 +34,6 @@ static Type getLoadLikeResultType(Operation *op) {
   llvm_unreachable("not a load-like op");
 }
 
-static Value getStoreLikeValue(Operation *op) {
-  if (auto s = dyn_cast<triton::StoreOp>(op))
-    return s.getValue();
-  if (auto s = dyn_cast<triton::DescriptorStoreOp>(op))
-    return s.getSrc();
-  llvm_unreachable("not a store-like op");
-}
-
-static void setStoreLikeValue(Operation *op, Value v) {
-  if (auto s = dyn_cast<triton::StoreOp>(op)) {
-    s.getValueMutable().assign(v);
-    return;
-  }
-  if (auto s = dyn_cast<triton::DescriptorStoreOp>(op)) {
-    s.getSrcMutable().assign(v);
-    return;
-  }
-  llvm_unreachable("not a store-like op");
-}
-
 static bool isDependentLoadLike(Operation *loadLike) {
   for (OpResult r : loadLike->getResults()) {
     for (OpOperand &use : r.getUses()) {

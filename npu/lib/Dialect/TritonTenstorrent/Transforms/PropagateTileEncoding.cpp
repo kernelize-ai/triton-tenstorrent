@@ -1,5 +1,7 @@
 #include "npu/include/Dialect/TritonTenstorrent/Transforms/Passes.h"
 
+#include "npu/include/Dialect/TritonTenstorrent/Transforms/Utility.h"
+
 #include "mlir/Analysis/SliceAnalysis.h"
 #include "mlir/Pass/Pass.h"
 #include "mlir/Transforms/Passes.h"
@@ -56,7 +58,7 @@ void TileEncodingPropagation::initComputeRegisterIndices() {
       storeRegisterIndex(op->getOperand(0).getDefiningOp(), 0);
       storeRegisterIndex(op->getOperand(1).getDefiningOp(), 1);
       for (Operation *user : op->getResult(0).getUsers()) {
-        if (isa<StoreOp>(user)) {
+        if (isStoreLike(user)) {
           storeRegisterIndex(user, 2);
         }
       }
@@ -90,7 +92,7 @@ void TileEncodingPropagation::initComputeRegisterIndices() {
                 continue;
 
               LDBG("Found candidate terminating op: " << *candidate);
-              if (isa<StoreOp>(candidate)) {
+              if (isStoreLike(candidate)) {
                 terminatingOp = candidate;
                 break;
               }
@@ -101,8 +103,9 @@ void TileEncodingPropagation::initComputeRegisterIndices() {
 
       assert(terminatingOp && "Expected dot op to have a user");
       LDBG("DotOp terminating op: " << *terminatingOp);
-      if (!isa<StoreOp>(terminatingOp)) {
-        LDBG("DotOp terminating op is not a StoreOp, skipping register index "
+      if (!isStoreLike(terminatingOp)) {
+        LDBG("DotOp terminating op is not a store like op, skipping register "
+             "index "
              "storage");
         return;
       }
@@ -154,20 +157,21 @@ void TileEncodingPropagation::propagateToLocalLoads() {
       loadOp.erase();
     };
 
-    auto propagateToStores = [](StoreOp storeOp, unsigned index) {
-      auto storeTensorType =
-          dyn_cast<RankedTensorType>(storeOp.getValue().getType());
+    auto propagateToStores = [](Operation *storeOp, unsigned index) {
+      assert(isStoreLike(storeOp) && "expected store like op");
+      Value storeValue = getStoreLikeValue(storeOp);
+      auto storeTensorType = dyn_cast<RankedTensorType>(storeValue.getType());
       if (!storeTensorType) {
-        LDBG("StoreOp " << storeOp
+        LDBG("StoreOp " << *storeOp
                         << " does not have RankedTensorType, skipping");
         return;
       }
       auto storeEncoding = storeTensorType.getEncoding();
       auto newStoreEncoding = npu::tt::RegisterEncodingAttr::get(
-          storeOp.getContext(), index,
+          storeOp->getContext(), index,
           cast<gpu::DistributedEncodingTrait>(storeEncoding));
       LDBG("Propagating new encoding " << newStoreEncoding << " to StoreOp "
-                                       << storeOp);
+                                       << *storeOp);
       auto newStoreType = storeTensorType.cloneWithEncoding(newStoreEncoding);
 
       OpBuilder rewriter(storeOp);
@@ -183,7 +187,7 @@ void TileEncodingPropagation::propagateToLocalLoads() {
               operandTensorType.cloneWithEncoding(newStoreEncoding));
         } else {
           auto cvt = gpu::ConvertLayoutOp::create(
-              rewriter, storeOp.getLoc(),
+              rewriter, storeOp->getLoc(),
               operandTensorType.cloneWithEncoding(newStoreEncoding), operand);
           mapping.map(operand, cvt);
         }
@@ -193,22 +197,19 @@ void TileEncodingPropagation::propagateToLocalLoads() {
       Operation *newStoreOp = rewriter.clone(*storeOp, mapping);
       LDBG("Created new StoreOp: " << *newStoreOp);
 
-      storeOp.erase();
+      storeOp->erase();
     };
 
     LDBG("Propagating register index " << index << " for operation " << op);
 
-    LoadOp loadOp = dyn_cast<LoadOp>(op);
-    if (loadOp) {
+    if (auto loadOp = dyn_cast<LoadOp>(op)) {
       propagateToLoads(loadOp, index);
-      continue;
+    } else if (isStoreLike(op)) {
+      propagateToStores(op, index);
+    } else {
+      LDBG("Operation " << op
+                        << " is neither LoadOp nor store like op, skipping");
     }
-    StoreOp storeOp = dyn_cast<StoreOp>(op);
-    if (storeOp) {
-      propagateToStores(storeOp, index);
-      continue;
-    }
-    LDBG("Operation " << op << " is neither LoadOp nor StoreOp, skipping");
   }
 }
 
