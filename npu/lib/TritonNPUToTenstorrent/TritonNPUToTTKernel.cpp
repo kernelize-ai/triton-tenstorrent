@@ -357,7 +357,6 @@ struct ConvertTritonNPUToTTKernelPass
           });
         });
 #endif
-#endif
     target.addDynamicallyLegalOp<func::FuncOp>(
         [](func::FuncOp funcOp) { return funcOp.getNumArguments() == 0; });
     target.addDynamicallyLegalDialect<arith::ArithDialect>([&](Operation *op) {
