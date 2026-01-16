@@ -7,6 +7,14 @@ namespace mlir {
 namespace triton {
 namespace npu {
 
+inline bool isLoadLike(Operation *op) {
+  return isa<triton::LoadOp, triton::DescriptorLoadOp>(op);
+}
+
+inline bool isStoreLike(Operation *op) {
+  return isa<triton::StoreOp, triton::DescriptorStoreOp>(op);
+}
+
 class TensorDescriptorUnpacked {
 public:
   TensorDescriptorUnpacked(TensorDescType type, ValueRange pack);

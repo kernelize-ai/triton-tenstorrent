@@ -74,6 +74,9 @@ Value buildIntraTileLinearOffsets(OpBuilder &builder, Location loc,
 Value TensorDescriptorUnpacked::generateBaseBlockOffset(
     OpBuilder &builder, Location loc, ArrayRef<int64_t> blockShape,
     ValueRange tileBaseOffsets) {
+  assert(blockShape.size() == shape.size());
+  assert(blockShape.size() == tileBaseOffsets.size());
+
   auto i32Ty = builder.getI32Type();
 
   SmallVector<Value, 4> blockShapeValues;

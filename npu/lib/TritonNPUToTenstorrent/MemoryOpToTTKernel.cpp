@@ -466,7 +466,7 @@ struct ConvertLocalLoadOp : public OpConversionPattern<gpu::LocalLoadOp> {
     // with its ptr
     assert(op->hasOneUse() &&
            "expected local load with store user to have one use");
-    if (isa<StoreOp>(*op->getUsers().begin())) {
+    if (isStoreLike(*op->getUsers().begin())) {
       rewriter.replaceOp(op, src);
       return success();
     }
