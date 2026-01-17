@@ -39,7 +39,7 @@ index 48049f026..a76221fda 100644
 +  mlir::triton::npu::registerFinalizeCBTransaction();
 +  mlir::triton::npu::registerTritonTenstorrentRemoveRedundantMasks();
 +  mlir::triton::npu::registerTritonTenstorrentCanonicalizeMatmulLoops();
-+  mlir::triton::npu::registerCoreSpecialize();
++  mlir::triton::cpu::registerCoreSpecialize();
 +
    registry.insert<
        mlir::triton::TritonDialect, mlir::cf::ControlFlowDialect,

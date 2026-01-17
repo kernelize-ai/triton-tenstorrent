@@ -3,7 +3,6 @@ add_triton_library(TritonTenstorrentTransforms
     CanonicalizeMatmulLoops.cpp
     ConvertComputeOps.cpp
     ConvertTensorDescToLoadStore.cpp
-    CoreSpecialize.cpp
     PropagateTileEncoding.cpp
     RemoveDotLoadLayoutConversions.cpp
     RemoveRedundantMasks.cpp

@@ -52,7 +52,7 @@ void init_triton_cpu_passes(py::module &&m) {
 
 void init_triton_npu_passes_tenstorrent(py::module &&m) {
   m.def("add_core_specialize", [](mlir::PassManager &pm) {
-    pm.addPass(mlir::triton::npu::createCoreSpecialize());
+    pm.addPass(mlir::triton::cpu::createCoreSpecialize());
   });
   m.def("add_propagate_register_indices", [](mlir::PassManager &pm) {
     pm.addPass(
