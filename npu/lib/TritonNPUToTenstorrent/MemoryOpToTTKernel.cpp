@@ -203,11 +203,10 @@ struct ConvertTensorDescLoadOp
     auto tiledParent =
         cast<npu::tt::TiledEncodingAttr>(dotOpEncoding.getParent());
     auto tileShape = tiledParent.getTileShape();
-    auto fastChangeDim = outDimNames[1];
-    unsigned numFastChangeDimTiles =
-        layout.getOutDimSize(fastChangeDim) / tileShape[1];
-    LDBG("Fast changing dim: " << fastChangeDim << " with "
-                               << numFastChangeDimTiles << " tiles");
+    auto dotOrder = gpu::getOrderForDotOperand(
+        dotOpEncoding.getOpIdx(), outDimNames.size(),
+        /*kContig=*/true /*getOpIdx() == 0 ? true : false*/);
+    llvm::errs() << "dotOrder: " << dotOrder[0] << ", " << dotOrder[1] << "\n";
 
     // convert bytes offset to tile index
     auto offsets = op.getIndices();
@@ -258,6 +257,9 @@ struct ConvertTensorDescLoadOp
 
     Value l1Addr = ttkernel::GetWritePtrOp::create(rewriter, loc, cb);
 
+    SmallVector tilesPerCore = llvm::to_vector(llvm::map_range(
+        layout.getOutDimSizes(), [](auto v) { return v / 32; }));
+
     // auto registerIndexLayout = layout.flattenOuts();
     for (int32_t i = 0; i < numTiles; ++i) {
       auto crtIndex = layout.apply({{S("tile"), i}, {S("register"), 0}});
@@ -269,35 +271,50 @@ struct ConvertTensorDescLoadOp
         }
         DBGS() << "\n";
       });
-      // linearize tensor index into tiled byte offset
-      // TODO: incorporate global offsets
-      // add the dim0 tile index to the dim0 from the layout
-      // similarly for dim1
-      // then linearize
+
+      // Element-space start of this tile within the block (from the layout).
+      int32_t elem0 = crtIndex[0].second;
+      int32_t elem1 = crtIndex[1].second;
+      llvm::errs() << "Tile " << i << " elem0: " << elem0
+                   << ", elem1: " << elem1 << "\n";
+
+      // Tile coordinates within the block (0..tilesPerCore[d)-1).
+      int32_t localTile0 = elem0 / tileShape[0];
+      int32_t localTile1 = elem1 / tileShape[1];
+
+      llvm::errs() << "Tile " << i << " localTile0: " << localTile0
+                   << ", localTile1: " << localTile1 << "\n";
+
+      // --- GLOBAL tile id for NOC addressing (remote index) ---
+      // Add the block/global tile coordinate (tileCoord) and linearize into the
+      // full tensor tile space using tilesPerDim (global tiles per dim).
       Value tileIndexDim0 = arith::AddIOp::create(
           rewriter, loc, tileCoord[0],
-          arith::createConstantI32(loc, rewriter,
-                                   crtIndex[0].second / tileShape[0]));
+          arith::createConstantI32(loc, rewriter, localTile0));
       Value tileIndexDim1 = arith::AddIOp::create(
           rewriter, loc, tileCoord[1],
-          arith::createConstantI32(loc, rewriter,
-                                   crtIndex[1].second / tileShape[1]));
-      Value tileOffset = arith::AddIOp::create(
+          arith::createConstantI32(loc, rewriter, localTile1));
+
+      Value remoteTileIndex = arith::AddIOp::create(
           rewriter, loc,
           arith::MulIOp::create(rewriter, loc, tileIndexDim0, tilesPerDim[1]),
           tileIndexDim1);
 
-      Value crtTileIndex = tileOffset;
+      // --- LOCAL slot id for CB/L1 placement (consumer order) ---
+      int32_t slot = true ? (localTile0 * tilesPerCore[1] + localTile1)
+                          : (localTile1 * tilesPerCore[0] + localTile0);
 
-      Value localTileIndex = arith::createConstantI32(loc, rewriter, i);
+      llvm::errs() << "Tile " << i << " slot: " << slot << "\n";
+
+      Value localTileIndex = arith::createConstantI32(loc, rewriter, slot);
       Value localTileIndexOffset =
           arith::MulIOp::create(rewriter, loc, localTileIndex, pageSize);
       Value crtL1Address =
           arith::AddIOp::create(rewriter, loc, l1Addr, localTileIndexOffset);
-      // TODO: should the offset be const0 here? the only examples we have are
-      // TensorAccessor...
+
       Value nocAddr = ttkernel::InterleavedAddrGenFastGetNocAddrOp::create(
-          rewriter, loc, addrGen, crtTileIndex, const0, Value());
+          rewriter, loc, addrGen, remoteTileIndex, const0, Value());
+
       ttkernel::NocAsyncReadOp::create(rewriter, loc, nocAddr, crtL1Address,
                                        pageSize);
     }
