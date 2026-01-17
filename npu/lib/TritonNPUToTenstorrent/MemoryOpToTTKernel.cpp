@@ -160,6 +160,8 @@ struct ConvertTensorDescLoadOp
 
     auto descTy = op.getDesc().getType();
     const auto blockShape = descTy.getBlockType().getShape();
+    llvm::errs() << "block shape: " << blockShape[0] << ", " << blockShape[1]
+                 << "\n";
     auto descOp = op.getDesc().getDefiningOp();
     ValueRange descValues =
         isa<UnrealizedConversionCastOp>(descOp)
@@ -182,20 +184,60 @@ struct ConvertTensorDescLoadOp
 
     rewriter.restoreInsertionPoint(opInsertionPt);
 
+    auto loadResultType = cast<RankedTensorType>(op.getResult().getType());
+    const int32_t elementSize =
+        loadResultType.getElementType().getIntOrFloatBitWidth() / 8;
+
+    auto dotOpEncoding = cast<npu::tt::TiledDotOperandEncodingAttr>(
+        loadResultType.getEncoding());
+    LDBG("Lowering load op with encoding " << dotOpEncoding << "\n");
+    auto layout = gpu::toLinearLayout(loadResultType.getShape(), dotOpEncoding);
+    layout = layout.sublayout({S("register"), S("tile")},
+                              llvm::to_vector(layout.getOutDimNames()));
+    LDBG("Register/Tile layout:\n" << layout << "\n");
+
+    auto numTiles = layout.getInDimSize(S("tile"));
+    LDBG("Generating " << numTiles << " tile loads");
+
+    auto outDimNames = llvm::to_vector(layout.getOutDimNames());
+    auto tiledParent =
+        cast<npu::tt::TiledEncodingAttr>(dotOpEncoding.getParent());
+    auto tileShape = tiledParent.getTileShape();
+    auto fastChangeDim = outDimNames[1];
+    unsigned numFastChangeDimTiles =
+        layout.getOutDimSize(fastChangeDim) / tileShape[1];
+    LDBG("Fast changing dim: " << fastChangeDim << " with "
+                               << numFastChangeDimTiles << " tiles");
+
     // convert bytes offset to tile index
     auto offsets = op.getIndices();
 
-    Value offset =
-        desc.generateBaseBlockOffset(rewriter, loc, blockShape, offsets);
+    // we can refactor this to have a few interfaces that populate vectors (or
+    // return them, fine) so we can get the tile ids pe-linearization and we
+    // could even have a linearize utility method that generated the linearized
+    // value.... Value offset =
+    //     desc.generateBaseBlockOffset(rewriter, loc, blockShape, offsets);
 
     auto i32Ty = rewriter.getI32Type();
-    auto shape = desc.getShape();
+    // Note: unlike the tensor descriptor base case we normalize the shape into
+    // 32x32 tiles here
+
     SmallVector<Value, 4> blockShapeValues;
     for (unsigned i = 0; i < blockShape.size(); ++i) {
       blockShapeValues.push_back(arith::ConstantOp::create(
           rewriter, loc, i32Ty,
-          IntegerAttr::get(i32Ty, static_cast<int32_t>(blockShape[i]))));
+          IntegerAttr::get(i32Ty, static_cast<int32_t>(tileShape[i]))));
     }
+
+    // tileCoord[i] = tileBaseOffset[i] / blockShape[i]
+    SmallVector<Value, 4> tileCoord;
+    tileCoord.reserve(blockShape.size());
+    for (unsigned i = 0; i < blockShape.size(); ++i) {
+      tileCoord.push_back(arith::DivSIOp::create(rewriter, loc, offsets[i],
+                                                 blockShapeValues[i]));
+    }
+
+    auto shape = desc.getShape();
     // tilesPerDim[i] = ceil(shape[i] / blockShape[i])
     SmallVector<Value, 4> tilesPerDim;
     for (unsigned i = 0; i < blockShape.size(); ++i) {
@@ -208,81 +250,58 @@ struct ConvertTensorDescLoadOp
     // determine how many tiles we need to load by converting the shape to tiles
     const int32_t numCbTiles =
         cast<ttkernel::CBType>(cb.getType()).getNumTiles();
+    assert(numTiles == numCbTiles &&
+           "number of tiles in layout must match number of tiles in CB");
     LDBG("Loading from CB of size " << numCbTiles << " tiles");
     Value numPages = arith::createConstantI32(loc, rewriter, numCbTiles);
     ttkernel::CBReserveBackOp::create(rewriter, loc, cb, numPages);
 
     Value l1Addr = ttkernel::GetWritePtrOp::create(rewriter, loc, cb);
 
-    auto loadResultType = cast<RankedTensorType>(op.getResult().getType());
-    const int32_t elementSize =
-        loadResultType.getElementType().getIntOrFloatBitWidth() / 8;
-    if (auto dotOpEncoding = dyn_cast<npu::tt::TiledDotOperandEncodingAttr>(
-            loadResultType.getEncoding())) {
-      LDBG("Lowering load op with encoding " << dotOpEncoding << "\n");
-      auto layout =
-          gpu::toLinearLayout(loadResultType.getShape(), dotOpEncoding);
-      layout = layout.sublayout({S("register"), S("tile")},
-                                llvm::to_vector(layout.getOutDimNames()));
-      LDBG("Register/Tile layout:\n" << layout << "\n");
+    // auto registerIndexLayout = layout.flattenOuts();
+    for (int32_t i = 0; i < numTiles; ++i) {
+      auto crtIndex = layout.apply({{S("tile"), i}, {S("register"), 0}});
+      assert(crtIndex.size() == 2);
+      LLVM_DEBUG({
+        DBGS() << "Tile " << i << " has start index: ";
+        for (auto [dim, idx] : crtIndex) {
+          DBGS() << dim.getValue() << ": " << idx << ", ";
+        }
+        DBGS() << "\n";
+      });
+      // linearize tensor index into tiled byte offset
+      // TODO: incorporate global offsets
+      // add the dim0 tile index to the dim0 from the layout
+      // similarly for dim1
+      // then linearize
+      Value tileIndexDim0 = arith::AddIOp::create(
+          rewriter, loc, tileCoord[0],
+          arith::createConstantI32(loc, rewriter,
+                                   crtIndex[0].second / tileShape[0]));
+      Value tileIndexDim1 = arith::AddIOp::create(
+          rewriter, loc, tileCoord[1],
+          arith::createConstantI32(loc, rewriter,
+                                   crtIndex[1].second / tileShape[1]));
+      Value tileOffset = arith::AddIOp::create(
+          rewriter, loc,
+          arith::MulIOp::create(rewriter, loc, tileIndexDim0, tilesPerDim[1]),
+          tileIndexDim1);
 
-      auto numTiles = layout.getInDimSize(S("tile"));
-      assert(numTiles == numCbTiles &&
-             "number of tiles in layout must match number of tiles in CB");
-      LDBG("Generating " << numTiles << " tile loads");
+      Value crtTileIndex = tileOffset;
 
-      auto outDimNames = llvm::to_vector(layout.getOutDimNames());
-      auto tiledParent =
-          cast<npu::tt::TiledEncodingAttr>(dotOpEncoding.getParent());
-      auto tileShape = tiledParent.getTileShape();
-      auto fastChangeDim = outDimNames[1];
-      unsigned numFastChangeDimTiles =
-          layout.getOutDimSize(fastChangeDim) / tileShape[1];
-      LDBG("Fast changing dim: " << fastChangeDim << " with "
-                                 << numFastChangeDimTiles << " tiles");
-
-      // auto registerIndexLayout = layout.flattenOuts();
-      for (int32_t i = 0; i < numTiles; ++i) {
-        auto crtIndex = layout.apply({{S("tile"), i}, {S("register"), 0}});
-        assert(crtIndex.size() == 2);
-        LLVM_DEBUG({
-          DBGS() << "Tile " << i << " has start index: ";
-          for (auto [dim, idx] : crtIndex) {
-            DBGS() << dim.getValue() << ": " << idx << ", ";
-          }
-          DBGS() << "\n";
-        });
-        // linearize tensor index into tiled byte offset
-        Value tileIndexDim0 = arith::createConstantI32(
-            loc, rewriter, crtIndex[0].second / tileShape[0]);
-        Value tileIndexDim1 = arith::createConstantI32(
-            loc, rewriter, crtIndex[1].second / tileShape[1]);
-        Value tileOffset = arith::AddIOp::create(
-            rewriter, loc,
-            arith::MulIOp::create(rewriter, loc, tileIndexDim0, tilesPerDim[1]),
-            tileIndexDim1);
-#if 1
-        Value crtTileIndex = tileOffset;
-#else
-        // broken, we can't offset like this
-        Value crtByteOffset =
-            arith::AddIOp::create(rewriter, loc, offset, byteOffsetVal);
-        Value crtTileIndex =
-            arith::DivUIOp::create(rewriter, loc, crtByteOffset, pageSize);
-#endif
-        Value localTileIndex = arith::createConstantI32(loc, rewriter, i);
-        Value localTileIndexOffset =
-            arith::MulIOp::create(rewriter, loc, localTileIndex, pageSize);
-        Value crtL1Address =
-            arith::AddIOp::create(rewriter, loc, l1Addr, localTileIndexOffset);
-        // TODO: should the offset be const0 here? the only examples we have are
-        // TensorAccessor...
-        Value nocAddr = ttkernel::InterleavedAddrGenFastGetNocAddrOp::create(
-            rewriter, loc, addrGen, crtTileIndex, const0, Value());
-        ttkernel::NocAsyncReadOp::create(rewriter, loc, nocAddr, crtL1Address,
-                                         pageSize);
-      }
+      Value localTileIndex = arith::createConstantI32(loc, rewriter, i);
+      Value localTileIndexOffset =
+          arith::MulIOp::create(rewriter, loc, localTileIndex, pageSize);
+      Value crtL1Address =
+          arith::AddIOp::create(rewriter, loc, l1Addr, localTileIndexOffset);
+      // TODO: should the offset be const0 here? the only examples we have are
+      // TensorAccessor...
+      Value nocAddr = ttkernel::InterleavedAddrGenFastGetNocAddrOp::create(
+          rewriter, loc, addrGen, crtTileIndex, const0, Value());
+      ttkernel::NocAsyncReadOp::create(rewriter, loc, nocAddr, crtL1Address,
+                                       pageSize);
     }
+
     ttkernel::NocAsyncReadBarrierOp::create(rewriter, loc);
 
     rewriter.eraseOp(op);
