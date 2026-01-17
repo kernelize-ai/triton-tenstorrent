@@ -203,6 +203,8 @@ struct ConvertTensorDescLoadOp
     auto tiledParent =
         cast<npu::tt::TiledEncodingAttr>(dotOpEncoding.getParent());
     auto tileShape = tiledParent.getTileShape();
+    auto order = tiledParent.getOrder();
+    llvm::errs() << "order: " << order[0] << ", " << order[1] << "\n";
     auto dotOrder = gpu::getOrderForDotOperand(
         dotOpEncoding.getOpIdx(), outDimNames.size(),
         /*kContig=*/true /*getOpIdx() == 0 ? true : false*/);
@@ -297,11 +299,11 @@ struct ConvertTensorDescLoadOp
 
       Value remoteTileIndex = arith::AddIOp::create(
           rewriter, loc,
-          arith::MulIOp::create(rewriter, loc, tileIndexDim0, tilesPerDim[1]),
+          arith::MulIOp::create(rewriter, loc, tileIndexDim0, tilesPerDim[order[0]]),
           tileIndexDim1);
 
       // --- LOCAL slot id for CB/L1 placement (consumer order) ---
-      int32_t slot = true ? (localTile0 * tilesPerCore[1] + localTile1)
+      int32_t slot = true ? (localTile0 * tilesPerCore[order[0]] + localTile1)
                           : (localTile1 * tilesPerCore[0] + localTile0);
 
       llvm::errs() << "Tile " << i << " slot: " << slot << "\n";
