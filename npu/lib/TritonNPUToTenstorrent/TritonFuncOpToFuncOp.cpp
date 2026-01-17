@@ -64,7 +64,6 @@ struct ConvertTritonFunc : public OpConversionPattern<triton::FuncOp> {
     }
 
     Block &oldEntry = funcOp.getBody().front();
-    const unsigned numArgs = oldEntry.getNumArguments();
 
     // create a new function with no arguments
     mlir::FunctionType newTy = mlir::FunctionType::get(
@@ -94,6 +93,7 @@ struct ConvertTritonFunc : public OpConversionPattern<triton::FuncOp> {
     // fix in
     rewriter.inlineRegionBefore(funcOp.getBody(), newRegion, newRegion.end());
 
+    int32_t numArgs = -1;
     {
       OpBuilder::InsertionGuard guard(rewriter);
       rewriter.setInsertionPointToStart(newEntry);
@@ -142,6 +142,7 @@ struct ConvertTritonFunc : public OpConversionPattern<triton::FuncOp> {
           argReplacements.push_back(getArg(idx++, newType));
         }
       }
+      numArgs = idx;
 #else
       for (auto [idx, arg] : llvm::enumerate(oldEntry.getArguments())) {
         Type oldType = arg.getType();
@@ -177,6 +178,7 @@ struct ConvertTritonFunc : public OpConversionPattern<triton::FuncOp> {
 
     // Number of user args
     // TODO: add launch params (grid size, block size, shared memory size, etc)
+    assert(numArgs >= 0 && "numArgs not set");
     newFunc->setAttr("tt.num_args", rewriter.getI32IntegerAttr(numArgs));
 
     rewriter.eraseOp(funcOp);
