@@ -239,6 +239,9 @@ struct ConvertTritonNPUToTTKernelPass
       if (isa<triton::PointerType>(etype)) {
         return IntegerType::get(type.getContext(), 32);
       }
+      if (!type.getEncoding()) {
+        return type;
+      }
       if (isa<npu::tt::RegisterEncodingAttr>(type.getEncoding())) {
         auto shape = convertShapeToTileShape(type.getShape());
         auto ttcoreTileType = ttcore::TileType::get(
@@ -277,6 +280,25 @@ struct ConvertTritonNPUToTTKernelPass
           return UnrealizedConversionCastOp::create(builder, loc, type, inputs)
               .getResult(0);
         });
+    typeConverter.addConversion([](mlir::triton::TensorDescType t,
+                                   llvm::SmallVectorImpl<mlir::Type> &out) {
+      // We convert a tensor descriptor into an pointer, and a shape and stride
+      // for each dimension, and padding option. i.e., we create 1+2*rank+1
+      // values. Note that tensor descriptors may be signed/unsigned integers
+      // whereas pointers should always be signless.
+      auto tensorType = t.getSignlessBlockType();
+      out.push_back(triton::getPointerType(tensorType.getElementType()));
+      out.insert(out.end(), 2 * tensorType.getRank(),
+                 mlir::IntegerType::get(t.getContext(), 32));
+      out.push_back(mlir::IntegerType::get(t.getContext(), 1));
+      return mlir::success();
+    });
+    typeConverter.addSourceMaterialization(
+        [](OpBuilder &builder, mlir::triton::TensorDescType type,
+           ValueRange inputs, Location loc) -> Value {
+          return UnrealizedConversionCastOp::create(builder, loc, type, inputs)
+              .getResult(0);
+        });
 
     mlir::ConversionTarget funcTarget(*context);
     funcTarget.addIllegalOp<triton::FuncOp>();
@@ -311,7 +333,30 @@ struct ConvertTritonNPUToTTKernelPass
     target.addIllegalDialect<triton::cpu::TritonCPUDialect>();
     target.addIllegalDialect<triton::gpu::TritonGPUDialect>();
 
-    target.addLegalOp<UnrealizedConversionCastOp>();
+#if 1
+    // TODO: make this only for tensor desc types
+    // target.addIllegalOp<UnrealizedConversionCastOp>();
+#else
+    target.addDynamicallyLegalOp<UnrealizedConversionCastOp>(
+        [&](UnrealizedConversionCastOp op) {
+          const bool hasOutputTensorDesc =
+              llvm::all_of(op.getOutputs(), [&](Value v) {
+                if (isa<triton::TensorDescType>(v.getType())) {
+                  return true;
+                }
+                return false; // illegal
+              });
+          if (hasOutputTensorDesc) {
+            return true;
+          }
+          return llvm::any_of(op.getInputs(), [&](Value v) {
+            if (isa<triton::TensorDescType>(v.getType())) {
+              return true;
+            }
+            return false; // illegal
+          });
+        });
+#endif
     target.addDynamicallyLegalOp<func::FuncOp>(
         [](func::FuncOp funcOp) { return funcOp.getNumArguments() == 0; });
     target.addDynamicallyLegalDialect<arith::ArithDialect>([&](Operation *op) {

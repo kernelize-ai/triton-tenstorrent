@@ -125,6 +125,67 @@ struct RemoveDescriptorLoadOpToDotCvt
   }
 };
 
+struct RemoveDotToDescriptorStoreOpCvt
+    : public mlir::OpRewritePattern<triton::gpu::ConvertLayoutOp> {
+  using OpRewritePattern::OpRewritePattern;
+
+  LogicalResult matchAndRewrite(triton::gpu::ConvertLayoutOp cvtOp,
+                                PatternRewriter &rewriter) const override {
+    LDBG("Evaluate cvtOp for removal: " << cvtOp << "\n");
+
+    bool modified = false;
+    Value cvtResult = cvtOp.getResult();
+    for (auto user : cvtResult.getUsers()) {
+      if (auto descStoreOp = dyn_cast<triton::DescriptorStoreOp>(user)) {
+        auto cvtSrcType = cast<RankedTensorType>(cvtOp.getSrc().getType());
+        auto cvtResultType =
+            cast<RankedTensorType>(cvtOp.getResult().getType());
+        if (isa<npu::tt::TiledEncodingAttr>(cvtSrcType.getEncoding()) &&
+            isa<npu::tt::RegisterEncodingAttr>(cvtResultType.getEncoding())) {
+          LDBG("Remove cvtOp " << *cvtOp
+                               << " and push tiled encoding into store");
+
+          rewriter.modifyOpInPlace(descStoreOp, [&]() {
+            descStoreOp.getSrcMutable().assign(cvtOp.getSrc());
+          });
+          modified = true;
+        }
+      }
+    }
+
+    if (modified && cvtOp.getResult().use_empty()) {
+      LDBG("Erasing cvtOp " << *cvtOp << "\n");
+      rewriter.eraseOp(cvtOp);
+    }
+
+    return modified ? success() : failure();
+
+#if 0
+    auto cvtResultOp = *cvtResult.getUsers().begin();
+    if (!cvtResultOp) {
+      // ignore block arguments
+      return failure();
+    }
+
+    // TODO: currently we force replacement of descriptor store #reg layout with #tiled layout. It would be better to pick the right layout initially, or at least know that we're pushing the #tiled layout in because of a dot op. Then again, the store does not really care about the registers used (but the relationship between source and store does).
+    auto descStoreOp = dyn_cast<triton::DescriptorStoreOp>(cvtResultOp);
+
+    if (descStoreOp && isa<npu::tt::TiledEncodingAttr>(cvtSrcType.getEncoding()) && isa<npu::tt::RegisterEncodingAttr>(cvtResultType.getEncoding())) {
+      LDBG("Remove cvtOp " << *cvtOp
+                           << " and push tiled encoding into store");
+
+       rewriter.modifyOpInPlace(descStoreOp, [&]() {
+          descStoreOp.getSrcMutable().assign(cvtOp.getSrc());
+      });
+      rewriter.eraseOp(cvtOp);
+      return success();
+    }
+
+    return failure();
+#endif
+  }
+};
+
 } // namespace
 
 class TritonTenstorrentRemoveDotLoadLayoutConversionsPass
@@ -141,6 +202,7 @@ public:
 
     patterns.add<RemoveLoadOpToDotCvt>(context, benefitDefault);
     patterns.add<RemoveDescriptorLoadOpToDotCvt>(context, benefitDefault);
+    patterns.add<RemoveDotToDescriptorStoreOpCvt>(context, benefitDefault);
 
     if (applyPatternsGreedily(m, std::move(patterns)).failed()) {
       signalPassFailure();
