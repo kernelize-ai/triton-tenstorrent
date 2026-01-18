@@ -83,9 +83,6 @@ static std::optional<int64_t> getAllocIdx(Operation *op) {
 class Specializer {
   triton::FuncOp func;
   SmallVector<triton::gpu::LocalAllocOp> allocs;
-  SmallVector<Operation *> loads; // triton::LoadOp or triton::DescriptorLoadOp
-  SmallVector<Operation *>
-      stores; // triton::StoreOp or triton::DescriptorStoreOp
 
 public:
   Specializer(ModuleOp m, triton::FuncOp _func) : func(_func) {
@@ -97,7 +94,6 @@ public:
         op->setAttr(
             kAllocIdxAttrName,
             IntegerAttr::get(IntegerType::get(func.getContext(), 64), idx));
-        stores.push_back(op);
       } else if (isLoadLike(op)) {
         if (isDependentLoadLike(op))
           return;
@@ -107,7 +103,6 @@ public:
         op->setAttr(
             kAllocIdxAttrName,
             IntegerAttr::get(IntegerType::get(func.getContext(), 64), idx));
-        loads.push_back(op);
       }
     });
 
