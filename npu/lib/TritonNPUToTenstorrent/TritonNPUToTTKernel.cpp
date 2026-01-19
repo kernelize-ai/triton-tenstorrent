@@ -333,30 +333,7 @@ struct ConvertTritonNPUToTTKernelPass
     target.addIllegalDialect<triton::cpu::TritonCPUDialect>();
     target.addIllegalDialect<triton::gpu::TritonGPUDialect>();
 
-#if 1
-    // TODO: make this only for tensor desc types
-    // target.addIllegalOp<UnrealizedConversionCastOp>();
-#else
-    target.addDynamicallyLegalOp<UnrealizedConversionCastOp>(
-        [&](UnrealizedConversionCastOp op) {
-          const bool hasOutputTensorDesc =
-              llvm::all_of(op.getOutputs(), [&](Value v) {
-                if (isa<triton::TensorDescType>(v.getType())) {
-                  return true;
-                }
-                return false; // illegal
-              });
-          if (hasOutputTensorDesc) {
-            return true;
-          }
-          return llvm::any_of(op.getInputs(), [&](Value v) {
-            if (isa<triton::TensorDescType>(v.getType())) {
-              return true;
-            }
-            return false; // illegal
-          });
-        });
-#endif
+    target.addLegalOp<UnrealizedConversionCastOp>();
     target.addDynamicallyLegalOp<func::FuncOp>(
         [](func::FuncOp funcOp) { return funcOp.getNumArguments() == 0; });
     target.addDynamicallyLegalDialect<arith::ArithDialect>([&](Operation *op) {
