@@ -100,7 +100,6 @@ struct ConvertTritonFunc : public OpConversionPattern<triton::FuncOp> {
 
       SmallVector<Value> argReplacements;
       argReplacements.reserve(oldEntry.getNumArguments());
-#if 1
 
       auto getArg = [&](const unsigned idx, Type newType) -> Value {
         Value indexVal = arith::createIndexConstant(loc, rewriter, idx);
@@ -143,36 +142,6 @@ struct ConvertTritonFunc : public OpConversionPattern<triton::FuncOp> {
         }
       }
       numArgs = idx;
-#else
-      for (auto [idx, arg] : llvm::enumerate(oldEntry.getArguments())) {
-        Type oldType = arg.getType();
-        if (isa<TensorDescType>(oldType)) {
-          SmallVector<Type> unpacked;
-          assert(typeConverter->convertType(oldType, unpacked).succeeded() &&
-                 "failed to convert tensor descriptor type");
-
-          for (auto v : unpacked) {
-            llvm::errs() << "unpacked val: " << v << "\n";
-          }
-
-          llvm::errs() << "uh oh: " << oldType << "\n";
-          assert(false && "TODO");
-        }
-        Type newType = typeConverter->convertType(oldType);
-
-        LDBG("Replacing arg " << idx << " of type " << oldType << " with type "
-                              << newType);
-
-        Value indexVal = arith::createIndexConstant(loc, rewriter, idx);
-        Value getArgVal = ttkernel::GetArgValOp::create(
-            rewriter, loc, rewriter.getIntegerType(32), indexVal);
-        if (isa<IntegerType>(newType) && newType.getIntOrFloatBitWidth() < 32) {
-          getArgVal =
-              arith::TruncIOp::create(rewriter, loc, newType, getArgVal);
-        }
-        argReplacements.push_back(getArgVal);
-      }
-#endif
       rewriter.mergeBlocks(&oldEntry, newEntry, argReplacements);
     }
 

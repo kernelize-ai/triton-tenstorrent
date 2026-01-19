@@ -159,30 +159,6 @@ struct RemoveDotToDescriptorStoreOpCvt
     }
 
     return modified ? success() : failure();
-
-#if 0
-    auto cvtResultOp = *cvtResult.getUsers().begin();
-    if (!cvtResultOp) {
-      // ignore block arguments
-      return failure();
-    }
-
-    // TODO: currently we force replacement of descriptor store #reg layout with #tiled layout. It would be better to pick the right layout initially, or at least know that we're pushing the #tiled layout in because of a dot op. Then again, the store does not really care about the registers used (but the relationship between source and store does).
-    auto descStoreOp = dyn_cast<triton::DescriptorStoreOp>(cvtResultOp);
-
-    if (descStoreOp && isa<npu::tt::TiledEncodingAttr>(cvtSrcType.getEncoding()) && isa<npu::tt::RegisterEncodingAttr>(cvtResultType.getEncoding())) {
-      LDBG("Remove cvtOp " << *cvtOp
-                           << " and push tiled encoding into store");
-
-       rewriter.modifyOpInPlace(descStoreOp, [&]() {
-          descStoreOp.getSrcMutable().assign(cvtOp.getSrc());
-      });
-      rewriter.eraseOp(cvtOp);
-      return success();
-    }
-
-    return failure();
-#endif
   }
 };
 
