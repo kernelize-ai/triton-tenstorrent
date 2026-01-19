@@ -547,9 +547,9 @@ module attributes {"ttg.num-ctas" = 1 : i32, "ttg.num-warps" = 1 : i32, "ttg.thr
     // CHECK: ttkernel.cb_reserve_back(%[[CB]], %[[c2_i32]]) : (!ttkernel.cb<2, !ttcore.tile<32x32, f16>>, i32) -> ()
     // CHECK: %[[CB_WRITE_PTR:.*]] = ttkernel.get_write_ptr(%[[CB]]) : (!ttkernel.cb<2, !ttcore.tile<32x32, f16>>) -> i32
 
-    %a_6 = tt.descriptor_load %arg0[%offs_am, %offs_k] : !tt.tensordesc<tensor<32x64xf16>> -> tensor<32x64xf16, #triton_tenstorrent.tiled_dot_op<{opIdx = 0, parent = #tiled}>> 
+    %a_6 = tt.descriptor_load %arg0[%offs_am, %offs_k] : !tt.tensordesc<tensor<32x64xf16>> -> tensor<32x64xf16, #triton_tenstorrent.tiled_dot_op<{opIdx = 0, parent = #tiled}>>
 
-    // COM: linearized tile id 
+    // COM: linearized tile id
     // CHECK: %[[TILE_ID_ROW_OFFSET:.*]] = arith.muli %[[X_TILE_ID]], %[[TILES_PER_DIM0]] : i32
     // CHECK: %[[TILE_ID:.*]] = arith.addi %[[TILE_ID_ROW_OFFSET]], %[[Y_TILE_ID]] : i32
     // COM: tile 0
@@ -592,15 +592,15 @@ module attributes {"ttg.num-ctas" = 1 : i32, "ttg.num-warps" = 1 : i32, "ttg.thr
     // CHECK: %[[DESC_SHAPE0:.*]] = ttkernel.get_arg_val(%[[c2]]) : (index) -> i32
     // CHECK: %[[SHAPE0:.*]] = ttkernel.get_arg_val(%[[c6]]) : (index) -> i32
     // CHECK: %[[SHAPE1:.*]] = ttkernel.get_arg_val(%[[c7]]) : (index) -> i32
-    
-    %b = ttg.local_alloc {alloc_idx = 1 : i32} : () -> !ttg.memdesc<64x64xf16, #shared, #smem, mutable> 
+
+    %b = ttg.local_alloc {alloc_idx = 1 : i32} : () -> !ttg.memdesc<64x64xf16, #shared, #smem, mutable>
     // CHECK: %[[ADDR_GEN:.*]] = ttkernel.get_interleaved_addr_gen_fast({{.*}})
     // CHECK-DAG: %[[X_TILE_ID:.*]] = arith.divsi %[[SHAPE0]], %[[c32_i32]] : i32
     // CHECK-DAG: %[[Y_TILE_ID:.*]] = arith.divsi %[[SHAPE1]], %[[c32_i32]] : i32
     // CHECK-DAG: %[[TILES_PER_DIM0:.*]] = arith.ceildivsi %[[DESC_SHAPE0]], %[[c32_i32]] : i32
     // CHECK: ttkernel.cb_reserve_back
-    %b_7 = tt.descriptor_load %arg5[%offs_k, %offs_bn] : !tt.tensordesc<tensor<64x64xf16>> -> tensor<64x64xf16, #triton_tenstorrent.tiled_dot_op<{opIdx = 1, parent = #tiled1}>> 
-    // COM: We have already tested the pre-amble above, so we restrict this test to ensuring the load order matches the layout 
+    %b_7 = tt.descriptor_load %arg5[%offs_k, %offs_bn] : !tt.tensordesc<tensor<64x64xf16>> -> tensor<64x64xf16, #triton_tenstorrent.tiled_dot_op<{opIdx = 1, parent = #tiled1}>>
+    // COM: We have already tested the pre-amble above, so we restrict this test to ensuring the load order matches the layout
 
     // COM: tile 0,0
     // CHECK: %[[INITIAL_ROW_OFFSET:.*]] = arith.muli %[[Y_TILE_ID]], %[[TILES_PER_DIM0]] : i32
@@ -626,7 +626,7 @@ module attributes {"ttg.num-ctas" = 1 : i32, "ttg.num-warps" = 1 : i32, "ttg.thr
     // CHECK: %[[TILE_ID_3:.*]] = arith.addi %[[Y_TILE_OFFSET_3]], %[[X_TILE_OFFSET_PLUS_1]] : i32
     // CHECK: ttkernel.interleaved_addr_gen_fast.get_noc_addr(%[[ADDR_GEN]], %[[TILE_ID_3]], %[[c0_i32]], ) : (!ttkernel.interleaved_addr_gen_fast, i32, i32) -> !ttkernel.noc_addr
 
-    ttg.local_store %b_7, %b : tensor<64x64xf16, #triton_tenstorrent.tiled_dot_op<{opIdx = 1, parent = #tiled1}>> -> !ttg.memdesc<64x64xf16, #shared, #smem, mutable> 
+    ttg.local_store %b_7, %b : tensor<64x64xf16, #triton_tenstorrent.tiled_dot_op<{opIdx = 1, parent = #tiled1}>> -> !ttg.memdesc<64x64xf16, #shared, #smem, mutable>
     // CHECK: return
     tt.return
   }
@@ -634,7 +634,7 @@ module attributes {"ttg.num-ctas" = 1 : i32, "ttg.num-warps" = 1 : i32, "ttg.thr
 
 // -----
 
-// COM: descriptor store 
+// COM: descriptor store
 
 #shared = #ttg.padded_shared<[1:+1] {order = [1, 0], shape = [64, 64]}>
 #shared1 = #ttg.padded_shared<[1:+1] {order = [1, 0], shape = [32, 64]}>
@@ -644,9 +644,46 @@ module attributes {"ttg.num-ctas" = 1 : i32, "ttg.num-warps" = 1 : i32, "ttg.thr
 module attributes {"ttg.num-ctas" = 1 : i32, "ttg.num-warps" = 1 : i32, "ttg.threads-per-warp" = 1 : i32} {
   // CHECK: func public @store_tiled_dot_op__writer
   tt.func public @store_tiled_dot_op__writer(%arg10: !tt.tensordesc<tensor<32x64xf16>>, %offs_am: i32, %offs_bn: i32) {
-    %0 = ttg.local_alloc {alloc_idx = 2 : i32} : () -> !ttg.memdesc<32x64xf16, #shared1, #smem, mutable> 
-    %4 = ttg.local_load %0 : !ttg.memdesc<32x64xf16, #shared1, #smem, mutable> -> tensor<32x64xf16, #tiled> 
-    tt.descriptor_store %arg10[%offs_am, %offs_bn], %4 : !tt.tensordesc<tensor<32x64xf16>>, tensor<32x64xf16, #tiled> 
+    // CHECK-DAG: %[[c0_i32:.*]] = arith.constant 0 : i32
+    // CHECK-DAG: %[[c1_i32:.*]] = arith.constant 1 : i32
+    // CHECK-DAG: %[[c2_i32:.*]] = arith.constant 2 : i32
+    // CHECK-DAG: %[[c32_i32:.*]] = arith.constant 32 : i32
+    // CHECK-DAG: %[[TRUE:.*]] = arith.constant true
+    // CHECK-DAG: %[[c0:.*]] = arith.constant 0 : index
+    // CHECK-DAG: %[[c2:.*]] = arith.constant 2 : index
+    // CHECK-DAG: %[[c6:.*]] = arith.constant 6 : index
+    // CHECK-DAG: %[[c7:.*]] = arith.constant 7 : index
+    // CHECK: %[[PTR:.*]] = ttkernel.get_arg_val(%[[c0]]) : (index) -> i32
+    // CHECK: %[[DESC_SHAPE0:.*]] = ttkernel.get_arg_val(%[[c2]]) : (index) -> i32
+    // CHECK: %[[SHAPE0:.*]] = ttkernel.get_arg_val(%[[c6]]) : (index) -> i32
+    // CHECK: %[[SHAPE1:.*]] = ttkernel.get_arg_val(%[[c7]]) : (index) -> i32
+    %0 = ttg.local_alloc {alloc_idx = 2 : i32} : () -> !ttg.memdesc<32x64xf16, #shared1, #smem, mutable>
+    // CHECK: %[[CB:.*]] = ttkernel.get_compile_time_arg_val(2) : () -> !ttkernel.cb<2, !ttcore.tile<32x32, f16>>
+    // CHECK: %[[DATAFORMAT:.*]] = ttkernel.get_dataformat(%[[CB]]) : (!ttkernel.cb<2, !ttcore.tile<32x32, f16>>) -> !ttkernel.DataFormat
+    // CHECK: %[[TILESIZE:.*]] = ttkernel.get_tile_size(%[[CB]]) : (!ttkernel.cb<2, !ttcore.tile<32x32, f16>>) -> i32
+    // CHECK: %[[ADDR_GEN:.*]] = ttkernel.get_interleaved_addr_gen_fast(%[[TRUE]], %[[PTR]], %[[TILESIZE]], %[[DATAFORMAT]]) : (i1, i32, i32, !ttkernel.DataFormat) -> !ttkernel.interleaved_addr_gen_fast
+    // CHECK: ttkernel.cb_wait_front(%[[CB]], %[[c2_i32]]) : (!ttkernel.cb<2, !ttcore.tile<32x32, f16>>, i32) -> ()
+    // CHECK-DAG: %[[X_TILE_ID:.*]] = arith.divsi %[[SHAPE0]], %[[c32_i32]] : i32
+    // CHECK-DAG: %[[Y_TILE_ID:.*]] = arith.divsi %[[SHAPE1]], %[[c32_i32]] : i32
+    // CHECK-DAG: %[[TILES_PER_DIM0:.*]] = arith.ceildivsi %[[DESC_SHAPE0]], %[[c32_i32]] : i32
+    // CHECK: %[[CB_READ_PTR:.*]] = ttkernel.get_read_ptr(%[[CB]]) : (!ttkernel.cb<2, !ttcore.tile<32x32, f16>>) -> i32
+    %4 = ttg.local_load %0 : !ttg.memdesc<32x64xf16, #shared1, #smem, mutable> -> tensor<32x64xf16, #tiled>
+    // COM: tile 0
+    // CHECK: %[[TILE_ID_ROW_OFFSET:.*]] = arith.muli %[[X_TILE_ID]], %[[TILES_PER_DIM0]] : i32
+    // CHECK: %[[TILE_ID:.*]] = arith.addi %[[TILE_ID_ROW_OFFSET]], %[[Y_TILE_ID]] : i32
+    // CHECK: %[[NOC_ADDR:.*]] = ttkernel.interleaved_addr_gen_fast.get_noc_addr(%[[ADDR_GEN]], %[[TILE_ID]], %[[c0_i32]], ) : (!ttkernel.interleaved_addr_gen_fast, i32, i32) -> !ttkernel.noc_addr
+    // CHECK: ttkernel.noc_async_write(%[[CB_READ_PTR]], %[[NOC_ADDR]], %[[TILESIZE]]) : (i32, !ttkernel.noc_addr, i32) -> ()
+    // COM: tile 1
+    // CHECK: %[[NEXT_COL_TILE:.*]] = arith.addi %[[Y_TILE_ID]], %[[c1_i32]] : i32
+    // CHECK: %[[TILE_ID_ROW_OFFSET_OLD:.*]] = arith.muli %[[X_TILE_ID]], %[[TILES_PER_DIM0]] : i32
+    // CHECK: %[[TILE_ID_1:.*]] = arith.addi %[[TILE_ID_ROW_OFFSET_OLD]], %[[NEXT_COL_TILE]] : i32
+    // CHECK: %[[NEXT_CB_READ_PTR:.*]] = arith.addi %[[CB_READ_PTR]], %[[TILESIZE]] : i32
+    // CHECK: %[[NOC_ADDR_1:.*]] = ttkernel.interleaved_addr_gen_fast.get_noc_addr(%[[ADDR_GEN]], %[[TILE_ID_1]], %[[c0_i32]], ) : (!ttkernel.interleaved_addr_gen_fast, i32, i32) -> !ttkernel.noc_addr
+    // CHECK: ttkernel.noc_async_write(%[[NEXT_CB_READ_PTR]], %[[NOC_ADDR_1]], %[[TILESIZE]]) : (i32, !ttkernel.noc_addr, i32) -> ()
+    // CHECK: ttkernel.noc_async_write_barrier() : () -> ()
+    tt.descriptor_store %arg10[%offs_am, %offs_bn], %4 : !tt.tensordesc<tensor<32x64xf16>>, tensor<32x64xf16, #tiled>
+    // CHECK: ttkernel.cb_pop_front(%[[CB]], %[[c2_i32]]) : (!ttkernel.cb<2, !ttcore.tile<32x32, f16>>, i32) -> ()
+    // CHECK: return
     tt.return
   }
 }
