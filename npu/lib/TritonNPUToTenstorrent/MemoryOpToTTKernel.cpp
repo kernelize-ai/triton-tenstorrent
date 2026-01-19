@@ -183,9 +183,6 @@ struct ConvertTensorDescLoadOp
     rewriter.restoreInsertionPoint(opInsertionPt);
 
     auto loadResultType = cast<RankedTensorType>(op.getResult().getType());
-    const int32_t elementSize =
-        loadResultType.getElementType().getIntOrFloatBitWidth() / 8;
-
     auto dotOpEncoding = cast<npu::tt::TiledDotOperandEncodingAttr>(
         loadResultType.getEncoding());
     LDBG("Lowering load op with encoding " << dotOpEncoding << "\n");
@@ -202,23 +199,13 @@ struct ConvertTensorDescLoadOp
         cast<npu::tt::TiledEncodingAttr>(dotOpEncoding.getParent());
     auto tileShape = tiledParent.getTileShape();
     auto order = tiledParent.getOrder();
-    auto dotOrder = gpu::getOrderForDotOperand(
-        dotOpEncoding.getOpIdx(), outDimNames.size(),
-        /*kContig=*/true /*getOpIdx() == 0 ? true : false*/);
-
-    // convert bytes offset to tile index
     auto offsets = op.getIndices();
-
-    // we can refactor this to have a few interfaces that populate vectors (or
-    // return them, fine) so we can get the tile ids pe-linearization and we
-    // could even have a linearize utility method that generated the linearized
-    // value.... Value offset =
-    //     desc.generateBaseBlockOffset(rewriter, loc, blockShape, offsets);
 
     auto i32Ty = rewriter.getI32Type();
     // Note: unlike the tensor descriptor base case we normalize the shape into
     // 32x32 tiles here
-
+    // TODO: refactor to remove duplication with load/store and tensor
+    // descriptor utility
     SmallVector<Value, 4> blockShapeValues;
     for (unsigned i = 0; i < blockShape.size(); ++i) {
       blockShapeValues.push_back(arith::ConstantOp::create(
@@ -258,7 +245,6 @@ struct ConvertTensorDescLoadOp
     SmallVector tilesPerCore = llvm::to_vector(llvm::map_range(
         layout.getOutDimSizes(), [](auto v) { return v / 32; }));
 
-    // auto registerIndexLayout = layout.flattenOuts();
     for (int32_t i = 0; i < numTiles; ++i) {
       auto crtIndex = layout.apply({{S("tile"), i}, {S("register"), 0}});
       assert(crtIndex.size() == 2);
@@ -278,9 +264,7 @@ struct ConvertTensorDescLoadOp
       int32_t localTile0 = elem0 / tileShape[0];
       int32_t localTile1 = elem1 / tileShape[1];
 
-      // --- GLOBAL tile id for NOC addressing (remote index) ---
-      // Add the block/global tile coordinate (tileCoord) and linearize into the
-      // full tensor tile space using tilesPerDim (global tiles per dim).
+      // DRAM tile index
       Value tileIndexDim0 = arith::AddIOp::create(
           rewriter, loc, tileCoord[0],
           arith::createConstantI32(loc, rewriter, localTile0));
@@ -294,10 +278,8 @@ struct ConvertTensorDescLoadOp
                                 tilesPerDim[order[0]]),
           tileIndexDim1);
 
-      // --- LOCAL slot id for CB/L1 placement (consumer order) ---
-      int32_t slot = true ? (localTile0 * tilesPerCore[order[0]] + localTile1)
-                          : (localTile1 * tilesPerCore[0] + localTile0);
-
+      // local circular buffer slot
+      int32_t slot = localTile0 * tilesPerCore[order[0]] + localTile1;
       Value localTileIndex = arith::createConstantI32(loc, rewriter, slot);
       Value localTileIndexOffset =
           arith::MulIOp::create(rewriter, loc, localTileIndex, pageSize);
@@ -361,7 +343,6 @@ struct ConvertStoreOp : public OpConversionPattern<triton::StoreOp> {
 
     Value const0 = arith::createConstantI32(loc, rewriter, 0);
 
-    auto storeType = cast<RankedTensorType>(op.getValue().getType());
     // determine how many tiles we need to load by converting the shape to tiles
     const int32_t numTiles = cast<ttkernel::CBType>(cb.getType()).getNumTiles();
     Value numPages = arith::createConstantI32(loc, rewriter, numTiles);
@@ -577,14 +558,12 @@ struct ConvertTensorDescStoreOp
 
     auto tileShape = tiledEncoding.getTileShape();
     auto order = tiledEncoding.getOrder();
-
-    // convert bytes offset to tile index
     auto offsets = op.getIndices();
 
     auto i32Ty = rewriter.getI32Type();
+
     // Note: unlike the tensor descriptor base case we normalize the shape into
     // 32x32 tiles here
-
     SmallVector<Value, 4> blockShapeValues;
     for (unsigned i = 0; i < blockShape.size(); ++i) {
       blockShapeValues.push_back(arith::ConstantOp::create(
@@ -608,7 +587,6 @@ struct ConvertTensorDescStoreOp
                                                        blockShapeValues[i]));
     }
 
-    auto storeType = cast<RankedTensorType>(op.getSrc().getType());
     // determine how many tiles we need to load by converting the shape to tiles
     const int32_t numCbTiles =
         cast<ttkernel::CBType>(cb.getType()).getNumTiles();
@@ -641,9 +619,7 @@ struct ConvertTensorDescStoreOp
       int32_t localTile0 = elem0 / tileShape[0];
       int32_t localTile1 = elem1 / tileShape[1];
 
-      // --- GLOBAL tile id for NOC addressing (remote index) ---
-      // Add the block/global tile coordinate (tileCoord) and linearize into the
-      // full tensor tile space using tilesPerDim (global tiles per dim).
+      // DRAM tile index
       Value tileIndexDim0 = arith::AddIOp::create(
           rewriter, loc, tileCoord[0],
           arith::createConstantI32(loc, rewriter, localTile0));
@@ -657,9 +633,8 @@ struct ConvertTensorDescStoreOp
                                 tilesPerDim[order[0]]),
           tileIndexDim1);
 
-      // --- LOCAL slot id for CB/L1 placement (consumer order) ---
-      int32_t slot = true ? (localTile0 * tilesPerCore[order[0]] + localTile1)
-                          : (localTile1 * tilesPerCore[0] + localTile0);
+      // local circular buffer slot
+      int32_t slot = localTile0 * tilesPerCore[order[0]] + localTile1;
 
       Value localTileIndex = arith::createConstantI32(loc, rewriter, slot);
       Value localTileIndexOffset =
