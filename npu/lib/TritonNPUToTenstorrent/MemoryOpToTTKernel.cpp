@@ -160,8 +160,6 @@ struct ConvertTensorDescLoadOp
 
     auto descTy = op.getDesc().getType();
     const auto blockShape = descTy.getBlockType().getShape();
-    llvm::errs() << "block shape: " << blockShape[0] << ", " << blockShape[1]
-                 << "\n";
     auto descOp = op.getDesc().getDefiningOp();
     ValueRange descValues =
         isa<UnrealizedConversionCastOp>(descOp)
@@ -204,11 +202,9 @@ struct ConvertTensorDescLoadOp
         cast<npu::tt::TiledEncodingAttr>(dotOpEncoding.getParent());
     auto tileShape = tiledParent.getTileShape();
     auto order = tiledParent.getOrder();
-    llvm::errs() << "order: " << order[0] << ", " << order[1] << "\n";
     auto dotOrder = gpu::getOrderForDotOperand(
         dotOpEncoding.getOpIdx(), outDimNames.size(),
         /*kContig=*/true /*getOpIdx() == 0 ? true : false*/);
-    llvm::errs() << "dotOrder: " << dotOrder[0] << ", " << dotOrder[1] << "\n";
 
     // convert bytes offset to tile index
     auto offsets = op.getIndices();
@@ -277,15 +273,10 @@ struct ConvertTensorDescLoadOp
       // Element-space start of this tile within the block (from the layout).
       int32_t elem0 = crtIndex[0].second;
       int32_t elem1 = crtIndex[1].second;
-      llvm::errs() << "Tile " << i << " elem0: " << elem0
-                   << ", elem1: " << elem1 << "\n";
 
       // Tile coordinates within the block (0..tilesPerCore[d)-1).
       int32_t localTile0 = elem0 / tileShape[0];
       int32_t localTile1 = elem1 / tileShape[1];
-
-      llvm::errs() << "Tile " << i << " localTile0: " << localTile0
-                   << ", localTile1: " << localTile1 << "\n";
 
       // --- GLOBAL tile id for NOC addressing (remote index) ---
       // Add the block/global tile coordinate (tileCoord) and linearize into the
@@ -306,8 +297,6 @@ struct ConvertTensorDescLoadOp
       // --- LOCAL slot id for CB/L1 placement (consumer order) ---
       int32_t slot = true ? (localTile0 * tilesPerCore[order[0]] + localTile1)
                           : (localTile1 * tilesPerCore[0] + localTile0);
-
-      llvm::errs() << "Tile " << i << " slot: " << slot << "\n";
 
       Value localTileIndex = arith::createConstantI32(loc, rewriter, slot);
       Value localTileIndexOffset =
@@ -647,15 +636,10 @@ struct ConvertTensorDescStoreOp
       // Element-space start of this tile within the block (from the layout).
       int32_t elem0 = crtIndex[0].second;
       int32_t elem1 = crtIndex[1].second;
-      llvm::errs() << "Tile " << i << " elem0: " << elem0
-                   << ", elem1: " << elem1 << "\n";
 
       // Tile coordinates within the block (0..tilesPerCore[d)-1).
       int32_t localTile0 = elem0 / tileShape[0];
       int32_t localTile1 = elem1 / tileShape[1];
-
-      llvm::errs() << "Tile " << i << " localTile0: " << localTile0
-                   << ", localTile1: " << localTile1 << "\n";
 
       // --- GLOBAL tile id for NOC addressing (remote index) ---
       // Add the block/global tile coordinate (tileCoord) and linearize into the
@@ -676,8 +660,6 @@ struct ConvertTensorDescStoreOp
       // --- LOCAL slot id for CB/L1 placement (consumer order) ---
       int32_t slot = true ? (localTile0 * tilesPerCore[order[0]] + localTile1)
                           : (localTile1 * tilesPerCore[0] + localTile0);
-
-      llvm::errs() << "Tile " << i << " slot: " << slot << "\n";
 
       Value localTileIndex = arith::createConstantI32(loc, rewriter, slot);
       Value localTileIndexOffset =
