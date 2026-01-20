@@ -175,8 +175,7 @@ struct ConvertTensorDescLoadOp
     auto pageSize = ttkernel::GetTileSizeOp::create(rewriter, loc, cb);
 
     Value trueVal = arith::createConstantI1(loc, rewriter, 1);
-    Value baseAddr =
-        /* desc.generateBasePtr(rewriter, loc, blockShape);*/ desc.getPtr();
+    Value baseAddr = desc.getPtr();
     Value addrGen = ttkernel::GetInterleavedAddrGenFastOp::create(
         rewriter, loc, /*dram=*/trueVal, baseAddr, pageSize, dataFormat);
 
@@ -537,7 +536,6 @@ struct ConvertTensorDescStoreOp
     auto pageSize = ttkernel::GetTileSizeOp::create(rewriter, loc, cb);
 
     Value trueVal = arith::createConstantI1(loc, rewriter, 1);
-    // Value baseAddr = desc.generateBasePtr(rewriter, loc, blockShape);
     Value baseAddr = desc.getPtr();
     Value addrGen = ttkernel::GetInterleavedAddrGenFastOp::create(
         rewriter, loc, /*dram=*/trueVal, baseAddr, pageSize, dataFormat);
@@ -587,7 +585,8 @@ struct ConvertTensorDescStoreOp
                                                        blockShapeValues[i]));
     }
 
-    // determine how many tiles we need to load by converting the shape to tiles
+    // determine how many tiles we need to store by converting the shape to
+    // tiles
     const int32_t numCbTiles =
         cast<ttkernel::CBType>(cb.getType()).getNumTiles();
     assert(numTiles == numCbTiles &&

@@ -609,8 +609,8 @@ module attributes {"ttg.num-ctas" = 1 : i32, "ttg.num-warps" = 1 : i32, "ttg.thr
 
     // COM: tile 0, 32
     // CHECK: %[[Y_TILE_ID_1:.*]] = arith.addi %[[Y_TILE_ID]], %[[c1_i32]] : i32
-    // CHECK: %[[TILE_ROW_OFFSERT_1:.*]] = arith.muli %[[Y_TILE_ID_1]], %[[TILES_PER_DIM0]] : i32
-    // CHECK: %[[TILE_ID_1:.*]] = arith.addi %[[TILE_ROW_OFFSERT_1]], %[[X_TILE_ID]] : i32
+    // CHECK: %[[TILE_ROW_OFFSET_1:.*]] = arith.muli %[[Y_TILE_ID_1]], %[[TILES_PER_DIM0]] : i32
+    // CHECK: %[[TILE_ID_1:.*]] = arith.addi %[[TILE_ROW_OFFSET_1]], %[[X_TILE_ID]] : i32
     // CHECK: ttkernel.interleaved_addr_gen_fast.get_noc_addr(%[[ADDR_GEN]], %[[TILE_ID_1]], %[[c0_i32]], ) : (!ttkernel.interleaved_addr_gen_fast, i32, i32) -> !ttkernel.noc_addr
 
     // COM: tile 32, 0
