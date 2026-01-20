@@ -245,6 +245,22 @@ void matmul_multi_core(
     uint32_t stride_CM = N;
     fmt::print("Matrix strides: AM={}, BK={}, CM={}\n", stride_AM, stride_BK, stride_CM);
 
+    // Set common runtime args per kernel
+    auto common_args = std::vector<uint32_t>{
+        src0_dram_buffer->address(),  // Address of matrix A in DRAM
+        src1_dram_buffer->address(),  // Address of matrix B in DRAM
+        dst_dram_buffer->address(),
+        M,                           
+        N,                           
+        K,                           
+        stride_AM, 
+        stride_BK, 
+        stride_CM
+    };
+    tt_metal::SetCommonRuntimeArgs(program, reader_id, common_args);
+    tt_metal::SetCommonRuntimeArgs(program, writer_id, common_args);
+    tt_metal::SetCommonRuntimeArgs(program, compute_kernel_id, common_args);
+
     // Iterate through each work group and assign work to cores
     for (const auto& [ranges, work_per_core] : work_groups) {
         for (const auto& range : ranges.ranges()) {
@@ -255,30 +271,14 @@ void matmul_multi_core(
                     program,
                     reader_id,
                     core,
-                    {src0_dram_buffer->address(),  // Address of matrix A in DRAM
-                        src1_dram_buffer->address(),  // Address of matrix B in DRAM
-                        dst_dram_buffer->address(),
-                        M,                           
-                        N,                           
-                        K,                           
-                        stride_AM, 
-                        stride_BK, 
-                        stride_CM, 
+                    {
                         work_offset,
                         work_offset + work_per_core
                     });             
 
                 // Set arguments for the writer kernel (data output)
                 tt_metal::SetRuntimeArgs(
-                    program, writer_id, core, {src0_dram_buffer->address(),  // Address of matrix A in DRAM
-                        src1_dram_buffer->address(),  // Address of matrix B in DRAM
-                        dst_dram_buffer->address(),
-                        M,                           
-                        N,                           
-                        K,                           
-                        stride_AM, 
-                        stride_BK, 
-                        stride_CM, 
+                    program, writer_id, core, {
                         work_offset,
                         work_offset + work_per_core
                     });
@@ -288,15 +288,7 @@ void matmul_multi_core(
                     program,
                     compute_kernel_id,
                     core,
-                    {src0_dram_buffer->address(),  // Address of matrix A in DRAM
-                        src1_dram_buffer->address(),  // Address of matrix B in DRAM
-                        dst_dram_buffer->address(),
-                        M,                           
-                        N,                           
-                        K,                           
-                        stride_AM, 
-                        stride_BK, 
-                        stride_CM, 
+                    {
                         work_offset,
                         work_offset + work_per_core
                     });                    

@@ -30,16 +30,15 @@ module attributes {"ttg.num-ctas" = 1 : i32, "ttg.num-warps" = 1 : i32, ttg.targ
     // CHECK-DAG: %[[c5:.*]] = arith.constant 5 : index
     // CHECK-DAG: %[[c6:.*]] = arith.constant 6 : index
     // CHECK-DAG: %[[c7:.*]] = arith.constant 7 : index
-    // CHECK-DAG: %[[c9:.*]] = arith.constant 9 : index
 
-    // CHECK-DAG: %[[A_PTR:.*]] = ttkernel.get_arg_val(%[[c0]])
-    // CHECK-DAG: %[[B_PTR:.*]] = ttkernel.get_arg_val(%[[c1]])
-    // CHECK-DAG: %[[M_SIZE:.*]] = ttkernel.get_arg_val(%[[c3]])
-    // CHECK-DAG: %[[N_SIZE:.*]] = ttkernel.get_arg_val(%[[c4]])
-    // CHECK-DAG: %[[K_SIZE:.*]] = ttkernel.get_arg_val(%[[c5]])
-    // CHECK-DAG: %[[A_BLOCK_STRIDE_M:.*]] = ttkernel.get_arg_val(%[[c6]])
-    // CHECK-DAG: %[[B_BLOCK_STRIDE_K:.*]] = ttkernel.get_arg_val(%[[c7]])
-    // CHECK-DAG: %[[BLOCK_INDEX:.*]] = ttkernel.get_arg_val(%[[c9]])
+    // CHECK-DAG: %[[A_PTR:.*]] = ttkernel.get_common_arg_val(%[[c0]])
+    // CHECK-DAG: %[[B_PTR:.*]] = ttkernel.get_common_arg_val(%[[c1]])
+    // CHECK-DAG: %[[M_SIZE:.*]] = ttkernel.get_common_arg_val(%[[c3]])
+    // CHECK-DAG: %[[N_SIZE:.*]] = ttkernel.get_common_arg_val(%[[c4]])
+    // CHECK-DAG: %[[K_SIZE:.*]] = ttkernel.get_common_arg_val(%[[c5]])
+    // CHECK-DAG: %[[A_BLOCK_STRIDE_M:.*]] = ttkernel.get_common_arg_val(%[[c6]])
+    // CHECK-DAG: %[[B_BLOCK_STRIDE_K:.*]] = ttkernel.get_common_arg_val(%[[c7]])
+    // CHECK-DAG: %[[BLOCK_INDEX:.*]] = ttkernel.get_arg_val(%[[c0]])
 
     // CHECK-DAG: %[[B_CB:.*]] = ttkernel.get_compile_time_arg_val(1)
     // CHECK-DAG: %[[B_DATA_FORMAT:.*]] = ttkernel.get_dataformat(%[[B_CB]])
@@ -214,7 +213,7 @@ module attributes {"ttg.num-ctas" = 1 : i32, "ttg.num-warps" = 1 : i32, ttg.targ
         // CHECK-DAG: %[[c0:.*]] = arith.constant 0 : index
         // CHECK-DAG: %[[c5:.*]] = arith.constant 5 : index
 
-        // CHECK-DAG: %[[K_SIZE:.*]] = ttkernel.get_arg_val(%[[c5]])
+        // CHECK-DAG: %[[K_SIZE:.*]] = ttkernel.get_common_arg_val(%[[c5]])
 
         // CHECK-DAG: %[[A_CB:.*]] = ttkernel.get_compile_time_arg_val(0)
         // CHECK-DAG: %[[B_CB:.*]] = ttkernel.get_compile_time_arg_val(1)
@@ -303,11 +302,10 @@ tt.func public @matmul_kernel__writer(%a_ptr: !tt.ptr<f16> {tt.divisibility = 8 
     // CHECK-DAG: %[[c2:.*]] = arith.constant 2 : index
     // CHECK-DAG: %[[c3:.*]] = arith.constant 3 : index
     // CHECK-DAG: %[[c4:.*]] = arith.constant 4 : index
-    // CHECK-DAG: %[[c9:.*]] = arith.constant 9 : index
 
-    // CHECK-DAG: %[[C_PTR:.*]] = ttkernel.get_arg_val(%[[c2]])
-    // CHECK-DAG: %[[M_SIZE:.*]] = ttkernel.get_arg_val(%[[c3]])
-    // CHECK-DAG: %[[N_SIZE:.*]] = ttkernel.get_arg_val(%[[c4]])
+    // CHECK-DAG: %[[C_PTR:.*]] = ttkernel.get_common_arg_val(%[[c2]])
+    // CHECK-DAG: %[[M_SIZE:.*]] = ttkernel.get_common_arg_val(%[[c3]])
+    // CHECK-DAG: %[[N_SIZE:.*]] = ttkernel.get_common_arg_val(%[[c4]])
 
     %0 = ttg.local_alloc {alloc_idx = 2 : i32} : () -> !ttg.memdesc<32x32xf16, #shared, #smem, mutable>
     // CHECK-DAG: %[[C_CB:.*]] = ttkernel.get_compile_time_arg_val(2)
@@ -315,7 +313,7 @@ tt.func public @matmul_kernel__writer(%a_ptr: !tt.ptr<f16> {tt.divisibility = 8 
     // CHECK: %[[TILE_SIZE:.*]] = ttkernel.get_tile_size(%[[C_CB]])
     // CHECK: %[[ADDR_GEN:.*]] = ttkernel.get_interleaved_addr_gen_fast(%[[c_true]], %[[C_PTR]], %[[TILE_SIZE]], %[[CB_DATAFORMAT]])
     %pid = tt.get_program_id x : i32
-    // CHECK: %[[PID:.*]] = ttkernel.get_arg_val(%[[c9]])
+    // CHECK: %[[PID:.*]] = ttkernel.get_arg_val(%[[c0]])
     %num_pid_m = arith.addi %M, %c31_i32 : i32
     %num_pid_m_0 = arith.divsi %num_pid_m, %c32_i32 : i32
     %num_pid_n = arith.addi %N, %c31_i32 : i32
@@ -409,10 +407,10 @@ module attributes {"ttg.num-ctas" = 1 : i32, "ttg.num-warps" = 1 : i32, ttg.targ
     %1 = ttc.block_end
     %2 = ttc.block_start
     // CHECK-DAG: %[[c1_i32:.*]] = arith.constant 1 : i32
-    // CHECK-DAG: %[[c33_index:.*]] = arith.constant 33 : index
-    // CHECK-DAG: %[[c34_index:.*]] = arith.constant 34 : index
-    // CHECK-DAG: %[[START:.*]] = ttkernel.get_arg_val(%[[c33_index]])
-    // CHECK-DAG: %[[END:.*]] = ttkernel.get_arg_val(%[[c34_index]])
+    // CHECK-DAG: %[[c0_index:.*]] = arith.constant 0 : index
+    // CHECK-DAG: %[[c1_index:.*]] = arith.constant 1 : index
+    // CHECK-DAG: %[[START:.*]] = ttkernel.get_arg_val(%[[c0_index]])
+    // CHECK-DAG: %[[END:.*]] = ttkernel.get_arg_val(%[[c1_index]])
 
     %k_tiles = arith.addi %arg32, %c31_i32 : i32
     %k_tiles_0 = arith.divsi %k_tiles, %c32_i32 : i32
@@ -464,10 +462,10 @@ module attributes {"ttg.num-ctas" = 1 : i32, "ttg.num-warps" = 1 : i32, ttg.targ
     %4 = tt.splat %arg20 : !tt.ptr<f16> -> tensor<32x32x!tt.ptr<f16>, #triton_tenstorrent.register_encoding<{index = 0, parent = #blocked1}>>
 
     // CHECK-DAG: %[[c1_i32:.*]] = arith.constant 1 : i32
-    // CHECK-DAG: %[[c33_index:.*]] = arith.constant 33 : index
-    // CHECK-DAG: %[[c34_index:.*]] = arith.constant 34 : index
-    // CHECK-DAG: %[[START:.*]] = ttkernel.get_arg_val(%[[c33_index]])
-    // CHECK-DAG: %[[END:.*]] = ttkernel.get_arg_val(%[[c34_index]])
+    // CHECK-DAG: %[[c0_index:.*]] = arith.constant 0 : index
+    // CHECK-DAG: %[[c1_index:.*]] = arith.constant 1 : index
+    // CHECK-DAG: %[[START:.*]] = ttkernel.get_arg_val(%[[c0_index]])
+    // CHECK-DAG: %[[END:.*]] = ttkernel.get_arg_val(%[[c1_index]])
 
     // CHECK: scf.for %[[arg0:.*]] = %[[START]] to %[[END]] step %[[c1_i32]] : i32 {
     scf.for %arg33 = %2 to %1 step %c1_i32  : i32 {
@@ -532,10 +530,10 @@ module attributes {"ttg.num-ctas" = 1 : i32, "ttg.num-warps" = 1 : i32, "ttg.thr
     // CHECK-DAG: %[[c2:.*]] = arith.constant 2 : index
     // CHECK-DAG: %[[c6:.*]] = arith.constant 6 : index
     // CHECK-DAG: %[[c7:.*]] = arith.constant 7 : index
-    // CHECK: %[[PTR:.*]] = ttkernel.get_arg_val(%[[c0]]) : (index) -> i32
-    // CHECK: %[[DESC_SHAPE0:.*]] = ttkernel.get_arg_val(%[[c2]]) : (index) -> i32
-    // CHECK: %[[SHAPE0:.*]] = ttkernel.get_arg_val(%[[c6]]) : (index) -> i32
-    // CHECK: %[[SHAPE1:.*]] = ttkernel.get_arg_val(%[[c7]]) : (index) -> i32
+    // CHECK: %[[PTR:.*]] = ttkernel.get_common_arg_val(%[[c0]]) : (index) -> i32
+    // CHECK: %[[DESC_SHAPE0:.*]] = ttkernel.get_common_arg_val(%[[c2]]) : (index) -> i32
+    // CHECK: %[[SHAPE0:.*]] = ttkernel.get_common_arg_val(%[[c6]]) : (index) -> i32
+    // CHECK: %[[SHAPE1:.*]] = ttkernel.get_common_arg_val(%[[c7]]) : (index) -> i32
     %a = ttg.local_alloc {alloc_idx = 0 : i32} : () -> !ttg.memdesc<32x64xf16, #shared1, #smem, mutable>
     // CHECK: %[[CB:.*]] = ttkernel.get_compile_time_arg_val(0) : () -> !ttkernel.cb<2, !ttcore.tile<32x32, f16>>
     // CHECK: %[[DATAFORMAT:.*]] = ttkernel.get_dataformat(%[[CB]]) : (!ttkernel.cb<2, !ttcore.tile<32x32, f16>>) -> !ttkernel.DataFormat
@@ -588,10 +586,10 @@ module attributes {"ttg.num-ctas" = 1 : i32, "ttg.num-warps" = 1 : i32, "ttg.thr
     // CHECK-DAG: %[[c2:.*]] = arith.constant 2 : index
     // CHECK-DAG: %[[c6:.*]] = arith.constant 6 : index
     // CHECK-DAG: %[[c7:.*]] = arith.constant 7 : index
-    // CHECK: %[[PTR:.*]] = ttkernel.get_arg_val(%[[c0]]) : (index) -> i32
-    // CHECK: %[[DESC_SHAPE0:.*]] = ttkernel.get_arg_val(%[[c2]]) : (index) -> i32
-    // CHECK: %[[SHAPE0:.*]] = ttkernel.get_arg_val(%[[c6]]) : (index) -> i32
-    // CHECK: %[[SHAPE1:.*]] = ttkernel.get_arg_val(%[[c7]]) : (index) -> i32
+    // CHECK: %[[PTR:.*]] = ttkernel.get_common_arg_val(%[[c0]]) : (index) -> i32
+    // CHECK: %[[DESC_SHAPE0:.*]] = ttkernel.get_common_arg_val(%[[c2]]) : (index) -> i32
+    // CHECK: %[[SHAPE0:.*]] = ttkernel.get_common_arg_val(%[[c6]]) : (index) -> i32
+    // CHECK: %[[SHAPE1:.*]] = ttkernel.get_common_arg_val(%[[c7]]) : (index) -> i32
 
     %b = ttg.local_alloc {alloc_idx = 1 : i32} : () -> !ttg.memdesc<64x64xf16, #shared, #smem, mutable>
     // CHECK: %[[ADDR_GEN:.*]] = ttkernel.get_interleaved_addr_gen_fast({{.*}})
@@ -653,10 +651,10 @@ module attributes {"ttg.num-ctas" = 1 : i32, "ttg.num-warps" = 1 : i32, "ttg.thr
     // CHECK-DAG: %[[c2:.*]] = arith.constant 2 : index
     // CHECK-DAG: %[[c6:.*]] = arith.constant 6 : index
     // CHECK-DAG: %[[c7:.*]] = arith.constant 7 : index
-    // CHECK: %[[PTR:.*]] = ttkernel.get_arg_val(%[[c0]]) : (index) -> i32
-    // CHECK: %[[DESC_SHAPE0:.*]] = ttkernel.get_arg_val(%[[c2]]) : (index) -> i32
-    // CHECK: %[[SHAPE0:.*]] = ttkernel.get_arg_val(%[[c6]]) : (index) -> i32
-    // CHECK: %[[SHAPE1:.*]] = ttkernel.get_arg_val(%[[c7]]) : (index) -> i32
+    // CHECK: %[[PTR:.*]] = ttkernel.get_common_arg_val(%[[c0]]) : (index) -> i32
+    // CHECK: %[[DESC_SHAPE0:.*]] = ttkernel.get_common_arg_val(%[[c2]]) : (index) -> i32
+    // CHECK: %[[SHAPE0:.*]] = ttkernel.get_common_arg_val(%[[c6]]) : (index) -> i32
+    // CHECK: %[[SHAPE1:.*]] = ttkernel.get_common_arg_val(%[[c7]]) : (index) -> i32
     %0 = ttg.local_alloc {alloc_idx = 2 : i32} : () -> !ttg.memdesc<32x64xf16, #shared1, #smem, mutable>
     // CHECK: %[[CB:.*]] = ttkernel.get_compile_time_arg_val(2) : () -> !ttkernel.cb<2, !ttcore.tile<32x32, f16>>
     // CHECK: %[[DATAFORMAT:.*]] = ttkernel.get_dataformat(%[[CB]]) : (!ttkernel.cb<2, !ttcore.tile<32x32, f16>>) -> !ttkernel.DataFormat

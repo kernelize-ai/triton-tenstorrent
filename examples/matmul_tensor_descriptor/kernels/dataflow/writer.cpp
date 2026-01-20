@@ -10,10 +10,10 @@ void kernel_main() {
   bool v4 = true;
   int32_t v5 = 2;
   int32_t v6 = 0;
-  int32_t v7 = get_arg_val<uint32_t>(20);
-  int32_t v8 = get_arg_val<uint32_t>(22);
-  int32_t v9 = get_arg_val<uint32_t>(30);
-  int32_t v10 = get_arg_val<uint32_t>(31);
+  int32_t v7 = get_common_arg_val<uint32_t>(20);
+  int32_t v8 = get_common_arg_val<uint32_t>(22);
+  int32_t v9 = get_common_arg_val<uint32_t>(30);
+  int32_t v10 = get_common_arg_val<uint32_t>(31);
   DataFormat v11 = get_dataformat(get_compile_time_arg_val(2));
   int32_t v12 = get_tile_size(get_compile_time_arg_val(2));
   InterleavedAddrGenFast<true> v13;
@@ -21,8 +21,8 @@ void kernel_main() {
   v13.page_size = v12;
   v13.data_format = v11;
   InterleavedAddrGenFast<true> v14 = v13;
-  int32_t v15 = get_arg_val<uint32_t>(34);
-  int32_t v16 = get_arg_val<uint32_t>(33);
+  int32_t v15 = get_arg_val<uint32_t>(1);
+  int32_t v16 = get_arg_val<uint32_t>(0);
   int32_t v17 = (int32_t) ((uint32_t) v10 + (uint32_t) 63) / v1;
   for (int32_t i18 = v16; i18 < v15; i18 += v3) {
     int32_t v19 = i18 / v17;

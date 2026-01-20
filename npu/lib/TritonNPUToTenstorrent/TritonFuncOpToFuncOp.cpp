@@ -103,7 +103,10 @@ struct ConvertTritonFunc : public OpConversionPattern<triton::FuncOp> {
 
       auto getArg = [&](const unsigned idx, Type newType) -> Value {
         Value indexVal = arith::createIndexConstant(loc, rewriter, idx);
-        Value getArgVal = ttkernel::GetArgValOp::create(
+        // function arguments are common across kernels
+        // block start, block end arguments are per-core but are added later,
+        // during SPMD op lowering
+        Value getArgVal = ttkernel::GetCommonArgValOp::create(
             rewriter, loc, rewriter.getIntegerType(32), indexVal);
         if (isa<IntegerType>(newType) && newType.getIntOrFloatBitWidth() < 32) {
           getArgVal =
@@ -148,7 +151,8 @@ struct ConvertTritonFunc : public OpConversionPattern<triton::FuncOp> {
     // Number of user args
     // TODO: add launch params (grid size, block size, shared memory size, etc)
     assert(numArgs >= 0 && "numArgs not set");
-    newFunc->setAttr("tt.num_args", rewriter.getI32IntegerAttr(numArgs));
+    newFunc->setAttr(kTTNumCommonArgsAttr, rewriter.getI32IntegerAttr(numArgs));
+    newFunc->setAttr(kTTNumPerCoreArgsAttr, rewriter.getI32IntegerAttr(0));
 
     rewriter.eraseOp(funcOp);
     return success();

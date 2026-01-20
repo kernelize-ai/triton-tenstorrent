@@ -5,7 +5,18 @@
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/IR/Dialect.h"
 
-namespace mlir::arith {
+namespace mlir {
+
+namespace triton {
+namespace npu {
+static constexpr llvm::StringLiteral kTTNumCommonArgsAttr =
+    "tt.num_common_args";
+static constexpr llvm::StringLiteral kTTNumPerCoreArgsAttr =
+    "tt.num_per_core_args";
+} // namespace npu
+} // namespace triton
+
+namespace arith {
 
 Value createConstantI1(Location loc, OpBuilder &rewriter, bool v);
 Value createConstantI32(Location loc, OpBuilder &rewriter, int32_t v);
@@ -16,6 +27,7 @@ Value createConstantF64(Location loc, OpBuilder &rewriter, double v);
 
 Value createIndexConstant(Location loc, OpBuilder &builder, int64_t value);
 
-} // namespace mlir::arith
+} // namespace arith
+} // namespace mlir
 
 #endif // TRITON_NPU_CONVERSION_TRITONNPU_TO_TENSTORRENT_UTILITY_H
