@@ -1,5 +1,7 @@
 #include "npu/include/Dialect/TritonTenstorrent/Transforms/Passes.h"
 
+#include "npu/include/Dialect/TritonTenstorrent/Transforms/Utility.h"
+
 #include "mlir/IR/BuiltinAttributes.h"
 #include "mlir/IR/Matchers.h"
 #include "mlir/IR/PatternMatch.h"
@@ -24,40 +26,12 @@ namespace {
 static constexpr llvm::StringLiteral kAllocIdxAttrName =
     "__core_specialize.alloc_idx";
 
-static bool isLoadLike(Operation *op) {
-  return isa<triton::LoadOp, triton::DescriptorLoadOp>(op);
-}
-
-static bool isStoreLike(Operation *op) {
-  return isa<triton::StoreOp, triton::DescriptorStoreOp>(op);
-}
-
 static Type getLoadLikeResultType(Operation *op) {
   if (auto l = dyn_cast<triton::LoadOp>(op))
     return l.getType();
   if (auto l = dyn_cast<triton::DescriptorLoadOp>(op))
     return l.getType();
   llvm_unreachable("not a load-like op");
-}
-
-static Value getStoreLikeValue(Operation *op) {
-  if (auto s = dyn_cast<triton::StoreOp>(op))
-    return s.getValue();
-  if (auto s = dyn_cast<triton::DescriptorStoreOp>(op))
-    return s.getSrc();
-  llvm_unreachable("not a store-like op");
-}
-
-static void setStoreLikeValue(Operation *op, Value v) {
-  if (auto s = dyn_cast<triton::StoreOp>(op)) {
-    s.getValueMutable().assign(v);
-    return;
-  }
-  if (auto s = dyn_cast<triton::DescriptorStoreOp>(op)) {
-    s.getSrcMutable().assign(v);
-    return;
-  }
-  llvm_unreachable("not a store-like op");
 }
 
 static bool isDependentLoadLike(Operation *loadLike) {

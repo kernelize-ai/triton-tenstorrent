@@ -37,71 +37,43 @@ void kernel_main() {
   int32_t v25 = get_arg_val<uint32_t>(34);
   int32_t v26 = get_arg_val<uint32_t>(33);
   int32_t v27 = (int32_t) ((uint32_t) v15 + (uint32_t) v2) / v4;
-  for (int32_t i28 = v26; i28 < v25; i28 += v6) {
-    int32_t v29 = i28 / v27;
-    int32_t v30 = (int32_t) ((uint32_t) ((int32_t) ((uint32_t) v14 + (uint32_t) 31) / v5) - (uint32_t) v29) < v6 ? (int32_t) ((uint32_t) ((int32_t) ((uint32_t) v14 + (uint32_t) 31) / v5) - (uint32_t) v29) : v6;
-    for (int32_t j31 = v3; j31 < ((int32_t) ((uint32_t) v16 + (uint32_t) v2) / v4); j31 += v6) {
-      int32_t v32 = (int32_t) ((uint32_t) j31 * (uint32_t) v4);
-      int32_t v33 = v32 / v4;
-      int32_t v34 = (int32_t) ((uint32_t) v32 % (uint32_t) v4);
+  int32_t v28 = v13 != (int32_t) ((uint32_t) (v13 / v5) * (uint32_t) v5) & v13 < v3 == v1 ? (int32_t) ((uint32_t) (v13 / v5) + (uint32_t) v6) : v13 / v5;
+  for (int32_t i29 = v26; i29 < v25; i29 += v6) {
+    int32_t v30 = i29 / v27;
+    int32_t v31 = (int32_t) ((uint32_t) ((int32_t) ((uint32_t) v14 + (uint32_t) 31) / v5) - (uint32_t) v30) < v6 ? (int32_t) ((uint32_t) ((int32_t) ((uint32_t) v14 + (uint32_t) 31) / v5) - (uint32_t) v30) : v6;
+    int32_t v32 = (int32_t) ((uint32_t) ((int32_t) ((uint32_t) ((int32_t) ((uint32_t) v30 + (uint32_t) (i29 % v31))) * (uint32_t) v5) / v5) * (uint32_t) (v11 != (int32_t) ((uint32_t) (v11 / v5) * (uint32_t) v5) & v11 < v3 == v1 ? (int32_t) ((uint32_t) (v11 / v5) + (uint32_t) v6) : v11 / v5));
+    int32_t v33 = (int32_t) ((uint32_t) ((i29 % v27) / v31) * (uint32_t) v4) / v5;
+    int32_t v34 = (int32_t) ((uint32_t) v33 + (uint32_t) v6);
+    for (int32_t j35 = v3; j35 < ((int32_t) ((uint32_t) v16 + (uint32_t) v2) / v4); j35 += v6) {
+      int32_t v36 = (int32_t) ((uint32_t) j35 * (uint32_t) v4) / v5;
       cb_reserve_back(get_compile_time_arg_val(0), v8);
-      int32_t v35 = get_write_ptr(get_compile_time_arg_val(0));
-      int32_t v36;
-      int32_t v37;
-      v36 = v35;
-      v37 = (int32_t) ((uint32_t) ((int32_t) ((uint32_t) ((int32_t) ((uint32_t) ((int32_t) ((uint32_t) ((int32_t) ((uint32_t) ((int32_t) ((uint32_t) ((int32_t) ((uint32_t) ((int32_t) ((uint32_t) v29 + (uint32_t) (i28 % v30))) * (uint32_t) v5) / v5) * (uint32_t) (v11 != (int32_t) ((uint32_t) (v11 / v4) * (uint32_t) v4) & v11 < v3 == v1 ? (int32_t) ((uint32_t) (v11 / v4) + (uint32_t) v6) : v11 / v4))) + (uint32_t) v33)) * (uint32_t) 2048)) + (uint32_t) ((int32_t) ((uint32_t) ((int32_t) ((uint32_t) ((int32_t) ((uint32_t) ((int32_t) ((uint32_t) ((int32_t) ((uint32_t) v29 + (uint32_t) (i28 % v30))) * (uint32_t) v5)) % (uint32_t) v5)) * (uint32_t) v4)) + (uint32_t) v34)))) * (uint32_t) v8)) / (uint32_t) v22);
-      for (int32_t k38 = v3; k38 < v8; k38 += v6) {
-        int32_t v39 = v36;
-        int32_t v40 = v37;
-        uint64_t temp_371 = v24.get_noc_addr(v40, v3);
-        noc_async_read(temp_371, v39, v22);
-        v36 = (int32_t) ((uint32_t) v39 + (uint32_t) v22);
-        v37 = (int32_t) ((uint32_t) v40 + (uint32_t) v6);
-      }
+      int32_t v37 = get_write_ptr(get_compile_time_arg_val(0));
+      uint64_t temp_311 = v24.get_noc_addr((int32_t) ((uint32_t) v32 + (uint32_t) v36), v3);
+      noc_async_read(temp_311, v37, v22);
+      int32_t v38 = (int32_t) ((uint32_t) v36 + (uint32_t) v6);
+      int32_t v39 = (int32_t) ((uint32_t) v37 + (uint32_t) v22);
+      uint64_t temp_328 = v24.get_noc_addr((int32_t) ((uint32_t) v32 + (uint32_t) v38), v3);
+      noc_async_read(temp_328, v39, v22);
       {
       DeviceZoneScopedN("noc_async_read_barrier");
       noc_async_read_barrier();
       }
       cb_push_back(get_compile_time_arg_val(0), v8);
       cb_reserve_back(get_compile_time_arg_val(1), v9);
-      int32_t v41 = get_write_ptr(get_compile_time_arg_val(1));
-      int32_t v42;
-      int32_t v43;
-      v42 = v41;
-      v43 = (int32_t) ((uint32_t) ((int32_t) ((uint32_t) ((int32_t) ((uint32_t) ((int32_t) ((uint32_t) ((int32_t) ((uint32_t) ((int32_t) ((uint32_t) v33 * (uint32_t) (v13 != (int32_t) ((uint32_t) (v13 / v4) * (uint32_t) v4) & v13 < v3 == v1 ? (int32_t) ((uint32_t) (v13 / v4) + (uint32_t) v6) : v13 / v4))) + (uint32_t) ((int32_t) ((uint32_t) ((i28 % v27) / v30) * (uint32_t) v4) / v4))) * (uint32_t) 4096)) + (uint32_t) ((int32_t) ((uint32_t) ((int32_t) ((uint32_t) v34 * (uint32_t) v4)) + (uint32_t) ((int32_t) ((uint32_t) ((int32_t) ((uint32_t) ((i28 % v27) / v30) * (uint32_t) v4)) % (uint32_t) v4)))))) * (uint32_t) v8)) / (uint32_t) v18);
-      int32_t tiles_per_row_B = (v13 + 31) / 32;   // N in elements, 32 elements per tile col
-#if 1
-      uint32_t pid_n = (i28 % v27) / v30;
-
-      uint32_t N = v15;
-      uint32_t Nt_tiles = N / 32;        // since you assert multiples of 32
-      uint32_t BNt = 64 / 32;            // 2 (block N in tiles)
-      uint32_t BKt = 64 / 32;            // 2 (block K in tiles)
-
-      uint32_t n0 = pid_n * BNt;         // pid_n is your block column id
-      uint32_t k_iter = j31;
-      uint32_t k0 = k_iter * BKt;        // k_iter is your 64-wide K block id
-
-      int32_t dst = v42;
-      for (uint32_t r = 0; r < BKt; r++) {
-        for (uint32_t c = 0; c < BNt; c++) {
-        
-        uint32_t tileIndex = (k0 + r) * Nt_tiles + (n0 + c);
-        noc_async_read(v20.get_noc_addr(tileIndex, 0), dst, v18);
-        dst += v18;
-        }
-      }
-#else
-      for (int32_t k44 = v3; k44 < v9; k44 += v6) {
-        int32_t v45 = v42;
-        int32_t v46 = v43;
-        DPRINT << "Reading tile k44=" << k44 << " to L1 addr " << v45 << " from tile id " << v46 << "\n";
-        uint64_t temp_405 = v20.get_noc_addr(v46, v3);
-        noc_async_read(temp_405, v45, v18);
-        v42 = (int32_t) ((uint32_t) v45 + (uint32_t) v18);
-        v43 = (int32_t) ((uint32_t) v46 + (uint32_t) v6);
-      }
-#endif
+      int32_t v40 = get_write_ptr(get_compile_time_arg_val(1));
+      int32_t v41 = (int32_t) ((uint32_t) v36 * (uint32_t) v28);
+      uint64_t temp_342 = v20.get_noc_addr((int32_t) ((uint32_t) v41 + (uint32_t) v33), v3);
+      noc_async_read(temp_342, v40, v18);
+      int32_t v42 = (int32_t) ((uint32_t) v38 * (uint32_t) v28);
+      int32_t v43 = (int32_t) ((uint32_t) v40 + (uint32_t) ((int32_t) ((uint32_t) v18 * (uint32_t) v8)));
+      uint64_t temp_359 = v20.get_noc_addr((int32_t) ((uint32_t) v42 + (uint32_t) v33), v3);
+      noc_async_read(temp_359, v43, v18);
+      int32_t v44 = (int32_t) ((uint32_t) v40 + (uint32_t) v18);
+      uint64_t temp_371 = v20.get_noc_addr((int32_t) ((uint32_t) v41 + (uint32_t) v34), v3);
+      noc_async_read(temp_371, v44, v18);
+      int32_t v45 = (int32_t) ((uint32_t) v40 + (uint32_t) ((int32_t) ((uint32_t) v18 * (uint32_t) 3)));
+      uint64_t temp_383 = v20.get_noc_addr((int32_t) ((uint32_t) v42 + (uint32_t) v34), v3);
+      noc_async_read(temp_383, v45, v18);
       {
       DeviceZoneScopedN("noc_async_read_barrier");
       noc_async_read_barrier();

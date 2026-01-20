@@ -14,6 +14,8 @@
 #include <tt-metalium/device.hpp>
 #include <fmt/core.h>
 
+#include <omp.h>
+
 using namespace tt::constants;
 using namespace std;
 using namespace tt;
@@ -33,27 +35,17 @@ void golden_matmul(
     uint32_t M,
     uint32_t N,
     uint32_t K) {
-    std::uint32_t idx_c = 0;
-    std::uint32_t idx_a = 0;
-    std::uint32_t idx_b = 0;
-
-    float c_f;
-    float float_tmp;
-    std::vector<bfloat16> c_bf(M * N, 0);
-
-    for (int i = 0; i < M; i++) {
-        for (int j = 0; j < N; j++) {
-            idx_c = j + (i * N);
-            idx_a = i * K;
-            idx_b = j;
-            c_f = 0;
-            for (int k_m = 0; k_m < K; k_m++) {
-                float_tmp = static_cast<float>(a[idx_a]) * static_cast<float>(b[idx_b]);
-                c_f += float_tmp;
-                idx_a += 1;
-                idx_b += N;
+ #pragma omp parallel for collapse(2) schedule(static)
+    for (uint32_t i = 0; i < M; ++i) {
+        for (uint32_t j = 0; j < N; ++j) {
+            float sum = 0.0f;
+            uint32_t idx_a = i * K;
+            uint32_t idx_b = j;
+            for (uint32_t k = 0; k < K; ++k) {
+                sum += static_cast<float>(a[idx_a + k]) *
+                       static_cast<float>(b[idx_b + k * N]);
             }
-            output.at(idx_c) = bfloat16(c_f);
+            output[j + i * N] = bfloat16(sum);
         }
     }
 }

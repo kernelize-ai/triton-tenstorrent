@@ -64,7 +64,6 @@ struct ConvertTritonFunc : public OpConversionPattern<triton::FuncOp> {
     }
 
     Block &oldEntry = funcOp.getBody().front();
-    const unsigned numArgs = oldEntry.getNumArguments();
 
     // create a new function with no arguments
     mlir::FunctionType newTy = mlir::FunctionType::get(
@@ -94,19 +93,15 @@ struct ConvertTritonFunc : public OpConversionPattern<triton::FuncOp> {
     // fix in
     rewriter.inlineRegionBefore(funcOp.getBody(), newRegion, newRegion.end());
 
+    int32_t numArgs = -1;
     {
       OpBuilder::InsertionGuard guard(rewriter);
       rewriter.setInsertionPointToStart(newEntry);
 
       SmallVector<Value> argReplacements;
       argReplacements.reserve(oldEntry.getNumArguments());
-      for (auto [idx, arg] : llvm::enumerate(oldEntry.getArguments())) {
-        Type oldType = arg.getType();
-        Type newType = typeConverter->convertType(oldType);
 
-        LDBG("Replacing arg " << idx << " of type " << oldType << " with type "
-                              << newType);
-
+      auto getArg = [&](const unsigned idx, Type newType) -> Value {
         Value indexVal = arith::createIndexConstant(loc, rewriter, idx);
         Value getArgVal = ttkernel::GetArgValOp::create(
             rewriter, loc, rewriter.getIntegerType(32), indexVal);
@@ -114,13 +109,45 @@ struct ConvertTritonFunc : public OpConversionPattern<triton::FuncOp> {
           getArgVal =
               arith::TruncIOp::create(rewriter, loc, newType, getArgVal);
         }
-        argReplacements.push_back(getArgVal);
+        return getArgVal;
+      };
+
+      unsigned idx = 0;
+      for (auto arg : oldEntry.getArguments()) {
+        Type oldType = arg.getType();
+        if (isa<TensorDescType>(oldType)) {
+          SmallVector<Type> unpacked;
+          assert(typeConverter->convertType(oldType, unpacked).succeeded() &&
+                 "failed to convert tensor descriptor type");
+
+          SmallVector<Value> unpackedValues;
+          unpackedValues.reserve(unpacked.size());
+          for (unsigned i = 0; i < unpacked.size(); i++) {
+            Type t = unpacked[i];
+            LDBG("Replacing arg " << idx << " of type " << oldType
+                                  << " with type " << t);
+            unpackedValues.push_back(getArg(idx++, t));
+          }
+          Value packed = UnrealizedConversionCastOp::create(
+                             rewriter, loc, oldType, unpackedValues)
+                             .getResult(0);
+          argReplacements.push_back(packed);
+        } else {
+          Type newType = typeConverter->convertType(oldType);
+
+          LDBG("Replacing arg " << idx << " of type " << oldType
+                                << " with type " << newType);
+
+          argReplacements.push_back(getArg(idx++, newType));
+        }
       }
+      numArgs = idx;
       rewriter.mergeBlocks(&oldEntry, newEntry, argReplacements);
     }
 
     // Number of user args
     // TODO: add launch params (grid size, block size, shared memory size, etc)
+    assert(numArgs >= 0 && "numArgs not set");
     newFunc->setAttr("tt.num_args", rewriter.getI32IntegerAttr(numArgs));
 
     rewriter.eraseOp(funcOp);

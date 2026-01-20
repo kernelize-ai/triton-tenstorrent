@@ -103,7 +103,6 @@ class CPUBackend(BaseBackend):
         pm.enable_debug()
         passes.common.add_inliner(pm)
         passes.ttir.add_rewrite_tensor_pointer(pm)
-        cpu.passes.tenstorrent.add_convert_tensor_desc(pm)
         passes.common.add_canonicalizer(pm)
         passes.ttir.add_combine(pm)
         passes.ttir.add_reorder_broadcast(pm)
@@ -213,9 +212,8 @@ class CPUBackend(BaseBackend):
         cpu.passes.tenstorrent.add_propagate_register_indices(pm)
         passes.ttgpuir.add_remove_layout_conversions(pm)
 
-        # TODO(adb): re-enable once memory op to ttkernel supports the new layouts
-        #cpu.passes.tenstorrent.add_accelerate_matmul(pm)
-        #passes.ttgpuir.add_remove_layout_conversions(pm)
+        cpu.passes.tenstorrent.add_accelerate_matmul(pm)
+        passes.ttgpuir.add_remove_layout_conversions(pm)
         cpu.passes.tenstorrent.add_remove_dot_load_layout_conversions(pm)
         passes.ttgpuir.add_remove_layout_conversions(pm)
         cpu.passes.tenstorrent.remove_redundant_masks(pm)

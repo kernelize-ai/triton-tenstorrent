@@ -118,3 +118,22 @@ module attributes {"ttg.num-ctas" = 1 : i32, "ttg.num-warps" = 1 : i32, ttg.targ
     tt.return
  }
 }
+
+
+// -----
+
+// CHECK-DAG: #[[BLOCKED:.+]] = #ttg.blocked<{sizePerThread = [4, 4], threadsPerWarp = [1, 1], warpsPerCTA = [1, 1], order = [1, 0]}>
+// CHECK-DAG: #[[BLOCKED1:.+]] = #ttg.blocked<{sizePerThread = [1, 8], threadsPerWarp = [1, 1], warpsPerCTA = [1, 1], order = [1, 0]}>
+// CHECK-DAG: #[[REG:.+]] = #triton_tenstorrent.register_encoding<{index = 0, parent = #[[BLOCKED1]]}>
+#blocked = #ttg.blocked<{sizePerThread = [4, 4], threadsPerWarp = [1, 1], warpsPerCTA = [1, 1], order = [1, 0]}>
+#blocked1 = #ttg.blocked<{sizePerThread = [1, 8], threadsPerWarp = [1, 1], warpsPerCTA = [1, 1], order = [1, 0]}>
+module attributes {"ttg.num-ctas" = 1 : i32, "ttg.num-warps" = 1 : i32, "ttg.threads-per-warp" = 1 : i32} {
+    tt.func public @matmul_kernel_tma(%arg10: !tt.tensordesc<tensor<32x64xf16>>, %offs_am: i32, %offs_bn: i32, %a_7: tensor<32x64xf16, #ttg.dot_op<{opIdx = 0, parent = #blocked}>>, %b_8: tensor<64x64xf16, #ttg.dot_op<{opIdx = 1, parent = #blocked}>>, %arg20: tensor<32x64xf32, #blocked>) {
+      %accumulator = tt.dot %a_7, %b_8, %arg20 : tensor<32x64xf16, #ttg.dot_op<{opIdx = 0, parent = #blocked}>> * tensor<64x64xf16, #ttg.dot_op<{opIdx = 1, parent = #blocked}>> -> tensor<32x64xf32, #blocked>
+      %c = arith.truncf %accumulator : tensor<32x64xf32, #blocked> to tensor<32x64xf16, #blocked>
+      %3 = ttg.convert_layout %c : tensor<32x64xf16, #blocked> -> tensor<32x64xf16, #blocked1>
+      // CHECK: tt.descriptor_store {{.*}} : !tt.tensordesc<tensor<32x64xf16>>, tensor<32x64xf16, #[[REG]]>
+      tt.descriptor_store %arg10[%offs_am, %offs_bn], %3 : !tt.tensordesc<tensor<32x64xf16>>, tensor<32x64xf16, #blocked1>
+      tt.return
+    }
+}
