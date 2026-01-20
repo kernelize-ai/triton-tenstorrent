@@ -50,8 +50,8 @@ void kernel_main() {
   int32_t v4 = 1;
   int32_t v5 = 0;
   int32_t v6 = 2;
-  int32_t v7 = get_arg_val<uint32_t>(5);
-  int32_t v8 = get_arg_val<uint32_t>(4);
+  int32_t v7 = get_arg_val<uint32_t>(v2);
+  int32_t v8 = get_arg_val<uint32_t>(v1);
   for (int32_t i9 = v8; i9 < v7; i9 += v4) {
     {
     DeviceZoneScopedN("cb_wait_front");

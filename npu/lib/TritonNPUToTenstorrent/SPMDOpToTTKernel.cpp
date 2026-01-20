@@ -39,7 +39,7 @@ struct ConvertGetProgramIdOp : public OpConversionPattern<GetProgramIdOp> {
     auto funcOp = op->getParentOfType<func::FuncOp>();
     assert(funcOp && "expected FuncOp as a parent of GetProgramIdOp");
     auto launchParamIndex =
-        funcOp->getAttrOfType<IntegerAttr>("tt.num_args").getInt();
+        funcOp->getAttrOfType<IntegerAttr>(kTTNumPerCoreArgsAttr).getInt();
     Value paramIndexValue =
         arith::createIndexConstant(loc, rewriter, launchParamIndex + axis);
     auto launchParam = ttkernel::GetArgValOp::create(
@@ -71,7 +71,8 @@ public:
     assert(funcOp && "expected FuncOp as a parent of BlockIndexOp");
 
     auto launchParamIndex =
-        funcOp->template getAttrOfType<IntegerAttr>("tt.num_args").getInt();
+        funcOp->template getAttrOfType<IntegerAttr>(kTTNumPerCoreArgsAttr)
+            .getInt();
     Value paramIndexValue = arith::createIndexConstant(
         loc, rewriter, launchParamIndex + funcArgIndexOffset);
     auto launchParam = ttkernel::GetArgValOp::create(

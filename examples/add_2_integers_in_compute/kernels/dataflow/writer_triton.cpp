@@ -6,7 +6,7 @@
 void kernel_main() {
   int32_t v1 = 1;
   bool v2 = true;
-  int32_t v3 = get_arg_val<uint32_t>(2);
+  int32_t v3 = get_common_arg_val<uint32_t>(2);
   DataFormat v4 = get_dataformat(get_compile_time_arg_val(2));
   int32_t v5 = get_tile_size(get_compile_time_arg_val(2));
   InterleavedAddrGenFast<true> v6;
@@ -14,8 +14,8 @@ void kernel_main() {
   v6.page_size = v5;
   v6.data_format = v4;
   InterleavedAddrGenFast<true> v7 = v6;
-  int32_t v8 = get_arg_val<uint32_t>(5);
-  int32_t v9 = get_arg_val<uint32_t>(4);
+  int32_t v8 = get_arg_val<uint32_t>(1);
+  int32_t v9 = get_arg_val<uint32_t>(0);
   for (int32_t i10 = v9; i10 < v8; i10 += v1) {
     {
     DeviceZoneScopedN("cb_wait_front");
@@ -32,4 +32,3 @@ void kernel_main() {
   }
   return;
 }
-

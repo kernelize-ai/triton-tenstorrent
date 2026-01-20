@@ -113,6 +113,9 @@ public:
       OpBuilder builder(parentBlock, parentBlock->begin());
       // put the tile regs acquire ops after any get arg val ops. This seems to
       // be mostly cosmetic.
+      // Note that GetArgVal ops are per-core parameters (e.g. block start,
+      // block end), which are added during SPMD lowering and so should always
+      // exist
       auto getArgValOpItr = parentBlock->getOps<ttkernel::GetArgValOp>();
       if (!getArgValOpItr.empty()) {
         auto argValOps = llvm::reverse(getArgValOpItr);
@@ -308,6 +311,7 @@ struct ConvertTritonNPUToTTKernelPass
     funcTarget.addLegalDialect<func::FuncDialect>();
     funcTarget.addLegalOp<UnrealizedConversionCastOp>();
     funcTarget.addLegalOp<ttkernel::GetArgValOp>();
+    funcTarget.addLegalOp<ttkernel::GetCommonArgValOp>();
 
     mlir::RewritePatternSet funcPatterns(context);
     populateFuncOpConversionPattern(typeConverter, funcPatterns,

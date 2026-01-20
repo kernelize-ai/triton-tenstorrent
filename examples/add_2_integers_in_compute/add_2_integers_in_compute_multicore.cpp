@@ -171,6 +171,17 @@ int main() {
     // Setup arguments for the kernels in the program.
     // Unlike OpenCL/CUDA, every kernel can have its own set of arguments.
 #ifdef TRITON
+    auto common_args = std::vector<uint32_t>{
+        (uint32_t)src0_dram_buffer->address(),
+        (uint32_t)src1_dram_buffer->address(),
+        (uint32_t)dst_dram_buffer->address(),
+        uint32_t(num_cores * blocks_per_core * n_elements_per_tile)
+    };
+
+    tt_metal::SetCommonRuntimeArgs(program, binary_reader_kernel_id, common_args);
+    tt_metal::SetCommonRuntimeArgs(program, unary_writer_kernel_id, common_args);
+    tt_metal::SetCommonRuntimeArgs(program, eltwise_binary_kernel_id, common_args);
+
     fmt::print("Core grid size: {}, {}\n", cores.grid_size().x, cores.grid_size().y);
     for (const auto& core : cores) {
         uint32_t core_id = core.x + core.y * cores.grid_size().x;
@@ -178,17 +189,28 @@ int main() {
             program,
             binary_reader_kernel_id,
             core,
-            {(uint32_t)src0_dram_buffer->address(), (uint32_t)src1_dram_buffer->address(), (uint32_t)dst_dram_buffer->address(), uint32_t(num_cores * blocks_per_core * n_elements_per_tile), core_id * blocks_per_core, core_id * blocks_per_core + blocks_per_core});
+            {
+                core_id * blocks_per_core,
+                core_id * blocks_per_core + blocks_per_core
+            });
+
         SetRuntimeArgs(
             program, 
             eltwise_binary_kernel_id, 
             core, 
-            {NULL, NULL, NULL, 0, core_id * blocks_per_core, core_id * blocks_per_core + blocks_per_core});
+            {
+                core_id * blocks_per_core,
+                core_id * blocks_per_core + blocks_per_core
+            });
+
         SetRuntimeArgs(
             program,
             unary_writer_kernel_id,
             core,
-            {(uint32_t)src0_dram_buffer->address(), (uint32_t)src1_dram_buffer->address(), (uint32_t)dst_dram_buffer->address(), uint32_t(num_cores * blocks_per_core * n_elements_per_tile), core_id * blocks_per_core, core_id * blocks_per_core + blocks_per_core});
+            {
+                core_id * blocks_per_core,
+                core_id * blocks_per_core + blocks_per_core
+            });
     }
 #else
     SetRuntimeArgs(

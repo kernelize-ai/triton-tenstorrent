@@ -69,10 +69,9 @@ module attributes {"ttg.num-ctas" = 1 : i32, "ttg.num-warps" = 1 : i32, ttg.targ
 
     // CHECK-DAG: %[[c0_index:.*]] = arith.constant 0 : index
     // CHECK-DAG: %[[c1_index:.*]] = arith.constant 1 : index
-    // CHECK-DAG: %[[c4_index:.*]] = arith.constant 4 : index
 
-    // CHECK-DAG: %[[X_PTR:.*]] = ttkernel.get_arg_val(%[[c0_index]])
-    // CHECK-DAG: %[[Y_PTR:.*]] = ttkernel.get_arg_val(%[[c1_index]])
+    // CHECK-DAG: %[[X_PTR:.*]] = ttkernel.get_common_arg_val(%[[c0_index]])
+    // CHECK-DAG: %[[Y_PTR:.*]] = ttkernel.get_common_arg_val(%[[c1_index]])
     // CHECK-DAG: %[[X:.*]] = ttkernel.get_compile_time_arg_val(0)
     // CHECK-DAG: %[[Y:.*]] = ttkernel.get_compile_time_arg_val(1)
     %y = ttg.local_alloc {alloc_idx = 1 : i32} : () -> !ttg.memdesc<1024xf32, #shared, #smem, mutable>
@@ -85,7 +84,7 @@ module attributes {"ttg.num-ctas" = 1 : i32, "ttg.num-warps" = 1 : i32, ttg.targ
     // CHECK-DAG: %[[Y_TILE_SIZE:.*]] = ttkernel.get_tile_size(%[[Y]])
     // CHECK-DAG: %[[Y_DATA_FORMAT:.*]] = ttkernel.get_dataformat(%[[Y]])
     // CHECK-DAG: %[[Y_ADDR:.*]] = ttkernel.get_interleaved_addr_gen_fast(%[[true]], %[[Y_PTR]], %[[Y_TILE_SIZE]], %[[Y_DATA_FORMAT]])
-    // CHECK: %[[PID:.*]] = ttkernel.get_arg_val(%[[c4_index]])
+    // CHECK: %[[PID:.*]] = ttkernel.get_arg_val(%[[c0_index]])
     %pid = tt.get_program_id x : i32
 
     // CHECK-DAG: %[[TILE_INDEX_X_BYTES:.*]] = arith.muli %[[PID]], %[[c4096_i32]] : i32
@@ -142,9 +141,8 @@ module attributes {"ttg.num-ctas" = 1 : i32, "ttg.num-warps" = 1 : i32, ttg.targ
     // CHECK-DAG: %[[true:.*]] = arith.constant true
 
     // CHECK-DAG: %[[c2_index:.*]] = arith.constant 2 : index
-    // CHECK-DAG: %[[c4_index:.*]] = arith.constant 4 : index
 
-    // CHECK-DAG: %[[OUTPUT_PTR:.*]] = ttkernel.get_arg_val(%[[c2_index]])
+    // CHECK-DAG: %[[OUTPUT_PTR:.*]] = ttkernel.get_common_arg_val(%[[c2_index]])
     // CHECK-DAG: %[[OUTPUT:.*]] = ttkernel.get_compile_time_arg_val(2)
 
     // CHECK-DAG: %[[OUTPUT_TILE_SIZE:.*]] = ttkernel.get_tile_size(%[[OUTPUT]])
@@ -160,7 +158,7 @@ module attributes {"ttg.num-ctas" = 1 : i32, "ttg.num-warps" = 1 : i32, ttg.targ
     %offsets_1 = arith.addi %offsets_0, %offsets : tensor<1024xi32, #triton_tenstorrent.register_encoding<{index = 2, parent = #blocked}>>
     %1 = tt.splat %output_ptr : !tt.ptr<f32> -> tensor<1024x!tt.ptr<f32>, #triton_tenstorrent.register_encoding<{index = 2, parent = #blocked}>>
     %2 = tt.addptr %1, %offsets_1 : tensor<1024x!tt.ptr<f32>, #triton_tenstorrent.register_encoding<{index = 2, parent = #blocked}>>, tensor<1024xi32, #triton_tenstorrent.register_encoding<{index = 2, parent = #blocked}>>
-    // CHECK: %[[PID:.*]] = ttkernel.get_arg_val(%[[c4_index:.*]])
+    // CHECK: %[[PID:.*]] = ttkernel.get_arg_val(%[[c0_index:.*]])
     // CHECK: %[[OUTPUT_TILE_INDEX_BYTES:.*]] = arith.muli %[[PID]], %[[c4096_i32]] : i32
 
     // CHECK: ttkernel.cb_wait_front(%[[OUTPUT]], %[[c1_i32]])
@@ -199,10 +197,10 @@ module attributes {"ttg.num-ctas" = 1 : i32, "ttg.num-warps" = 1 : i32, ttg.targ
     %x_2 = tt.splat %arg0 : !tt.ptr<f16> -> tensor<1024x!tt.ptr<f16>, #triton_tenstorrent.register_encoding<{index = 0, parent = #blocked}>>
     %y_3 = tt.splat %arg1 : !tt.ptr<f16> -> tensor<1024x!tt.ptr<f16>, #triton_tenstorrent.register_encoding<{index = 1, parent = #blocked}>>
     // CHECK-DAG: %[[c1_i32:.*]] = arith.constant 1 : i32
-    // CHECK-DAG: %[[c4_index:.*]] = arith.constant 4 : index
-    // CHECK-DAG: %[[c5_index:.*]] = arith.constant 5 : index
-    // CHECK-DAG: %[[START:.*]] = ttkernel.get_arg_val(%[[c4_index]])
-    // CHECK-DAG: %[[END:.*]] = ttkernel.get_arg_val(%[[c5_index]])
+    // CHECK-DAG: %[[c0_index:.*]] = arith.constant 0 : index
+    // CHECK-DAG: %[[c1_index:.*]] = arith.constant 1 : index
+    // CHECK-DAG: %[[START:.*]] = ttkernel.get_arg_val(%[[c0_index]])
+    // CHECK-DAG: %[[END:.*]] = ttkernel.get_arg_val(%[[c1_index]])
     // CHECK: scf.for %[[arg0:.*]] = %[[START]] to %[[END]] step %[[c1_i32]]
     scf.for %arg4 = %1 to %0 step %c1_i32  : i32 {
       // CHECK: %[[block_start:.*]] = arith.muli %[[arg0]]
