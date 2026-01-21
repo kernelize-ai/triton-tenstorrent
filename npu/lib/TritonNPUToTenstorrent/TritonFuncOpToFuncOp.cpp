@@ -57,7 +57,7 @@ struct ConvertTritonFunc : public OpConversionPattern<triton::FuncOp> {
     // TODO: this holds true for the compute kernel - what about reader/writer?
     SmallVector<ttkernel::ArgAttr> ctArgs;
     for (auto argType : tritonTy.getInputs()) {
-      if (isa<PointerType>(argType)) {
+      if (isa<PointerType>(argType) || isa<TensorDescType>(argType)) {
         ctArgs.push_back(rewriter.getAttr<ttkernel::ArgAttr>(
             ttkernel::ArgType::CBPort, ctArgs.size()));
       }
