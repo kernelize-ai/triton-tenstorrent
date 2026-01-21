@@ -15,9 +15,12 @@
 // TODO: conditionally include based on if we're building with tenstorrent
 // support
 #include "ttmlir/Conversion/TTKernelToEmitC/TTKernelToEmitC.h"
+#include "ttmlir/Dialect/TTCore/Transforms/Passes.h"
 #include "ttmlir/Dialect/TTKernel/IR/TTKernel.h"
 #include "ttmlir/Dialect/TTKernel/Transforms/Passes.h"
 #include "ttmlir/Target/TTKernel/TTKernelToCpp.h"
+
+#include "ttmlir/Dialect/TTCore/IR/TTCoreOpsTypes.h"
 
 #include <pybind11/pybind11.h>
 
@@ -103,6 +106,16 @@ void init_triton_npu_passes_tenstorrent(py::module &&m) {
   m.def("add_form_expressions_pass", [](mlir::PassManager &pm) {
     pm.addPass(mlir::emitc::createFormExpressionsPass());
   });
+
+  // tt-core
+  m.def("add_ttcore_register_device_pass", [](mlir::PassManager &pm) {
+    pm.addPass(mlir::tt::ttcore::createTTCoreRegisterDevicePass());
+  });
+
+  // tt-nn
+  m.def("add_create_ttnn_generic_op", [](mlir::PassManager &pm) {
+    pm.addPass(mlir::triton::npu::createCreateTTNNGenericOp());
+  });
 }
 
 void init_triton_npu_passes_common(py::module &&m) {
@@ -163,6 +176,15 @@ void init_triton_cpu(py::module &&m) {
           context.appendDialectRegistry(registry);
           context.loadAllAvailableDialects();
         });
+
+  m.def(
+      "translate_to_ttnn",
+      [](mlir::ModuleOp moduleOp, const std::string &symbolName) -> py::object {
+        mlir::MLIRContext *ctx = moduleOp.getContext();
+        mlir::SymbolTable symbolTable(moduleOp);
+
+        return py::str("");
+      });
 
   m.def("get_default_target_triple",
         []() { return getDefaultTargerOrProcessTriple(); });

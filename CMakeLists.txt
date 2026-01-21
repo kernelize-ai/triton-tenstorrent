@@ -16,6 +16,7 @@ set(TTMLIR_LIB_NAMES
     TTMLIRTTKernelToEmitC
     MLIRTTMetalDialect
     MLIRTTCoreDialect
+    MLIRTTTransforms
     MLIRTTIRDialect
     TTMLIRTTIRUtils
     MLIRTTNNDialect

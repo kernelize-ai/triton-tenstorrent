@@ -12,6 +12,8 @@ add_triton_library(TritonNPUToTenstorrent
     Utility.cpp
     ViewOpToTTKernel.cpp
 
+    CreateTTNNGenericOp.cpp
+
     DEPENDS
     TritonNPUTenstorrentConversionPassIncGen
 
