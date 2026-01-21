@@ -34,4 +34,14 @@ def DropFunction : Pass<"drop-function", "mlir::ModuleOp"> {
     let dependentDialects = ["mlir::func::FuncDialect"];
 }
 
+def CreateTTNNGenericOp : Pass<"create-ttnn-generic-op", "mlir::ModuleOp"> {
+    let summary = "Wrap the Triton kernels in a top-level TTNN.generic op in the module.";
+
+    let description = [{
+        This pass wraps all Triton kernels in the module into a single top-level TTNN.generic operation.
+    }];
+
+    let dependentDialects = ["mlir::tt::ttnn::TTNNDialect"];
+}
+
 #endif
