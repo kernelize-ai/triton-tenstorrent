@@ -80,12 +80,6 @@ struct ConvertTritonFunc : public OpConversionPattern<triton::FuncOp> {
                      rewriter.getAttr<tt::ttkernel::ThreadTypeAttr>(
                          getThreadTypeFromFunctionName(funcOp.getName())));
 
-    // TODO: fill with all function args as `ArgTypeBufferAddress`
-    SmallVector<ttkernel::ArgAttr> rtArgs;
-
-    ttkernel::ArgSpecAttr::setArgSpec(
-        newFunc, rewriter.getAttr<ttkernel::ArgSpecAttr>(rtArgs, ctArgs));
-
     // copy the body
     Region &newRegion = newFunc.getBody();
 
@@ -154,6 +148,19 @@ struct ConvertTritonFunc : public OpConversionPattern<triton::FuncOp> {
     assert(numArgs >= 0 && "numArgs not set");
     newFunc->setAttr(kTTNumCommonArgsAttr, rewriter.getI32IntegerAttr(numArgs));
     newFunc->setAttr(kTTNumPerCoreArgsAttr, rewriter.getI32IntegerAttr(0));
+
+    // handle populating arg spec post tensor descriptor argument expansion
+    // TODO: can we get input arguments from the newFunc here? I don't think so,
+    // since the rewriter is still holding all our changes to the module. For
+    // now all args are uniform so using numArgs should be fine.
+    SmallVector<ttkernel::ArgAttr> rtArgs;
+    for (unsigned i = 0; i < numArgs; i++) {
+      rtArgs.push_back(rewriter.getAttr<ttkernel::ArgAttr>(
+          ttkernel::ArgType::BufferAddress, i));
+    }
+
+    ttkernel::ArgSpecAttr::setArgSpec(
+        newFunc, rewriter.getAttr<ttkernel::ArgSpecAttr>(rtArgs, ctArgs));
 
     rewriter.eraseOp(funcOp);
     return success();
