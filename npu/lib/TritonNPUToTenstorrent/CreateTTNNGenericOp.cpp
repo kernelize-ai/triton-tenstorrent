@@ -112,8 +112,6 @@ populateBlockStartEndArgs(Builder &b,
     }
   }
 
-  // TODO: from here
-  //   return b.getArrayAttr(perCore);
   return perCore;
 }
 
@@ -163,6 +161,30 @@ createKernelDescriptors(Builder &builder, Kernels &kernels,
   SmallVector<ttnn::CoreRuntimeArgsAttr> kernelRTArgs =
       populateBlockStartEndArgs(builder, coreRangeSet);
 
+  // reader
+  {
+    auto kernelFunc = kernels.reader;
+    auto kernelSpec = kernelFunc->getAttrOfType<ttkernel::ArgSpecAttr>(
+        ttkernel::ArgSpecAttr::name);
+    auto crtArgs = kernelSpec.getRtArgs();
+    auto ctArgs = kernelSpec.getCtArgs();
+    SmallVector<mlir::Attribute> kernelCTArgs(ctArgs.size());
+    SmallVector<mlir::Attribute> kernelCRTArgs(crtArgs.size());
+    for (const auto [i, arg] : llvm::enumerate(crtArgs)) {
+      kernelCRTArgs[i] = convertKernelArg(builder, arg);
+    }
+    for (const auto [i, arg] : llvm::enumerate(ctArgs)) {
+      kernelCTArgs[i] = convertKernelArg(builder, arg);
+    }
+
+    auto symbolRef = SymbolRefAttr::get(kernelFunc.getContext(),
+                                        kernelFunc.getSymNameAttr());
+
+    kernelConfigs.push_back(builder.getAttr<ttnn::ReadKernelAttr>(
+        symbolRef, coreRangeSet, kernelCRTArgs,
+        kernelRTArgs, kernelCTArgs));
+  }
+
   // compute
   {
     auto kernelFunc = kernels.compute;
@@ -192,6 +214,30 @@ createKernelDescriptors(Builder &builder, Kernels &kernels,
             ttnn::ComputeKernelUnpackToDestMode::Default},
         /*bfp8_pack_precise*/ false,
         /*math_approx_mode*/ false, kernelCRTArgs, kernelRTArgs, kernelCTArgs));
+  }
+
+  // writer
+  {
+    auto kernelFunc = kernels.writer;
+    auto kernelSpec = kernelFunc->getAttrOfType<ttkernel::ArgSpecAttr>(
+        ttkernel::ArgSpecAttr::name);
+    auto crtArgs = kernelSpec.getRtArgs();
+    auto ctArgs = kernelSpec.getCtArgs();
+    SmallVector<mlir::Attribute> kernelCTArgs(ctArgs.size());
+    SmallVector<mlir::Attribute> kernelCRTArgs(crtArgs.size());
+    for (const auto [i, arg] : llvm::enumerate(crtArgs)) {
+      kernelCRTArgs[i] = convertKernelArg(builder, arg);
+    }
+    for (const auto [i, arg] : llvm::enumerate(ctArgs)) {
+      kernelCTArgs[i] = convertKernelArg(builder, arg);
+    }
+
+    auto symbolRef = SymbolRefAttr::get(kernelFunc.getContext(),
+                                        kernelFunc.getSymNameAttr());
+
+    kernelConfigs.push_back(builder.getAttr<ttnn::WriteKernelAttr>(
+        symbolRef, coreRangeSet, kernelCRTArgs,
+        kernelRTArgs, kernelCTArgs));
   }
 
   return kernelConfigs;
@@ -232,9 +278,11 @@ struct CreateTTNNGenericOp
     SmallVector<mlir::Attribute> kernelDescriptors = createKernelDescriptors(
         builder, kernels, coreRangeSet, symbolTable, mathFidelity);
 
-    for (auto desc : kernelDescriptors) {
-      llvm::errs() << "kernel descriptor: " << desc << "\n";
-    }
+    // semaphores not yet used
+    SmallVector<ttnn::KernelSemaphoreAttr> semaphoreDescriptors;
+
+    ttnn::ProgramAttr program = ttnn::ProgramAttr::get(
+        context, kernelDescriptors, cbDescriptors, semaphoreDescriptors);
   }
 };
 
