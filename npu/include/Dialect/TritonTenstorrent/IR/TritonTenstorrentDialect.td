@@ -16,6 +16,20 @@ def TritonTenstorrent_Dialect : Dialect {
     "triton::TritonDialect",
   ];
 
+  let discardableAttrs = (ins
+    "::mlir::IntegerAttr":$alloc_offset,
+    "::mlir::IntegerAttr":$alloc_size
+  );
+
+  let extraClassDeclaration = [{
+    static TritonTenstorrentDialect *getLoaded(MLIRContext *ctx) {
+      return ctx->getLoadedDialect<TritonTenstorrentDialect>();
+    }
+    static TritonTenstorrentDialect *getLoaded(Operation *op) {
+      return getLoaded(op->getContext());
+    }
+  }];
+
   let useDefaultAttributePrinterParser = 1;
   let usePropertiesForAttributes = 1;
 }

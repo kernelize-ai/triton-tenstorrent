@@ -38,6 +38,13 @@ struct ConvertDotOp : public OpConversionPattern<triton::DotOp> {
     }
 
     Location loc = op.getLoc();
+    auto dialect = tt::TritonTenstorrentDialect::getLoaded(op);
+    int64_t alloc_offset =
+        dialect->getAllocOffsetAttrHelper().getAttr(op).getInt();
+    int64_t alloc_size = dialect->getAllocSizeAttrHelper().getAttr(op).getInt();
+    LDBG("Dot op allocation offset: " << alloc_offset
+                                      << " size: " << alloc_size);
+
     auto typeConverter = getTypeConverter();
 
     ttkernel::CBType aCBType = cast<ttkernel::CBType>(adaptor.getA().getType());
@@ -60,6 +67,8 @@ struct ConvertDotOp : public OpConversionPattern<triton::DotOp> {
            "a cb num tiles does not match a tensor shape");
     assert(kTiles * nTiles == bCBType.getNumTiles() &&
            "b cb num tiles does not match b tensor shape");
+    assert(mTiles * nTiles == alloc_size &&
+           "output size does not match output tensor shape");
 
     Value aNumInputTilesValue = arith::createConstantI32(
         loc, rewriter, static_cast<int32_t>(aCBType.getNumTiles()));
@@ -81,7 +90,8 @@ struct ConvertDotOp : public OpConversionPattern<triton::DotOp> {
     Value kTilesVal =
         arith::createConstantI32(loc, rewriter, static_cast<int32_t>(kTiles));
 
-    Value destRegisterInitial = arith::createIndexConstant(loc, rewriter, 0);
+    Value destRegisterInitial =
+        arith::createIndexConstant(loc, rewriter, alloc_offset);
     auto mLoop = scf::ForOp::create(rewriter, loc, zeroI32, mTilesVal, oneI32,
                                     ValueRange{destRegisterInitial});
     {

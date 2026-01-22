@@ -140,8 +140,7 @@ struct RemoveDotToDescriptorStoreOpCvt
         auto cvtSrcType = cast<RankedTensorType>(cvtOp.getSrc().getType());
         auto cvtResultType =
             cast<RankedTensorType>(cvtOp.getResult().getType());
-        if (isa<npu::tt::TiledEncodingAttr>(cvtSrcType.getEncoding()) &&
-            isa<npu::tt::RegisterEncodingAttr>(cvtResultType.getEncoding())) {
+        if (isa<npu::tt::TiledEncodingAttr>(cvtSrcType.getEncoding())) {
           LDBG("Remove cvtOp " << *cvtOp
                                << " and push tiled encoding into store");
 

@@ -4,8 +4,9 @@ add_triton_library(TritonTenstorrentTransforms
     ConvertComputeOps.cpp
     ConvertTensorDescToLoadStore.cpp
     CoreSpecialize.cpp
-    PropagateTileEncoding.cpp
     RemoveDotLoadLayoutConversions.cpp
+    RegAlias.cpp
+    RegAlloc.cpp
     RemoveRedundantMasks.cpp
     Utility.cpp
 

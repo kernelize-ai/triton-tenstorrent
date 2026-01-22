@@ -209,7 +209,6 @@ class CPUBackend(BaseBackend):
         pm.enable_debug()
 
         cpu.passes.tenstorrent.add_convert_compute_ops(pm)
-        cpu.passes.tenstorrent.add_propagate_register_indices(pm)
         passes.ttgpuir.add_remove_layout_conversions(pm)
 
         cpu.passes.tenstorrent.add_accelerate_matmul(pm)
@@ -225,6 +224,7 @@ class CPUBackend(BaseBackend):
         passes.common.add_cse(pm)
         passes.common.add_canonicalizer(pm)
 
+        cpu.passes.tenstorrent.add_register_allocation(pm)
         cpu.passes.tenstorrent.add_canonicalize_matmul_loops(pm)
         cpu.passes.tenstorrent.add_to_ttkernel_dialect(pm)
         passes.common.add_canonicalizer(pm)

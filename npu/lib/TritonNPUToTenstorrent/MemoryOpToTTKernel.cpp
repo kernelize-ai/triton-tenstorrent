@@ -42,6 +42,16 @@ static int64_t findAllocIdx(Operation *op) {
   return -1;
 }
 
+static int64_t findRegisterOffset(Operation *op) {
+  auto helper =
+      tt::TritonTenstorrentDialect::getLoaded(op)->getAllocOffsetAttrHelper();
+  if (helper.isAttrPresent(op)) {
+    return helper.getAttr(op).getInt();
+  }
+  assert(false && "No allocation offset attribute found");
+  return -1;
+}
+
 struct ConvertLoadOp : public OpConversionPattern<triton::LoadOp> {
   using OpConversionPattern<triton::LoadOp>::OpConversionPattern;
 
@@ -404,12 +414,8 @@ struct ConvertLocalStoreOp : public OpConversionPattern<gpu::LocalStoreOp> {
       // reserve back the cb for pack tile
       ttkernel::CBReserveBackOp::create(rewriter, loc, dst, numPages);
 
+      int destIndexOffset = findRegisterOffset(op);
       auto srcType = cast<RankedTensorType>(op.getSrc().getType());
-      unsigned destIndexOffset = 0;
-      if (auto registerEncodingAttr =
-              dyn_cast<npu::tt::RegisterEncodingAttr>(srcType.getEncoding())) {
-        destIndexOffset = registerEncodingAttr.getIndex();
-      }
 
       // commit and wait before packing tiles
       ttkernel::TileRegsCommitOp::create(rewriter, loc);
@@ -489,10 +495,10 @@ struct ConvertLocalLoadOp : public OpConversionPattern<gpu::LocalLoadOp> {
     // 3. copy data from the cb into DST register
     ttkernel::CopyTileInitOp::create(rewriter, loc, src);
     Value c0 = arith::createIndexConstant(loc, rewriter, 0);
-    npu::tt::RegisterEncodingAttr loadEncoding =
-        cast<npu::tt::RegisterEncodingAttr>(dstType.getEncoding());
+    int destIndexOffset = findRegisterOffset(op);
+
     Value destRegisterIndex =
-        arith::createIndexConstant(loc, rewriter, loadEncoding.getIndex());
+        arith::createIndexConstant(loc, rewriter, destIndexOffset);
     ttkernel::CopyTileOp::create(rewriter, loc, src, c0, destRegisterIndex);
     ttkernel::CBPopFrontOp::create(rewriter, loc, src, numPages);
     rewriter.replaceOp(op, src);
