@@ -80,6 +80,7 @@ struct ConvertTritonFunc : public OpConversionPattern<triton::FuncOp> {
                      rewriter.getAttr<tt::ttkernel::ThreadTypeAttr>(
                          getThreadTypeFromFunctionName(funcOp.getName())));
 
+    // TODO: fill with all function args as `ArgTypeBufferAddress`
     SmallVector<ttkernel::ArgAttr> rtArgs;
 
     ttkernel::ArgSpecAttr::setArgSpec(

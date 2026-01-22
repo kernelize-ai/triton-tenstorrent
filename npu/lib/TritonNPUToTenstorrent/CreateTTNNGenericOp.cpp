@@ -3,6 +3,7 @@
 #include "ttmlir/Dialect/TTCore/IR/Utils.h"
 #include "ttmlir/Dialect/TTIR/IR/TTIROps.h"
 #include "ttmlir/Dialect/TTKernel/IR/TTKernelOps.h"
+#include "ttmlir/Dialect/TTMetal/IR/TTMetalOps.h"
 #include "ttmlir/Dialect/TTNN/IR/TTNN.h"
 #include "ttmlir/Dialect/TTNN/IR/TTNNOpsAttrs.h"
 
@@ -42,11 +43,9 @@ struct Kernels {
 };
 
 static SmallVector<ttnn::KernelCBAttr>
-createCBDescriptors(Builder &builder, func::FuncOp func,
+createCBDescriptors(MLIRContext *ctx, func::FuncOp func,
                     const ttcore::DeviceAttr &device,
                     const ttnn::CoreRangeSetAttr &coreRangeSet) {
-  MLIRContext *ctx = builder.getContext();
-
   DenseSet<Value> cbs;
   func.walk([&](ttkernel::GetCompileArgValOp op) {
     if (auto cbType = dyn_cast<ttkernel::CBType>(op.getType())) {
@@ -80,6 +79,124 @@ createCBDescriptors(Builder &builder, func::FuncOp func,
   return cbDescriptors;
 }
 
+// map the worker grid to the identity mapping (one block per core)
+static SmallVector<ttnn::CoreRuntimeArgsAttr>
+populateBlockStartEndArgs(Builder &b,
+                          const ttnn::CoreRangeSetAttr &coreRangeSet) {
+  MLIRContext *ctx = b.getContext();
+
+  auto coreRanges = coreRangeSet.getCoreRanges();
+  assert(coreRanges.size() == 1 && "expected exactly one core range");
+
+  auto coreRange = coreRanges[0];
+  auto start = coreRange.getStartCoord();
+  assert(start.getX() == 0 && start.getY() == 0 &&
+         "expected start coordinate to be (0,0)");
+
+  unsigned rows = coreRange.getEndCoord().getX();
+  unsigned cols = coreRange.getEndCoord().getY();
+
+  SmallVector<ttnn::CoreRuntimeArgsAttr> perCore;
+  perCore.reserve(rows * cols);
+
+  for (unsigned r = 0; r < rows; ++r) {
+    for (unsigned c = 0; c < cols; ++c) {
+      auto coord = ttnn::CoreCoordAttr::get(ctx, r, c);
+
+      uint32_t id = r * cols + c;
+      Attribute blockStartAttr = b.getI32IntegerAttr(id);
+      Attribute blockEndAttr = b.getI32IntegerAttr(id + 1);
+      auto rt = ttnn::CoreRuntimeArgsAttr::get(
+          ctx, coord, ArrayRef<mlir::Attribute>{blockStartAttr, blockEndAttr});
+      perCore.push_back(rt);
+    }
+  }
+
+  // TODO: from here
+  //   return b.getArrayAttr(perCore);
+  return perCore;
+}
+
+static ttnn::ComputeKernelMathFidelity
+convertMathFidelity(ttmetal::MathFidelity fidelity) {
+  switch (fidelity) {
+  case ttmetal::MathFidelity::LoFi:
+    return ttnn::ComputeKernelMathFidelity::LoFi;
+  case ttmetal::MathFidelity::HiFi2:
+    return ttnn::ComputeKernelMathFidelity::HiFi2;
+  case ttmetal::MathFidelity::HiFi3:
+    return ttnn::ComputeKernelMathFidelity::HiFi3;
+  case ttmetal::MathFidelity::HiFi4:
+    return ttnn::ComputeKernelMathFidelity::HiFi4;
+  }
+  llvm_unreachable("Invalid MathFidelity");
+}
+
+static mlir::Attribute convertKernelArg(Builder &builder,
+                                        const ttkernel::ArgAttr &arg) {
+  switch (arg.getArgType()) {
+  case ttkernel::ArgType::BufferAddress: {
+    return builder.getAttr<ttnn::KernelArgAddressOfTensorAttr>(
+        arg.getOperandIndex());
+  }
+  case ttkernel::ArgType::CBPort: {
+    return builder.getAttr<ttnn::KernelArgCBBufferIndexAttr>(
+        arg.getOperandIndex());
+  }
+  case ttkernel::ArgType::Semaphore: {
+    return builder.getAttr<ttnn::KernelArgSemaphoreAtAttr>(
+        arg.getOperandIndex());
+  }
+  }
+  llvm_unreachable("Invalid ArgType");
+}
+
+static SmallVector<mlir::Attribute>
+createKernelDescriptors(Builder &builder, Kernels &kernels,
+                        const ttnn::CoreRangeSetAttr &coreRangeSet,
+                        SymbolTable &symbolTable,
+                        ttmetal::MathFidelity mathFidelity) {
+  SmallVector<mlir::Attribute> kernelConfigs;
+
+  // TODO: these are hardcoded as the TTKernel arg spec does not support RT args
+  // We will need to use CoreRuntimeArgsAttr
+  SmallVector<ttnn::CoreRuntimeArgsAttr> kernelRTArgs =
+      populateBlockStartEndArgs(builder, coreRangeSet);
+
+  // compute
+  {
+    auto kernelFunc = kernels.compute;
+    auto kernelSpec = kernelFunc->getAttrOfType<ttkernel::ArgSpecAttr>(
+        ttkernel::ArgSpecAttr::name);
+    auto crtArgs = kernelSpec.getRtArgs();
+    auto ctArgs = kernelSpec.getCtArgs();
+    SmallVector<mlir::Attribute> kernelCTArgs(ctArgs.size());
+    SmallVector<mlir::Attribute> kernelCRTArgs(crtArgs.size());
+    for (const auto [i, arg] : llvm::enumerate(crtArgs)) {
+      kernelCRTArgs[i] = convertKernelArg(builder, arg);
+    }
+    for (const auto [i, arg] : llvm::enumerate(ctArgs)) {
+      kernelCTArgs[i] = convertKernelArg(builder, arg);
+    }
+
+    auto symbolRef = SymbolRefAttr::get(kernelFunc.getContext(),
+                                        kernelFunc.getSymNameAttr());
+
+    kernelConfigs.push_back(builder.getAttr<ttnn::ComputeKernelAttr>(
+        symbolRef, coreRangeSet,
+        /*math_fidelity*/ convertMathFidelity(mathFidelity),
+        /*fp32DestAccum*/ false,
+        /*dst_full_sync_en*/ false,
+        /*unpack_to_dest_mode*/
+        ArrayRef<ttnn::ComputeKernelUnpackToDestMode>{
+            ttnn::ComputeKernelUnpackToDestMode::Default},
+        /*bfp8_pack_precise*/ false,
+        /*math_approx_mode*/ false, kernelCRTArgs, kernelRTArgs, kernelCTArgs));
+  }
+
+  return kernelConfigs;
+}
+
 } // namespace
 
 struct CreateTTNNGenericOp
@@ -103,13 +220,21 @@ struct CreateTTNNGenericOp
                                               grid.getShape()[1])));
 
     auto kernels = Kernels(m);
-
     OpBuilder builder(m);
 
+    // Create CB descriptors.
     SmallVector<ttnn::KernelCBAttr> cbDescriptors =
-        createCBDescriptors(builder, kernels.compute, device, coreRangeSet);
-    llvm::errs() << "got here?" << "\n";
-    // assert(false && "TODO");
+        createCBDescriptors(context, kernels.compute, device, coreRangeSet);
+
+    // Create KernelDescriptors
+    auto mathFidelity = ttmetal::MathFidelity::HiFi4; // TODO: parametrize
+    SymbolTable symbolTable(m);
+    SmallVector<mlir::Attribute> kernelDescriptors = createKernelDescriptors(
+        builder, kernels, coreRangeSet, symbolTable, mathFidelity);
+
+    for (auto desc : kernelDescriptors) {
+      llvm::errs() << "kernel descriptor: " << desc << "\n";
+    }
   }
 };
 
