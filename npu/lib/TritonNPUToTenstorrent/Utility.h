@@ -13,6 +13,9 @@ static constexpr llvm::StringLiteral kTTNumCommonArgsAttr =
     "tt.num_common_args";
 static constexpr llvm::StringLiteral kTTNumPerCoreArgsAttr =
     "tt.num_per_core_args";
+
+Type convertTypeToCBType(Type type);
+
 } // namespace npu
 } // namespace triton
 

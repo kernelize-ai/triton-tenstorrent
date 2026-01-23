@@ -3,6 +3,13 @@
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "triton/Conversion/MLIRTypes.h"
 
+#include "npu/include/Dialect/TritonTenstorrent/IR/Dialect.h"
+#include "npu/include/Dialect/TritonTenstorrent/Transforms/Utility.h"
+
+// Tenstorrent TTKernel includes
+#include "ttmlir/Dialect/TTKernel/IR/TTKernel.h"
+#include "ttmlir/Dialect/TTKernel/IR/TTKernelOps.h"
+
 using namespace mlir;
 
 namespace mlir::arith {
@@ -44,3 +51,24 @@ Value createIndexConstant(Location loc, OpBuilder &builder, int64_t value) {
 }
 
 } // namespace mlir::arith
+
+using namespace mlir::tt;
+
+namespace mlir::triton::npu {
+
+Type convertTypeToCBType(Type type) {
+  assert(isa<RankedTensorType>(type) && "expected ranked tensor type");
+  auto rankedType = cast<RankedTensorType>(type);
+  auto etype = rankedType.getElementType();
+  auto shape = convertShapeToTileShape(rankedType.getShape());
+  auto ttcoreTileType = ttcore::TileType::get(
+      type.getContext(), ttcore::TileType::getDefaultShape(),
+      ttcore::elementTypeToDataType(etype));
+  MemRefType cbMemRefType =
+      MemRefType::get(shape, ttcoreTileType, MemRefLayoutAttrInterface{},
+                      ttcore::MemorySpaceAttr::get(
+                          type.getContext(), ttcore::MemorySpace::DeviceL1));
+  return ttkernel::CBType::get(cbMemRefType);
+}
+
+} // namespace mlir::triton::npu

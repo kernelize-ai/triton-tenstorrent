@@ -33,7 +33,7 @@ index 48049f026..a76221fda 100644
 +  mlir::triton::npu::registerTritonTenstorrentConvertTensorDescToLoadStore();
 +  mlir::triton::npu::registerTritonTenstorrentAccelerateMatmul();
 +  mlir::triton::npu::registerTritonTenstorrentRemoveDotLoadLayoutConversions();
-+  mlir::triton::npu::registerTritonTenstorrentPropagateTileEncoding();
++  mlir::triton::npu::registerTritonTenstorrentRegAlloc();
 +  mlir::triton::npu::registerTritonTenstorrentConvertComputeOps();
 +  mlir::triton::npu::registerConvertTritonNPUToTTKernel();
 +  mlir::triton::npu::registerFinalizeCBTransaction();

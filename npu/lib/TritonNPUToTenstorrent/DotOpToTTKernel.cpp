@@ -4,6 +4,7 @@
 
 #include "npu/include/Dialect/TritonTenstorrent/IR/Attributes.h"
 #include "npu/include/Dialect/TritonTenstorrent/IR/Dialect.h"
+#include "npu/include/Dialect/TritonTenstorrent/Transforms/Utility.h"
 
 #include "ttmlir/Dialect/TTKernel/IR/TTKernel.h"
 #include "ttmlir/Dialect/TTKernel/IR/TTKernelOps.h"
@@ -38,7 +39,8 @@ struct ConvertDotOp : public OpConversionPattern<triton::DotOp> {
     }
 
     Location loc = op.getLoc();
-    auto dialect = tt::TritonTenstorrentDialect::getLoaded(op);
+    auto dialect =
+        op->getContext()->getLoadedDialect<tt::TritonTenstorrentDialect>();
     int64_t alloc_offset =
         dialect->getAllocOffsetAttrHelper().getAttr(op).getInt();
     int64_t alloc_size = dialect->getAllocSizeAttrHelper().getAttr(op).getInt();
@@ -59,9 +61,9 @@ struct ConvertDotOp : public OpConversionPattern<triton::DotOp> {
     int64_t K = aType.getShape()[1];
     int64_t N = bType.getShape()[1];
 
-    int64_t mTiles = (M + 31) / 32;
-    int64_t kTiles = (K + 31) / 32;
-    int64_t nTiles = (N + 31) / 32;
+    int64_t mTiles = (M + kTileDimSize - 1) / kTileDimSize;
+    int64_t kTiles = (K + kTileDimSize - 1) / kTileDimSize;
+    int64_t nTiles = (N + kTileDimSize - 1) / kTileDimSize;
 
     assert(mTiles * kTiles == aCBType.getNumTiles() &&
            "a cb num tiles does not match a tensor shape");

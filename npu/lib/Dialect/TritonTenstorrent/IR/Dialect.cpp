@@ -72,31 +72,6 @@ static LogicalResult parseIntArrayAttr(AsmParser &parser,
   return success();
 };
 
-Attribute RegisterEncodingAttr::parse(AsmParser &parser, Type type) {
-  if (parser.parseLess().failed())
-    return {};
-  NamedAttrList attrs;
-  if (parser.parseOptionalAttrDict(attrs).failed())
-    return {};
-  if (parser.parseGreater().failed())
-    return {};
-  unsigned index = cast<IntegerAttr>(attrs.get("index")).getInt();
-  auto parent = dyn_cast<gpu::DistributedEncodingTrait>(attrs.get("parent"));
-  if (!parent) {
-    parser.emitError(parser.getNameLoc(),
-                     "expected a distributed encoding trait");
-    return {};
-  }
-  return parser.getChecked<RegisterEncodingAttr>(parser.getContext(), index,
-                                                 parent);
-}
-
-void RegisterEncodingAttr::print(AsmPrinter &printer) const {
-  printer << "<{"
-          << "index = " << getIndex() << ", "
-          << "parent = " << getParent() << "}>";
-}
-
 Attribute TiledEncodingAttr::parse(AsmParser &parser, Type type) {
   if (parser.parseLess().failed())
     return {};
@@ -311,10 +286,7 @@ public:
   using OpAsmDialectInterface::OpAsmDialectInterface;
 
   AliasResult getAlias(Attribute attr, raw_ostream &os) const override {
-    if (auto regEnc = dyn_cast<RegisterEncodingAttr>(attr)) {
-      os << "reg";
-      return AliasResult::FinalAlias;
-    } else if (auto tiledEnc = dyn_cast<TiledEncodingAttr>(attr)) {
+    if (auto tiledEnc = dyn_cast<TiledEncodingAttr>(attr)) {
       os << "tiled";
       return AliasResult::FinalAlias;
     }

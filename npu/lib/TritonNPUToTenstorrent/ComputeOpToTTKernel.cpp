@@ -2,8 +2,8 @@
 
 #include "mlir/Transforms/DialectConversion.h"
 
-#include "npu/include/Dialect/TritonTenstorrent/IR/Attributes.h"
 #include "npu/include/Dialect/TritonTenstorrent/IR/Dialect.h"
+#include "npu/include/Dialect/TritonTenstorrent/Transforms/Utility.h"
 
 #include "ttmlir/Dialect/TTKernel/IR/TTKernel.h"
 #include "ttmlir/Dialect/TTKernel/IR/TTKernelOps.h"
@@ -20,41 +20,18 @@ namespace {
 
 struct ConvertBinaryComputeOp
     : public OpConversionPattern<npu::tt::BinaryComputeOp> {
-
-  ConvertBinaryComputeOp(TypeConverter &typeConverter, MLIRContext *context)
-      : OpConversionPattern<npu::tt::BinaryComputeOp>(typeConverter, context) {}
-
-  /// Walk up the stack to find the offset of the register buffer for the given
-  /// value.
-  uint getRegIndex(Value value) const {
-    if (auto op = value.getDefiningOp()) {
-      auto helper = tt::TritonTenstorrentDialect::getLoaded(op)
-                        ->getAllocOffsetAttrHelper();
-      if (helper.isAttrPresent(op)) {
-        return helper.getAttr(op).getInt();
-      }
-    } else if (auto blockArg = dyn_cast<BlockArgument>(value)) {
-      auto parentOp = blockArg.getOwner()->getParentOp();
-      if (auto loopOp = dyn_cast<LoopLikeOpInterface>(parentOp)) {
-        if (auto init = loopOp.getTiedLoopInit(blockArg)) {
-          return getRegIndex(init->get());
-        }
-      }
-    }
-    assert(false && "No allocation offset attribute found");
-    return 0;
-  }
+  using OpConversionPattern<npu::tt::BinaryComputeOp>::OpConversionPattern;
 
   LogicalResult
   matchAndRewrite(npu::tt::BinaryComputeOp op, OpAdaptor adaptor,
                   ConversionPatternRewriter &rewriter) const override {
     Location loc = op.getLoc();
-    Value lhs =
-        arith::createIndexConstant(loc, rewriter, getRegIndex(op.getLhs()));
-    Value rhs =
-        arith::createIndexConstant(loc, rewriter, getRegIndex(op.getRhs()));
-    Value dest = arith::createIndexConstant(loc, rewriter,
-                                            getRegIndex(op->getResult(0)));
+    auto lhsReg = lookupRegisterIndex(op.getLhs());
+    auto rhsReg = lookupRegisterIndex(op.getRhs());
+    auto destReg = lookupRegisterIndex(op->getResult(0));
+    Value lhs = arith::createIndexConstant(loc, rewriter, lhsReg);
+    Value rhs = arith::createIndexConstant(loc, rewriter, rhsReg);
+    Value dest = arith::createIndexConstant(loc, rewriter, destReg);
 
     std::string opcode = op.getOpcode().str();
     if (opcode == "arith.addf") {

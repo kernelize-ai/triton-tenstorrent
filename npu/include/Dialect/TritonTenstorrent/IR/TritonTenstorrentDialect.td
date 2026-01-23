@@ -21,15 +21,6 @@ def TritonTenstorrent_Dialect : Dialect {
     "::mlir::IntegerAttr":$alloc_size
   );
 
-  let extraClassDeclaration = [{
-    static TritonTenstorrentDialect *getLoaded(MLIRContext *ctx) {
-      return ctx->getLoadedDialect<TritonTenstorrentDialect>();
-    }
-    static TritonTenstorrentDialect *getLoaded(Operation *op) {
-      return getLoaded(op->getContext());
-    }
-  }];
-
   let useDefaultAttributePrinterParser = 1;
   let usePropertiesForAttributes = 1;
 }

@@ -15,6 +15,7 @@
 #include "npu/include/Dialect/TritonTenstorrent/IR/Dialect.h"
 #include "npu/include/Dialect/TritonTenstorrent/Transforms/RegAlias.h"
 #include "npu/include/Dialect/TritonTenstorrent/Transforms/RegAlloc.h"
+#include "npu/include/Dialect/TritonTenstorrent/Transforms/Utility.h"
 
 #define DEBUG_TYPE "tritontenstorrent-register-allocation"
 #define DBGS() (llvm::dbgs() << "[" DEBUG_TYPE "]: ")
@@ -57,28 +58,6 @@ private:
     getValuesAndSizes();
     resolveLiveness();
     computeOffsets();
-  }
-
-  static constexpr int TT_TILE_DIM_SIZE = 32;
-
-  static size_t cdiv(size_t a, size_t b) { return (a + b - 1) / b; }
-
-  /// Computes the number of tiles required for a given type.
-  int getNumTiles(Type type) {
-    if (auto rankedType = dyn_cast<RankedTensorType>(type)) {
-      auto shape = rankedType.getShape();
-      if (shape.size() == 1) {
-        // 1D tensor, use 1024 size tiles
-        return cdiv(shape[0], TT_TILE_DIM_SIZE * TT_TILE_DIM_SIZE);
-      } else if (shape.size() == 2) {
-        // 2D tensor, use 32x32 size tiles
-        return cdiv(shape[0], TT_TILE_DIM_SIZE) *
-               cdiv(shape[1], TT_TILE_DIM_SIZE);
-      } else {
-        assert(false && "Unsupported tensor rank");
-      }
-    }
-    return 0;
   }
 
   /// Initializes explicitly defined register values for a given operation.
@@ -496,7 +475,8 @@ class TritonTenstorrentRegAllocPass
 
   void assignRegisterOffset(Value result, int offset, int size) {
     if (auto op = result.getDefiningOp()) {
-      auto dialect = tt::TritonTenstorrentDialect::getLoaded(op);
+      auto dialect =
+          op->getContext()->getLoadedDialect<tt::TritonTenstorrentDialect>();
       dialect->getAllocOffsetAttrHelper().setAttr(
           op, IntegerAttr::get(IntegerType::get(op->getContext(), 32), offset));
       dialect->getAllocSizeAttrHelper().setAttr(

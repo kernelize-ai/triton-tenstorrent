@@ -16,6 +16,7 @@
 
 #include "npu/include/Dialect/TritonTenstorrent/IR/Attributes.h"
 #include "npu/include/Dialect/TritonTenstorrent/IR/Dialect.h"
+#include "npu/include/Dialect/TritonTenstorrent/Transforms/Utility.h"
 
 #include "cpu/include/Dialect/TritonCPU/IR/Dialect.h" // BlockIndexOps from MakePersistentKernel
 
@@ -194,25 +195,6 @@ private:
   const bool addMMInit;
 };
 
-inline SmallVector<int64_t, 2>
-convertShapeToTileShape(ArrayRef<int64_t> shape) {
-  if (shape.size() == 1) {
-    return SmallVector<int64_t, 2>{shape[0] / (32 * 32)};
-  }
-  SmallVector<int64_t, 2> tileShape;
-  tileShape.reserve(shape.size());
-  for (unsigned i = 0; i < shape.size(); ++i) {
-    if (shape[i] == 1) {
-      tileShape.push_back(1);
-      continue;
-    }
-    assert(shape[i] % 32 == 0 &&
-           "expecting shape dimensions to be multiple of 32");
-    tileShape.push_back(shape[i] / 32);
-  }
-  return tileShape;
-}
-
 } // namespace
 
 struct ConvertTritonNPUToTTKernelPass
@@ -245,31 +227,12 @@ struct ConvertTritonNPUToTTKernelPass
       if (!type.getEncoding()) {
         return type;
       }
-      if (isa<npu::tt::RegisterEncodingAttr>(type.getEncoding())) {
-        auto shape = convertShapeToTileShape(type.getShape());
-        auto ttcoreTileType = ttcore::TileType::get(
-            type.getContext(), ttcore::TileType::getDefaultShape(),
-            ttcore::elementTypeToDataType(etype));
-        MemRefType cbMemRefType = MemRefType::get(
-            shape, ttcoreTileType, MemRefLayoutAttrInterface{},
-            ttcore::MemorySpaceAttr::get(type.getContext(),
-                                         ttcore::MemorySpace::DeviceL1));
-        return ttkernel::CBType::get(cbMemRefType);
-      }
       if (isa<npu::tt::TiledDotOperandEncodingAttr>(type.getEncoding()) ||
           isa<gpu::DotOperandEncodingAttr>(type.getEncoding())) {
         // dot operands read directly from cbs, so convert to cb type
         assert(type.getShape().size() == 2 &&
                "expecting rank 2 tensor for dot operand");
-        auto shape = convertShapeToTileShape(type.getShape());
-        auto ttcoreTileType = ttcore::TileType::get(
-            type.getContext(), ttcore::TileType::getDefaultShape(),
-            ttcore::elementTypeToDataType(etype));
-        MemRefType cbMemRefType = MemRefType::get(
-            shape, ttcoreTileType, MemRefLayoutAttrInterface{},
-            ttcore::MemorySpaceAttr::get(type.getContext(),
-                                         ttcore::MemorySpace::DeviceL1));
-        return ttkernel::CBType::get(cbMemRefType);
+        return convertTypeToCBType(type);
       }
       return type;
     });
