@@ -319,18 +319,20 @@ class CPUBackend(BaseBackend):
         pm = ir.pass_manager(mod.context)
         pm.enable_debug()
 
-        cpu.passes.tenstorrent.add_ttcore_register_device_pass(pm)
-        cpu.passes.tenstorrent.add_create_ttnn_generic_op(pm)
-
-        # begin copied from emitc
-        cpu.passes.tenstorrent.add_ttkernel_device_zone_scopes(pm)
+        cpu.passes.common.add_arith_int_range_opts(pm)
+        cpu.passes.common.add_arith_expand(pm)
         passes.common.add_canonicalizer(pm)
         passes.common.add_licm(pm)
         passes.common.add_sccp(pm)
         passes.common.add_cse(pm)
 
-        cpu.passes.common.add_arith_int_range_opts(pm)
-        cpu.passes.common.add_arith_expand(pm)
+        cpu.passes.tenstorrent.add_ttcore_register_device_pass(pm)
+        cpu.passes.tenstorrent.add_create_ttnn_generic_op(pm)
+
+        # begin copied from emitc
+        cpu.passes.tenstorrent.add_ttkernel_device_zone_scopes(pm)
+        cpu.passes.tenstorrent.add_ttkernel_to_emitc(pm)
+        passes.common.add_canonicalizer(pm)
         # end copied from emitc
 
         pm.run(mod, "make_flatbuffer")
