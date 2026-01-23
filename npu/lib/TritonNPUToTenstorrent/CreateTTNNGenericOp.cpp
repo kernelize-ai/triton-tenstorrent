@@ -1,10 +1,14 @@
 #include "npu/include/TritonNPUToTenstorrent/Passes.h"
 
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wreturn-type"
 #include "ttmlir/Dialect/TTCore/IR/Utils.h"
+#pragma GCC diagnostic pop
 #include "ttmlir/Dialect/TTIR/IR/TTIROps.h"
 #include "ttmlir/Dialect/TTKernel/IR/TTKernelOps.h"
 #include "ttmlir/Dialect/TTMetal/IR/TTMetalOps.h"
 #include "ttmlir/Dialect/TTNN/IR/TTNN.h"
+#include "ttmlir/Dialect/TTNN/IR/TTNNOps.h"
 #include "ttmlir/Dialect/TTNN/IR/TTNNOpsAttrs.h"
 
 namespace mlir {
@@ -181,8 +185,7 @@ createKernelDescriptors(Builder &builder, Kernels &kernels,
                                         kernelFunc.getSymNameAttr());
 
     kernelConfigs.push_back(builder.getAttr<ttnn::ReadKernelAttr>(
-        symbolRef, coreRangeSet, kernelCRTArgs,
-        kernelRTArgs, kernelCTArgs));
+        symbolRef, coreRangeSet, kernelCRTArgs, kernelRTArgs, kernelCTArgs));
   }
 
   // compute
@@ -236,11 +239,161 @@ createKernelDescriptors(Builder &builder, Kernels &kernels,
                                         kernelFunc.getSymNameAttr());
 
     kernelConfigs.push_back(builder.getAttr<ttnn::WriteKernelAttr>(
-        symbolRef, coreRangeSet, kernelCRTArgs,
-        kernelRTArgs, kernelCTArgs));
+        symbolRef, coreRangeSet, kernelCRTArgs, kernelRTArgs, kernelCTArgs));
   }
 
   return kernelConfigs;
+}
+
+static constexpr int32_t M = 256;
+static constexpr int32_t N = 128;
+static constexpr int32_t K = 64;
+static constexpr int32_t stride_AM = K;
+static constexpr int32_t stride_BK = N;
+static constexpr int32_t stride_CM = N;
+
+// TODO: take the args map as a parameter
+// 0: A ptr
+// 1: M (A.shape[0])
+// 2: K (A.shape[1])
+// 3: stride_AM = K (A.strides[0])
+// 4: 1 (A.strides[1])
+// 5: 0 (A.has_padding)
+// 6: M (A.shape[0])
+// 7: K (A.shape[1])
+// 8: stride_AM (A.strides[0])
+// 9: 1 (A.strides[1])
+// 10: B ptr
+// 11: K (B.shape[0])
+// 12: N (B.shape[1])
+// 13: stride_BK (B.strides[0])
+// 14: 1 (B.strides[1])
+// 15: 0 (B.has_padding)
+// 16: K (B.shape[0])
+// 17: N (B.shape[1])
+// 18: stride_BK (B.strides[0])
+// 19: 1 (B.strides[1])
+// 20: C ptr
+// 21: M (C.shape[0])
+// 22: N (C.shape[1])
+// 23: stride_CM (C.strides[0])
+// 24: 1 (C.strides[1])
+// 25: 0 (C.has_padding)
+// 26: M (C.shape[0])
+// 27: N (C.shape[1])
+// 28: stride_CM (C.strides[0])
+// 29: 1 (C.strides[1])
+// 30: M
+// 31: N
+// 32: K
+static constexpr int32_t commonRuntimeArgs[] = {
+    0, M, K, stride_AM, 1, 0, M, K, stride_AM, 1, 0, K, N, stride_BK, 1,
+    0, K, N, stride_BK, 1, 0, M, N, stride_CM, 1, 0, M, N, stride_CM, 1,
+    M, N, K};
+static const std::set<int32_t> commonRuntimeArgsPtrIndices{
+    0, 10, 20}; // TODO: read from argspec
+
+void replaceNonPtrCommonRuntimeArgs(func::FuncOp f) {
+  f.walk([&](ttkernel::GetCommonArgValOp op) {
+    Value opIndexVal = op.getArgIndex();
+    assert(opIndexVal.getDefiningOp() &&
+           "expected constant op for common runtime arg index");
+    int32_t opIndex =
+        cast<IntegerAttr>(
+            cast<arith::ConstantOp>(opIndexVal.getDefiningOp()).getValue())
+            .getInt();
+    if (commonRuntimeArgsPtrIndices.count(opIndex))
+      return;
+
+    OpBuilder builder(op);
+    Location loc = op.getLoc();
+    op->replaceAllUsesWith(arith::ConstantOp::create(
+        builder, loc,
+        builder.getI32IntegerAttr(
+            reinterpret_cast<int32_t>(commonRuntimeArgs[opIndex]))));
+  });
+}
+
+// copied from TransformUtils but with a OpBuilder function argument
+static ttnn::GetDeviceOp insertGetDeviceOp(OpBuilder &builder,
+                                           ttcore::DeviceAttr deviceAttr,
+                                           Location loc) {
+  SmallVector<int64_t, 2> meshShape{deviceAttr.getMeshShape()};
+  if (meshShape.empty()) {
+    meshShape = SmallVector<int64_t, 2>{1, 1};
+  }
+  // TODO (jnie): Currently hardcoding the mesh offset to 0x0
+  // Need a proper plan to dynamically determine this.
+  SmallVector<int64_t, 2> meshOffset{0, 0};
+  return builder.create<ttnn::GetDeviceOp>(
+      loc, builder.getType<ttnn::DeviceType>(),
+      ttnn::MeshShapeAttr::get(builder.getContext(), meshShape[0],
+                               meshShape[1]),
+      ttnn::MeshOffsetAttr::get(builder.getContext(), meshOffset[0],
+                                meshOffset[1]));
+}
+
+// remove grid?
+void createMainFunc(MLIRContext *context, OpBuilder &builder,
+                    ttcore::GridAttr grid, ttcore::DeviceAttr deviceAttr) {
+  // DataType::BFloat16
+#if 1
+  Type aElementType = ttcore::TileType::get(
+      context, ttcore::TileType::getDefaultShape(),
+      ttcore::elementTypeToDataType(builder.getBF16Type()));
+
+#else
+  Type aElementType = ttcore::dataTypeToElementType(
+      context, ttcore::DataType::BFloat16); // TODO: actually float16 but maybe
+                                            // it doesn't matter? or we can
+                                            // change the kernel type
+#endif
+  auto getLayoutForShape = [&](ArrayRef<int64_t> shape) {
+    return ttnn::TTNNLayoutAttr::get(
+        context, shape, aElementType, ttnn::BufferType::DRAM,
+        ttcore::GridAttr::get(context),
+        ttnn::TensorMemoryLayoutAttr::get(
+            context, ttnn::TensorMemoryLayout::Interleaved));
+  };
+
+  auto aLayout = getLayoutForShape({M, K});
+  auto bLayout = getLayoutForShape({K, N});
+  auto cLayout = getLayoutForShape({M, N});
+
+  auto aType = RankedTensorType::get({M, K}, aElementType, aLayout);
+  auto bType = RankedTensorType::get({K, N}, aElementType, bLayout);
+  auto cType = RankedTensorType::get({M, N}, aElementType, cLayout);
+  llvm::errs() << "cType = " << cType << "\n";
+
+  auto funcType = builder.getFunctionType({aType, bType}, {/*cType*/});
+  auto mainFunc =
+      builder.create<func::FuncOp>(builder.getUnknownLoc(), "main", funcType);
+  mainFunc.setPublic(); // does this do anything?
+
+  Block *entryBlock = mainFunc.addEntryBlock();
+  builder.setInsertionPointToStart(entryBlock);
+  ttnn::GetDeviceOp deviceOp =
+      insertGetDeviceOp(builder, deviceAttr, builder.getUnknownLoc());
+
+  Value cTensor = ttnn::EmptyOp::create(
+      builder, builder.getUnknownLoc(), cType, deviceOp.getDevice(),
+      ttnn::ShapeAttr::get(context, {M, N}),
+      ttcore::DataTypeAttr::get(context,
+                                ttcore::elementTypeToDataType(aElementType)),
+      ttnn::LayoutAttr::get(context, ttnn::Layout::Tile),
+      ttnn::MemoryConfigAttr::get(
+          context,
+          ttnn::TensorMemoryLayoutAttr::get(
+              context, ttnn::TensorMemoryLayout::Interleaved),
+          ttnn::BufferTypeAttr::get(context, ttnn::BufferType::DRAM),
+          std::nullopt));
+
+  SmallVector<Value> ios;
+  ios.push_back(entryBlock->getArgument(0));
+  ios.push_back(entryBlock->getArgument(1));
+  ios.push_back(cTensor);
+
+  func::ReturnOp::create(builder, builder.getUnknownLoc(), ValueRange{cTensor});
 }
 
 } // namespace
@@ -250,6 +403,9 @@ struct CreateTTNNGenericOp
   void runOnOperation() override {
     MLIRContext *context = &getContext();
     ModuleOp m = getOperation();
+
+    // replace all non-ptr common runtime args with scalar constants
+    m.walk([&](func::FuncOp f) { replaceNonPtrCommonRuntimeArgs(f); });
 
     // Create a top-level TTNN.generic operation
     ttcore::DeviceAttr device = ttcore::lookupDevice(m);
@@ -283,6 +439,14 @@ struct CreateTTNNGenericOp
 
     ttnn::ProgramAttr program = ttnn::ProgramAttr::get(
         context, kernelDescriptors, cbDescriptors, semaphoreDescriptors);
+    llvm::errs() << "Program: " << program << "\n";
+
+    // need to construct a function to house the generic that haas some inputs,
+    // I think
+    auto deviceOps = llvm::to_vector(m.getOps<ttcore::DeviceOp>());
+    assert(deviceOps.size() == 1 && "expected only one device op");
+    builder.setInsertionPointAfter(deviceOps.front());
+    createMainFunc(context, builder, grid, device);
   }
 };
 
