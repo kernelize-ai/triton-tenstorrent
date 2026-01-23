@@ -88,6 +88,7 @@ struct ConvertTritonFunc : public OpConversionPattern<triton::FuncOp> {
     // fix in
     rewriter.inlineRegionBefore(funcOp.getBody(), newRegion, newRegion.end());
 
+    SmallVector<unsigned> ptrArgIndices;
     int32_t numArgs = -1;
     {
       OpBuilder::InsertionGuard guard(rewriter);
@@ -117,6 +118,7 @@ struct ConvertTritonFunc : public OpConversionPattern<triton::FuncOp> {
           SmallVector<Type> unpacked;
           assert(typeConverter->convertType(oldType, unpacked).succeeded() &&
                  "failed to convert tensor descriptor type");
+          ptrArgIndices.push_back(idx);
 
           SmallVector<Value> unpackedValues;
           unpackedValues.reserve(unpacked.size());
@@ -131,6 +133,8 @@ struct ConvertTritonFunc : public OpConversionPattern<triton::FuncOp> {
                              .getResult(0);
           argReplacements.push_back(packed);
         } else {
+          if (isa<PointerType>(oldType))
+            ptrArgIndices.push_back(idx);
           Type newType = typeConverter->convertType(oldType);
 
           LDBG("Replacing arg " << idx << " of type " << oldType
@@ -154,10 +158,19 @@ struct ConvertTritonFunc : public OpConversionPattern<triton::FuncOp> {
     // since the rewriter is still holding all our changes to the module. For
     // now all args are uniform so using numArgs should be fine.
     SmallVector<ttkernel::ArgAttr> rtArgs;
+#if 1
+    for (unsigned i = 0; i < ptrArgIndices.size(); i++) {
+      rtArgs.push_back(rewriter.getAttr<ttkernel::ArgAttr>(
+          ttkernel::ArgType::BufferAddress, ptrArgIndices[i]));
+    }
+#else
+    // temporarily disable since ttkernel does not yet support scalar common
+    // runtime args
     for (unsigned i = 0; i < numArgs; i++) {
       rtArgs.push_back(rewriter.getAttr<ttkernel::ArgAttr>(
           ttkernel::ArgType::BufferAddress, i));
     }
+#endif
 
     ttkernel::ArgSpecAttr::setArgSpec(
         newFunc, rewriter.getAttr<ttkernel::ArgSpecAttr>(rtArgs, ctArgs));
