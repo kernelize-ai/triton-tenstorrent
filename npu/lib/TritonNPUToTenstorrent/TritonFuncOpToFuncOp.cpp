@@ -159,9 +159,11 @@ struct ConvertTritonFunc : public OpConversionPattern<triton::FuncOp> {
     // now all args are uniform so using numArgs should be fine.
     SmallVector<ttkernel::ArgAttr> rtArgs;
 #if 1
+    // TODO: messy - we have to rewrite all non-scalar common args to constants
+    // in ttnn.generic and rewrite the ptr common args to be 0 indexed in order.
     for (unsigned i = 0; i < ptrArgIndices.size(); i++) {
       rtArgs.push_back(rewriter.getAttr<ttkernel::ArgAttr>(
-          ttkernel::ArgType::BufferAddress, ptrArgIndices[i]));
+          ttkernel::ArgType::BufferAddress, i));
     }
 #else
     // temporarily disable since ttkernel does not yet support scalar common

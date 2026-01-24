@@ -294,6 +294,7 @@ static const std::set<int32_t> commonRuntimeArgsPtrIndices{
     0, 10, 20}; // TODO: read from argspec
 
 void replaceNonPtrCommonRuntimeArgs(func::FuncOp f) {
+  unsigned commonRuntimeArgsIndex = 0;
   f.walk([&](ttkernel::GetCommonArgValOp op) {
     Value opIndexVal = op.getArgIndex();
     assert(opIndexVal.getDefiningOp() &&
@@ -302,15 +303,19 @@ void replaceNonPtrCommonRuntimeArgs(func::FuncOp f) {
         cast<IntegerAttr>(
             cast<arith::ConstantOp>(opIndexVal.getDefiningOp()).getValue())
             .getInt();
-    if (commonRuntimeArgsPtrIndices.count(opIndex))
-      return;
-
     OpBuilder builder(op);
     Location loc = op.getLoc();
-    op->replaceAllUsesWith(arith::ConstantOp::create(
-        builder, loc,
-        builder.getI32IntegerAttr(
-            reinterpret_cast<int32_t>(commonRuntimeArgs[opIndex]))));
+    if (commonRuntimeArgsPtrIndices.count(opIndex)) {
+      op->replaceAllUsesWith(ttkernel::GetCommonArgValOp::create(
+          builder, loc, op.getType(),
+          arith::ConstantOp::create(
+              builder, loc, builder.getIndexAttr(commonRuntimeArgsIndex++))));
+    } else {
+      op->replaceAllUsesWith(arith::ConstantOp::create(
+          builder, loc,
+          builder.getI32IntegerAttr(
+              reinterpret_cast<int32_t>(commonRuntimeArgs[opIndex]))));
+    }
   });
 }
 
@@ -333,21 +338,12 @@ static ttnn::GetDeviceOp insertGetDeviceOp(OpBuilder &builder,
                                 meshOffset[1]));
 }
 
-// remove grid?
 void createMainFunc(MLIRContext *context, OpBuilder &builder,
-                    ttcore::GridAttr grid, ttcore::DeviceAttr deviceAttr) {
-  // DataType::BFloat16
-#if 1
+                    ttcore::DeviceAttr deviceAttr, ttnn::ProgramAttr program) {
   ttcore::TileType aElementType = ttcore::TileType::get(
       context, ttcore::TileType::getDefaultShape(),
       ttcore::elementTypeToDataType(builder.getBF16Type()));
 
-#else
-  Type aElementType = ttcore::dataTypeToElementType(
-      context, ttcore::DataType::BFloat16); // TODO: actually float16 but maybe
-                                            // it doesn't matter? or we can
-                                            // change the kernel type
-#endif
   auto getLayoutForShape = [&](ArrayRef<int64_t> shape) {
     return ttnn::TTNNLayoutAttr::get(
         context, shape, aElementType, ttnn::BufferType::DRAM,
@@ -360,9 +356,12 @@ void createMainFunc(MLIRContext *context, OpBuilder &builder,
   auto bLayout = getLayoutForShape({K, N});
   auto cLayout = getLayoutForShape({M, N});
 
-  auto aType = RankedTensorType::get({M, K}, aElementType.getElementType(), aLayout);
-  auto bType = RankedTensorType::get({K, N}, aElementType.getElementType(), bLayout);
-  auto cType = RankedTensorType::get({M, N}, aElementType.getElementType(), cLayout);
+  auto aType =
+      RankedTensorType::get({M, K}, aElementType.getElementType(), aLayout);
+  auto bType =
+      RankedTensorType::get({K, N}, aElementType.getElementType(), bLayout);
+  auto cType =
+      RankedTensorType::get({M, N}, aElementType.getElementType(), cLayout);
   llvm::errs() << "cType = " << cType << "\n";
 
   auto funcType = builder.getFunctionType({aType, bType}, {cType});
@@ -392,6 +391,12 @@ void createMainFunc(MLIRContext *context, OpBuilder &builder,
   ios.push_back(entryBlock->getArgument(0));
   ios.push_back(entryBlock->getArgument(1));
   ios.push_back(cTensor);
+
+  ttnn::GenericOp::create(builder, builder.getUnknownLoc(), ios, program,
+                          ttnn::MemoryConfigAttr());
+
+  ttnn::DeallocateOp::create(builder, builder.getUnknownLoc(), ios[0]);
+  ttnn::DeallocateOp::create(builder, builder.getUnknownLoc(), ios[1]);
 
   func::ReturnOp::create(builder, builder.getUnknownLoc(), ValueRange{cTensor});
 }
@@ -441,12 +446,10 @@ struct CreateTTNNGenericOp
         context, kernelDescriptors, cbDescriptors, semaphoreDescriptors);
     llvm::errs() << "Program: " << program << "\n";
 
-    // need to construct a function to house the generic that haas some inputs,
-    // I think
     auto deviceOps = llvm::to_vector(m.getOps<ttcore::DeviceOp>());
     assert(deviceOps.size() == 1 && "expected only one device op");
     builder.setInsertionPointAfter(deviceOps.front());
-    createMainFunc(context, builder, grid, device);
+    createMainFunc(context, builder, device, program);
   }
 };
 
