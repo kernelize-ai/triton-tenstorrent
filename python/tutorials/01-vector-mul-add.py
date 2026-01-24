@@ -67,7 +67,6 @@ def muladd(x, y, z):
     output = triton.runtime.driver.active.get_empty_device_buffer(x.size, x.dtype)
     #assert x.device == DEVICE and y.device == DEVICE and output.device == DEVICE
     n_elements = output.numel()
-    n_cores = 130
     BLOCK_SIZE = 1024
     # The SPMD launch grid denotes the number of kernel instances that run in parallel.
     # It is analogous to CUDA launch grids. It can be either Tuple[int], or Callable(metaparameters) -> Tuple[int].
@@ -136,13 +135,15 @@ def benchmark(size, provider):
     print(f"benchmark: {size}")
     x = torch.rand(size, device=DEVICE, dtype=torch.float32)
     y = torch.rand(size, device=DEVICE, dtype=torch.float32)
+    z = torch.rand(size, device=DEVICE, dtype=torch.float32)
     dev_x = triton.runtime.driver.active.get_device_buffer(x)
     dev_y = triton.runtime.driver.active.get_device_buffer(y)
+    dev_z = triton.runtime.driver.active.get_device_buffer(z)
     quantiles = [0.5, 0.2, 0.8]
     if provider == 'torch':
-        ms, min_ms, max_ms = triton.testing.do_bench(lambda: x * y, quantiles=quantiles)
+        ms, min_ms, max_ms = triton.testing.do_bench(lambda: x * y + z, quantiles=quantiles)
     if provider == 'triton':
-        ms, min_ms, max_ms = triton.testing.do_bench(lambda: mul(dev_x, dev_y), quantiles=quantiles)
+        ms, min_ms, max_ms = triton.testing.do_bench(lambda: muladd(dev_x, dev_y, dev_z), quantiles=quantiles)
     gbps = lambda ms: 3 * x.numel() * x.element_size() * 1e-9 / (ms * 1e-3)
     return gbps(ms), gbps(max_ms), gbps(min_ms)
 

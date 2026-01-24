@@ -1,3 +1,4 @@
+#include "npu/include/Dialect/TritonTenstorrent/IR/Dialect.h"
 #include "npu/include/TritonNPUToTenstorrent/Passes.h"
 
 #include "mlir/Analysis/SliceAnalysis.h"
@@ -15,7 +16,6 @@
 #include "Utility.h"
 
 #include "npu/include/Dialect/TritonTenstorrent/IR/Attributes.h"
-#include "npu/include/Dialect/TritonTenstorrent/IR/Dialect.h"
 #include "npu/include/Dialect/TritonTenstorrent/Transforms/Utility.h"
 
 #include "cpu/include/Dialect/TritonCPU/IR/Dialect.h" // BlockIndexOps from MakePersistentKernel
