@@ -88,34 +88,32 @@ static SmallVector<ttnn::CoreRuntimeArgsAttr>
 populateBlockStartEndArgs(Builder &b,
                           const ttnn::CoreRangeSetAttr &coreRangeSet) {
   MLIRContext *ctx = b.getContext();
-
   auto coreRanges = coreRangeSet.getCoreRanges();
-  assert(coreRanges.size() == 1 && "expected exactly one core range");
-
-  auto coreRange = coreRanges[0];
-  auto start = coreRange.getStartCoord();
-  assert(start.getX() == 0 && start.getY() == 0 &&
-         "expected start coordinate to be (0,0)");
-
-  unsigned rows = coreRange.getEndCoord().getX();
-  unsigned cols = coreRange.getEndCoord().getY();
 
   SmallVector<ttnn::CoreRuntimeArgsAttr> perCore;
-  perCore.reserve(rows * cols);
+  for (auto coreRange : coreRanges) {
+    auto start = coreRange.getStartCoord();
+    auto end = coreRange.getEndCoord();
 
-  for (unsigned r = 0; r < rows; ++r) {
-    for (unsigned c = 0; c < cols; ++c) {
-      auto coord = ttnn::CoreCoordAttr::get(ctx, r, c);
+    unsigned rows = end.getX() - start.getX() + 1;
+    unsigned cols = end.getY() - start.getY() + 1;
 
-      uint32_t id = r * cols + c;
-      Attribute blockStartAttr = b.getI32IntegerAttr(id);
-      Attribute blockEndAttr = b.getI32IntegerAttr(id + 1);
-      auto rt = ttnn::CoreRuntimeArgsAttr::get(
-          ctx, coord, ArrayRef<mlir::Attribute>{blockStartAttr, blockEndAttr});
-      perCore.push_back(rt);
+    perCore.reserve(perCore.size() + rows * cols);
+
+    for (unsigned r = start.getX(); r <= end.getX(); ++r) {
+      for (unsigned c = start.getY(); c <= end.getY(); ++c) {
+        auto coord = ttnn::CoreCoordAttr::get(ctx, r, c);
+
+        uint32_t id = r * cols + c;
+        Attribute blockStartAttr = b.getI32IntegerAttr(id);
+        Attribute blockEndAttr = b.getI32IntegerAttr(id + 1);
+        auto rt = ttnn::CoreRuntimeArgsAttr::get(
+            ctx, coord,
+            ArrayRef<mlir::Attribute>{blockStartAttr, blockEndAttr});
+        perCore.push_back(rt);
+      }
     }
   }
-
   return perCore;
 }
 
@@ -420,12 +418,20 @@ struct CreateTTNNGenericOp
     assert(grid.getRank() == 2 && "expected rank 2 device grid");
     llvm::errs() << "grid: " << grid << "\n";
 
-    ttnn::CoreRangeSetAttr coreRangeSet = ttnn::CoreRangeSetAttr::get(
-        context, ttnn::CoreRangeAttr::get(
-                     context, ttnn::CoreCoordAttr::get(context, 0, 0),
-                     ttnn::CoreCoordAttr::get(context, grid.getShape()[0],
-                                              grid.getShape()[1])));
+    // Distributing 16 output tiles across 16 cores: 16 cores ({[(x=0,y=0) -
+    // (x=1,y=6)], [(x=2,y=0) - (x=2,y=1)]}) x 1 tiles/core + 0 cores ({}) x 0
+    // tiles/core
+    auto getCoreCoord = [&](int x, int y) {
+      return ttnn::CoreCoordAttr::get(context, x, y);
+    };
 
+    auto getCoreRange = [&](int x0, int y0, int x1, int y1) {
+      return ttnn::CoreRangeAttr::get(context, getCoreCoord(x0, y0),
+                                      getCoreCoord(x1, y1));
+    };
+
+    ttnn::CoreRangeSetAttr coreRangeSet = ttnn::CoreRangeSetAttr::get(
+        context, {getCoreRange(0, 0, 1, 6), getCoreRange(2, 0, 2, 1)});
     auto kernels = Kernels(m);
     OpBuilder builder(m);
 
