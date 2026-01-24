@@ -338,7 +338,7 @@ void createMainFunc(MLIRContext *context, OpBuilder &builder,
                     ttcore::GridAttr grid, ttcore::DeviceAttr deviceAttr) {
   // DataType::BFloat16
 #if 1
-  Type aElementType = ttcore::TileType::get(
+  ttcore::TileType aElementType = ttcore::TileType::get(
       context, ttcore::TileType::getDefaultShape(),
       ttcore::elementTypeToDataType(builder.getBF16Type()));
 
@@ -360,12 +360,12 @@ void createMainFunc(MLIRContext *context, OpBuilder &builder,
   auto bLayout = getLayoutForShape({K, N});
   auto cLayout = getLayoutForShape({M, N});
 
-  auto aType = RankedTensorType::get({M, K}, aElementType, aLayout);
-  auto bType = RankedTensorType::get({K, N}, aElementType, bLayout);
-  auto cType = RankedTensorType::get({M, N}, aElementType, cLayout);
+  auto aType = RankedTensorType::get({M, K}, aElementType.getElementType(), aLayout);
+  auto bType = RankedTensorType::get({K, N}, aElementType.getElementType(), bLayout);
+  auto cType = RankedTensorType::get({M, N}, aElementType.getElementType(), cLayout);
   llvm::errs() << "cType = " << cType << "\n";
 
-  auto funcType = builder.getFunctionType({aType, bType}, {/*cType*/});
+  auto funcType = builder.getFunctionType({aType, bType}, {cType});
   auto mainFunc =
       builder.create<func::FuncOp>(builder.getUnknownLoc(), "main", funcType);
   mainFunc.setPublic(); // does this do anything?
