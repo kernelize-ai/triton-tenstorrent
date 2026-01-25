@@ -3,6 +3,7 @@
 #include "mlir/Transforms/DialectConversion.h"
 
 #include "npu/include/Dialect/TritonTenstorrent/IR/Dialect.h"
+#include "npu/include/Dialect/TritonTenstorrent/Transforms/Utility.h"
 
 #include "ttmlir/Dialect/TTKernel/IR/TTKernel.h"
 #include "ttmlir/Dialect/TTKernel/IR/TTKernelOps.h"
@@ -25,16 +26,30 @@ struct ConvertBinaryComputeOp
   matchAndRewrite(npu::tt::BinaryComputeOp op, OpAdaptor adaptor,
                   ConversionPatternRewriter &rewriter) const override {
     Location loc = op.getLoc();
+    auto lhsReg = lookupRegisterIndex(op.getLhs());
+    auto rhsReg = lookupRegisterIndex(op.getRhs());
+    auto destReg = lookupRegisterIndex(op->getResult(0));
+    Value lhs = arith::createIndexConstant(loc, rewriter, lhsReg);
+    Value rhs = arith::createIndexConstant(loc, rewriter, rhsReg);
+    Value dest = arith::createIndexConstant(loc, rewriter, destReg);
 
-    if (op.getOpcode().str() != "arith.addf")
+    std::string opcode = op.getOpcode().str();
+    if (opcode == "arith.addf") {
+      ttkernel::AddBinaryTilesInitOp::create(rewriter, loc);
+      ttkernel::AddBinaryTilesOp::create(rewriter, loc, lhs, rhs, dest);
+    } else if (opcode == "arith.subf") {
+      ttkernel::SubBinaryTilesInitOp::create(rewriter, loc);
+      ttkernel::SubBinaryTilesOp::create(rewriter, loc, lhs, rhs, dest);
+    } else if (opcode == "arith.mulf") {
+      ttkernel::MulBinaryTilesInitOp::create(rewriter, loc);
+      ttkernel::MulBinaryTilesOp::create(rewriter, loc, lhs, rhs, dest);
+    } else if (opcode == "arith.divf") {
+      ttkernel::DivBinaryTilesInitOp::create(rewriter, loc);
+      ttkernel::DivBinaryTilesOp::create(rewriter, loc, lhs, rhs, dest);
+    } else {
+      // LDBG("Unsupported opcode: " << opcode.c_str());
       return failure();
-
-    ttkernel::AddBinaryTilesInitOp::create(rewriter, loc);
-    Value lhsIndex = arith::createIndexConstant(loc, rewriter, 0);
-    Value rhsIndex = arith::createIndexConstant(loc, rewriter, 1);
-    Value destIndex = arith::createIndexConstant(loc, rewriter, 2);
-    ttkernel::AddBinaryTilesOp::create(rewriter, loc, lhsIndex, rhsIndex,
-                                       destIndex);
+    }
 
     rewriter.eraseOp(op);
     return success();

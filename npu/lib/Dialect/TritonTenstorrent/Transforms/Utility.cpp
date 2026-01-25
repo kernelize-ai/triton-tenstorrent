@@ -1,3 +1,5 @@
+#include "npu/include/Dialect/TritonTenstorrent/IR/Dialect.h"
+
 #include "npu/include/Dialect/TritonTenstorrent/Transforms/Utility.h"
 
 namespace mlir {
@@ -229,6 +231,62 @@ TensorDescriptorUnpacked::TensorDescriptorUnpacked(TensorDescType type,
   shape = pack.slice(1, rank);
   strides = pack.slice(1 + rank, rank);
   paddingOption = pack[1 + 2 * rank];
+}
+
+int64_t lookupRegisterIndex(Value value) {
+  if (auto op = value.getDefiningOp()) {
+    auto dialect =
+        op->getContext()->getLoadedDialect<tt::TritonTenstorrentDialect>();
+    auto helper = dialect->getAllocOffsetAttrHelper();
+    if (helper.isAttrPresent(op)) {
+      return helper.getAttr(op).getInt();
+    }
+  } else if (auto blockArg = dyn_cast<BlockArgument>(value)) {
+    auto parentOp = blockArg.getOwner()->getParentOp();
+    if (auto loopOp = dyn_cast<LoopLikeOpInterface>(parentOp)) {
+      if (auto init = loopOp.getTiedLoopInit(blockArg)) {
+        return lookupRegisterIndex(init->get());
+      }
+    }
+  }
+  return -1;
+}
+
+static size_t cdiv(size_t a, size_t b) { return (a + b - 1) / b; }
+
+/// Computes the number of tiles required for a given type.
+int64_t getNumTiles(Type type) {
+  if (auto rankedType = dyn_cast<RankedTensorType>(type)) {
+    auto shape = rankedType.getShape();
+    if (shape.size() == 1) {
+      // 1D tensor, use 1024 size tiles
+      return cdiv(shape[0], kTileDimSize * kTileDimSize);
+    } else if (shape.size() == 2) {
+      // 2D tensor, use 32x32 size tiles
+      return cdiv(shape[0], kTileDimSize) * cdiv(shape[1], kTileDimSize);
+    } else {
+      assert(false && "Unsupported tensor rank");
+    }
+  }
+  return 0;
+}
+
+SmallVector<int64_t, 2> convertShapeToTileShape(ArrayRef<int64_t> shape) {
+  if (shape.size() == 1) {
+    return SmallVector<int64_t, 2>{shape[0] / (kTileDimSize * kTileDimSize)};
+  }
+  SmallVector<int64_t, 2> tileShape;
+  tileShape.reserve(shape.size());
+  for (unsigned i = 0; i < shape.size(); ++i) {
+    if (shape[i] == 1) {
+      tileShape.push_back(1);
+      continue;
+    }
+    assert(shape[i] % kTileDimSize == 0 &&
+           "expecting shape dimensions to be multiple of 32");
+    tileShape.push_back(shape[i] / kTileDimSize);
+  }
+  return tileShape;
 }
 
 } // namespace npu

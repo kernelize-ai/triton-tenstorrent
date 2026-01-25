@@ -58,14 +58,12 @@ def TritonTenstorrentConvertTensorDescToLoadStore : Pass<"tritontenstorrent-conv
     let dependentDialects = ["mlir::triton::TritonDialect"];
 }
 
-def TritonTenstorrentPropagateTileEncoding : Pass<"tritontenstorrent-propagate-tile-encoding", "mlir::ModuleOp"> {
-    let summary = "Propagate tile encoding from compute ops to local loads";
+def TritonTenstorrentRegAlloc : Pass<"tritontenstorrent-register-allocation", "mlir::ModuleOp"> {
+    let summary = "Allocate registers for compute ops inputs and results";
 
     let description = [{
-        Local loads from SRAM to registers need to know which tile register index to load into. This pass propagates the
-        register index information from the compute ops (which are users of the tile registers and dicatate placement based
-        on use pattern) to local loads, which generically copy data from SRAM into registers. The register index is stored
-        in the RegisterEncodingAttr attached to the tensor type.
+        Allocate registers for compute ops. Apply a `alloc_offset` and `alloc_size` attribute to ops that write to the register buffers
+        based on lifetime analysis.
     }];
 
     let dependentDialects = ["mlir::triton::npu::tt::TritonTenstorrentDialect",

@@ -35,8 +35,7 @@ struct RewriteBinaryComputeOp : OpRewritePattern<OpType> {
     if (!llvm::all_of(op->getOperands(), [](Value val) {
           // TODO: is isa<LoadOp> a strong enough condition by itself?
           // probably not if we have convert layout ops
-          return isa<RankedTensorType>(val.getType()) &&
-                 isa<LoadOp>(val.getDefiningOp());
+          return isa<RankedTensorType>(val.getType());
         }))
       return failure();
 
@@ -68,6 +67,9 @@ public:
     RewritePatternSet patterns(context);
 
     patterns.add<RewriteBinaryComputeOp<arith::AddFOp>>(context);
+    patterns.add<RewriteBinaryComputeOp<arith::SubFOp>>(context);
+    patterns.add<RewriteBinaryComputeOp<arith::MulFOp>>(context);
+    patterns.add<RewriteBinaryComputeOp<arith::DivFOp>>(context);
 
     if (failed(applyPatternsGreedily(getOperation(), std::move(patterns))))
       signalPassFailure();
