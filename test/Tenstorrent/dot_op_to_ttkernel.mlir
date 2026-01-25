@@ -260,10 +260,10 @@ module attributes {"ttg.num-ctas" = 1 : i32, "ttg.num-warps" = 1 : i32, ttg.targ
           // CHECK: ttkernel.matmul_tiles(%[[A_CB]], %[[B_CB]], %[[c0_i32]], %[[c0_i32]], %[[c0]])
         %a_6 = ttg.local_load %a : !ttg.memdesc<32x32xf16, #shared, #smem, mutable> -> tensor<32x32xf16, #ttg.dot_op<{opIdx = 0, parent = #blocked}>>
         %b_7 = ttg.local_load %b : !ttg.memdesc<32x32xf16, #shared, #smem, mutable> -> tensor<32x32xf16, #ttg.dot_op<{opIdx = 1, parent = #blocked}>>
-        %accumulator_8 = tt.dot %a_6, %b_7, %arg10 : tensor<32x32xf16, #ttg.dot_op<{opIdx = 0, parent = #blocked}>> * tensor<32x32xf16, #ttg.dot_op<{opIdx = 1, parent = #blocked}>> -> tensor<32x32xf32, #blocked>
+        %accumulator_8 = tt.dot %a_6, %b_7, %arg10 {triton_tenstorrent.alloc_offset = 0 : i32, triton_tenstorrent.alloc_size = 1 : i32} : tensor<32x32xf16, #ttg.dot_op<{opIdx = 0, parent = #blocked}>> * tensor<32x32xf16, #ttg.dot_op<{opIdx = 1, parent = #blocked}>> -> tensor<32x32xf32, #blocked>
         scf.yield %accumulator_8 : tensor<32x32xf32, #blocked>
         }
-        %c = arith.truncf %accumulator : tensor<32x32xf32, #blocked> to tensor<32x32xf16, #blocked>
+        %c = arith.truncf %accumulator {triton_tenstorrent.alloc_offset = 0 : i32, triton_tenstorrent.alloc_size = 1 : i32} : tensor<32x32xf32, #blocked> to tensor<32x32xf16, #blocked>
         ttg.local_store %c, %0 : tensor<32x32xf16, #blocked> -> !ttg.memdesc<32x32xf16, #shared, #smem, mutable>
         // CHECK-DAG: ttkernel.cb_pop_front(%[[A_CB]], %[[c1_i32]])
         // CHECK-DAG: ttkernel.cb_pop_front(%[[B_CB]], %[[c1_i32]])
@@ -350,30 +350,30 @@ tt.func public @matmul_kernel__writer(%a_ptr: !tt.ptr<f16> {tt.divisibility = 8 
     // CHECK: %[[ROW_OFFSET_ELEMS:.*]] = arith.muli %[[GROUP_ROW_INDEX]], %[[c64_i32]] : i32
 
     %offs_am = arith.muli %pid_m_4, %c32_i32 : i32
-    %offs_am_5 = tt.make_range {end = 32 : i32, start = 0 : i32} : tensor<32xi32, #ttg.slice<{dim = 1, parent = #triton_tenstorrent.register_encoding<{index = 0, parent = #blocked2}>}>>
-    %offs_am_6 = tt.make_range {end = 32 : i32, start = 0 : i32} : tensor<32xi32, #ttg.slice<{dim = 0, parent = #triton_tenstorrent.register_encoding<{index = 0, parent = #blocked2}>}>>
-    %offs_am_7 = tt.splat %offs_am : i32 -> tensor<32xi32, #ttg.slice<{dim = 1, parent = #triton_tenstorrent.register_encoding<{index = 0, parent = #blocked2}>}>>
-    %offs_am_8 = arith.addi %offs_am_7, %offs_am_5 : tensor<32xi32, #ttg.slice<{dim = 1, parent = #triton_tenstorrent.register_encoding<{index = 0, parent = #blocked2}>}>>
+    %offs_am_5 = tt.make_range {end = 32 : i32, start = 0 : i32} : tensor<32xi32, #ttg.slice<{dim = 1, parent = #blocked2}>>
+    %offs_am_6 = tt.make_range {end = 32 : i32, start = 0 : i32} : tensor<32xi32, #ttg.slice<{dim = 0, parent = #blocked2}>>
+    %offs_am_7 = tt.splat %offs_am : i32 -> tensor<32xi32, #ttg.slice<{dim = 1, parent = #blocked2}>>
+    %offs_am_8 = arith.addi %offs_am_7, %offs_am_5 : tensor<32xi32, #ttg.slice<{dim = 1, parent = #blocked2}>>
     %offs_bn = arith.muli %pid_n, %c32_i32 : i32
-    %offs_bn_9 = tt.splat %offs_bn : i32 -> tensor<32xi32, #ttg.slice<{dim = 0, parent = #triton_tenstorrent.register_encoding<{index = 0, parent = #blocked2}>}>>
-    %offs_bn_10 = arith.addi %offs_bn_9, %offs_am_6 : tensor<32xi32, #ttg.slice<{dim = 0, parent = #triton_tenstorrent.register_encoding<{index = 0, parent = #blocked2}>}>>
-    %c_ptrs = tt.expand_dims %offs_am_8 {axis = 1 : i32} : tensor<32xi32, #ttg.slice<{dim = 1, parent = #triton_tenstorrent.register_encoding<{index = 0, parent = #blocked2}>}>> -> tensor<32x1xi32, #triton_tenstorrent.register_encoding<{index = 0, parent = #blocked2}>>
-    %c_ptrs_11 = tt.splat %stride_cm : i32 -> tensor<32x1xi32, #triton_tenstorrent.register_encoding<{index = 0, parent = #blocked2}>>
-    %c_ptrs_12 = arith.muli %c_ptrs_11, %c_ptrs : tensor<32x1xi32, #triton_tenstorrent.register_encoding<{index = 0, parent = #blocked2}>>
-    %c_ptrs_13 = tt.splat %c_ptr : !tt.ptr<f16> -> tensor<32x1x!tt.ptr<f16>, #triton_tenstorrent.register_encoding<{index = 0, parent = #blocked2}>>
-    %c_ptrs_14 = tt.addptr %c_ptrs_13, %c_ptrs_12 : tensor<32x1x!tt.ptr<f16>, #triton_tenstorrent.register_encoding<{index = 0, parent = #blocked2}>>, tensor<32x1xi32, #triton_tenstorrent.register_encoding<{index = 0, parent = #blocked2}>>
-    %c_ptrs_15 = tt.expand_dims %offs_bn_10 {axis = 0 : i32} : tensor<32xi32, #ttg.slice<{dim = 0, parent = #triton_tenstorrent.register_encoding<{index = 0, parent = #blocked2}>}>> -> tensor<1x32xi32, #triton_tenstorrent.register_encoding<{index = 0, parent = #blocked2}>>
-    %c_ptrs_16 = tt.broadcast %c_ptrs_14 : tensor<32x1x!tt.ptr<f16>, #triton_tenstorrent.register_encoding<{index = 0, parent = #blocked2}>> -> tensor<32x32x!tt.ptr<f16>, #triton_tenstorrent.register_encoding<{index = 0, parent = #blocked2}>>
-    %c_ptrs_17 = tt.broadcast %c_ptrs_15 : tensor<1x32xi32, #triton_tenstorrent.register_encoding<{index = 0, parent = #blocked2}>> -> tensor<32x32xi32, #triton_tenstorrent.register_encoding<{index = 0, parent = #blocked2}>>
-    %c_ptrs_18 = tt.addptr %c_ptrs_16, %c_ptrs_17 : tensor<32x32x!tt.ptr<f16>, #triton_tenstorrent.register_encoding<{index = 0, parent = #blocked2}>>, tensor<32x32xi32, #triton_tenstorrent.register_encoding<{index = 0, parent = #blocked2}>>
-    %c_mask = tt.splat %M : i32 -> tensor<32x1xi32, #triton_tenstorrent.register_encoding<{index = 0, parent = #blocked2}>>
-    %c_mask_19 = arith.cmpi slt, %c_ptrs, %c_mask : tensor<32x1xi32, #triton_tenstorrent.register_encoding<{index = 0, parent = #blocked2}>>
-    %c_mask_20 = tt.splat %N : i32 -> tensor<1x32xi32, #triton_tenstorrent.register_encoding<{index = 0, parent = #blocked2}>>
-    %c_mask_21 = arith.cmpi slt, %c_ptrs_15, %c_mask_20 : tensor<1x32xi32, #triton_tenstorrent.register_encoding<{index = 0, parent = #blocked2}>>
-    %c_mask_22 = tt.broadcast %c_mask_19 : tensor<32x1xi1, #triton_tenstorrent.register_encoding<{index = 0, parent = #blocked2}>> -> tensor<32x32xi1, #triton_tenstorrent.register_encoding<{index = 0, parent = #blocked2}>>
-    %c_mask_23 = tt.broadcast %c_mask_21 : tensor<1x32xi1, #triton_tenstorrent.register_encoding<{index = 0, parent = #blocked2}>> -> tensor<32x32xi1, #triton_tenstorrent.register_encoding<{index = 0, parent = #blocked2}>>
-    %c_mask_24 = arith.andi %c_mask_22, %c_mask_23 : tensor<32x32xi1, #triton_tenstorrent.register_encoding<{index = 0, parent = #blocked2}>>
-    %6 = ttg.local_load %0 : !ttg.memdesc<32x32xf16, #shared, #smem, mutable> -> tensor<32x32xf16, #triton_tenstorrent.register_encoding<{index = 0, parent = #blocked2}>>
+    %offs_bn_9 = tt.splat %offs_bn : i32 -> tensor<32xi32, #ttg.slice<{dim = 0, parent = #blocked2}>>
+    %offs_bn_10 = arith.addi %offs_bn_9, %offs_am_6 : tensor<32xi32, #ttg.slice<{dim = 0, parent = #blocked2}>>
+    %c_ptrs = tt.expand_dims %offs_am_8 {axis = 1 : i32} : tensor<32xi32, #ttg.slice<{dim = 1, parent = #blocked2}>> -> tensor<32x1xi32, #blocked2>
+    %c_ptrs_11 = tt.splat %stride_cm : i32 -> tensor<32x1xi32, #blocked2>
+    %c_ptrs_12 = arith.muli %c_ptrs_11, %c_ptrs : tensor<32x1xi32, #blocked2>
+    %c_ptrs_13 = tt.splat %c_ptr : !tt.ptr<f16> -> tensor<32x1x!tt.ptr<f16>, #blocked2>
+    %c_ptrs_14 = tt.addptr %c_ptrs_13, %c_ptrs_12 : tensor<32x1x!tt.ptr<f16>, #blocked2>, tensor<32x1xi32, #blocked2>
+    %c_ptrs_15 = tt.expand_dims %offs_bn_10 {axis = 0 : i32} : tensor<32xi32, #ttg.slice<{dim = 0, parent = #blocked2}>> -> tensor<1x32xi32, #blocked2>
+    %c_ptrs_16 = tt.broadcast %c_ptrs_14 : tensor<32x1x!tt.ptr<f16>, #blocked2> -> tensor<32x32x!tt.ptr<f16>, #blocked2>
+    %c_ptrs_17 = tt.broadcast %c_ptrs_15 : tensor<1x32xi32, #blocked2> -> tensor<32x32xi32, #blocked2>
+    %c_ptrs_18 = tt.addptr %c_ptrs_16, %c_ptrs_17 : tensor<32x32x!tt.ptr<f16>, #blocked2>, tensor<32x32xi32, #blocked2>
+    %c_mask = tt.splat %M : i32 -> tensor<32x1xi32, #blocked2>
+    %c_mask_19 = arith.cmpi slt, %c_ptrs, %c_mask : tensor<32x1xi32, #blocked2>
+    %c_mask_20 = tt.splat %N : i32 -> tensor<1x32xi32, #blocked2>
+    %c_mask_21 = arith.cmpi slt, %c_ptrs_15, %c_mask_20 : tensor<1x32xi32, #blocked2>
+    %c_mask_22 = tt.broadcast %c_mask_19 : tensor<32x1xi1, #blocked2> -> tensor<32x32xi1, #blocked2>
+    %c_mask_23 = tt.broadcast %c_mask_21 : tensor<1x32xi1, #blocked2> -> tensor<32x32xi1, #blocked2>
+    %c_mask_24 = arith.andi %c_mask_22, %c_mask_23 : tensor<32x32xi1, #blocked2>
+    %6 = ttg.local_load %0 : !ttg.memdesc<32x32xf16, #shared, #smem, mutable> -> tensor<32x32xf16, #blocked2>
     // CHECK: ttkernel.cb_wait_front(%[[C_CB]], %[[c1_i32]])
     // CHECK: %[[NOC_TILE_INDEX:.*]] = arith.divui %[[ROW_OFFSET_ELEMS]], %[[TILE_SIZE]]
     // CHECK: %[[READ_PTR:.*]] = ttkernel.get_read_ptr(%[[C_CB]])
@@ -381,7 +381,7 @@ tt.func public @matmul_kernel__writer(%a_ptr: !tt.ptr<f16> {tt.divisibility = 8 
     // CHECK: ttkernel.noc_async_write(%[[READ_PTR]], %[[NOC_ADDR]], %[[TILE_SIZE]])
     // CHECK: ttkernel.noc_async_write_barrier()
     // CHECK: ttkernel.cb_pop_front(%[[C_CB]], %[[c1_i32]])
-    tt.store %c_ptrs_18, %6, %c_mask_24 : tensor<32x32x!tt.ptr<f16>, #triton_tenstorrent.register_encoding<{index = 0, parent = #blocked2}>>
+    tt.store %c_ptrs_18, %6, %c_mask_24 : tensor<32x32x!tt.ptr<f16>, #blocked2>
     // CHECK: return
     tt.return
   }
@@ -420,10 +420,10 @@ module attributes {"ttg.num-ctas" = 1 : i32, "ttg.num-warps" = 1 : i32, ttg.targ
       %accumulator = scf.for %accumulator_1 = %c0_i32 to %k_tiles_0 step %c1_i32 iter_args(%arg35 = %cst) -> (tensor<32x32xf32, #blocked>)  : i32 {
       %a_2 = ttg.local_load %a : !ttg.memdesc<32x32xf16, #shared, #smem, mutable> -> tensor<32x32xf16, #ttg.dot_op<{opIdx = 0, parent = #blocked}>>
       %b_3 = ttg.local_load %b : !ttg.memdesc<32x32xf16, #shared, #smem, mutable> -> tensor<32x32xf16, #ttg.dot_op<{opIdx = 1, parent = #blocked}>>
-      %accumulator_4 = tt.dot %a_2, %b_3, %arg35 : tensor<32x32xf16, #ttg.dot_op<{opIdx = 0, parent = #blocked}>> * tensor<32x32xf16, #ttg.dot_op<{opIdx = 1, parent = #blocked}>> -> tensor<32x32xf32, #blocked>
+      %accumulator_4 = tt.dot %a_2, %b_3, %arg35 {triton_tenstorrent.alloc_offset = 2 : i32, triton_tenstorrent.alloc_size = 1 : i32} : tensor<32x32xf16, #ttg.dot_op<{opIdx = 0, parent = #blocked}>> * tensor<32x32xf16, #ttg.dot_op<{opIdx = 1, parent = #blocked}>> -> tensor<32x32xf32, #blocked>
       scf.yield %accumulator_4 : tensor<32x32xf32, #blocked>
       }
-      %c = arith.truncf %accumulator : tensor<32x32xf32, #blocked> to tensor<32x32xf16, #blocked>
+      %c = arith.truncf %accumulator {triton_tenstorrent.alloc_offset = 2 : i32, triton_tenstorrent.alloc_size = 1 : i32} : tensor<32x32xf32, #blocked> to tensor<32x32xf16, #blocked>
       ttg.local_store %c, %0 : tensor<32x32xf16, #blocked> -> !ttg.memdesc<32x32xf16, #shared, #smem, mutable>
     }
     // CHECK: }
@@ -441,8 +441,8 @@ module attributes {"ttg.num-ctas" = 1 : i32, "ttg.num-warps" = 1 : i32, ttg.targ
 module attributes {"ttg.num-ctas" = 1 : i32, "ttg.num-warps" = 1 : i32, ttg.target = "cpu", "ttg.threads-per-warp" = 1 : i32} {
   // CHECK: func.func public @matmul_kernel_tma__writer()
   tt.func public @matmul_kernel_tma__writer(%arg0: !tt.ptr<f16>, %arg1: i32, %arg2: i32, %arg3: i32, %arg4: i32, %arg5: i1, %arg6: i32, %arg7: i32, %arg8: i64, %arg9: i64, %arg10: !tt.ptr<f16>, %arg11: i32, %arg12: i32, %arg13: i32, %arg14: i32, %arg15: i1, %arg16: i32, %arg17: i32, %arg18: i64, %arg19: i64, %arg20: !tt.ptr<f16>, %arg21: i32, %arg22: i32, %arg23: i32, %arg24: i32, %arg25: i1, %arg26: i32, %arg27: i32, %arg28: i64, %arg29: i64, %arg30: i32 {tt.divisibility = 8 : i32}, %arg31: i32 {tt.divisibility = 8 : i32}, %arg32: i32 {tt.divisibility = 8 : i32}) attributes {noinline = false} {
-    %cst = arith.constant dense<32> : tensor<1x32xi32, #triton_tenstorrent.register_encoding<{index = 0, parent = #blocked1}>>
-    %cst_0 = arith.constant dense<32> : tensor<32x1xi32, #triton_tenstorrent.register_encoding<{index = 0, parent = #blocked1}>>
+    %cst = arith.constant dense<32> : tensor<1x32xi32, #blocked1>
+    %cst_0 = arith.constant dense<32> : tensor<32x1xi32, #blocked1>
     %c31_i32 = arith.constant 31 : i32
     %c32_i32 = arith.constant 32 : i32
     %c8_i32 = arith.constant 8 : i32
@@ -456,10 +456,10 @@ module attributes {"ttg.num-ctas" = 1 : i32, "ttg.num-warps" = 1 : i32, ttg.targ
     %num_pid_n = arith.addi %arg31, %c31_i32 : i32
     %num_pid_n_2 = arith.divsi %num_pid_n, %c32_i32 : i32
     %num_pid_in_group = arith.muli %num_pid_n_2, %c8_i32 : i32
-    %a = tt.make_range {end = 32 : i32, start = 0 : i32} : tensor<32xi32, #ttg.slice<{dim = 1, parent = #triton_tenstorrent.register_encoding<{index = 0, parent = #blocked1}>}>>
-    %a_3 = tt.make_range {end = 32 : i32, start = 0 : i32} : tensor<32xi32, #ttg.slice<{dim = 0, parent = #triton_tenstorrent.register_encoding<{index = 0, parent = #blocked1}>}>>
+    %a = tt.make_range {end = 32 : i32, start = 0 : i32} : tensor<32xi32, #ttg.slice<{dim = 1, parent = #blocked1}>>
+    %a_3 = tt.make_range {end = 32 : i32, start = 0 : i32} : tensor<32xi32, #ttg.slice<{dim = 0, parent = #blocked1}>>
     %3 = arith.ceildivsi %arg22, %c32_i32 : i32
-    %4 = tt.splat %arg20 : !tt.ptr<f16> -> tensor<32x32x!tt.ptr<f16>, #triton_tenstorrent.register_encoding<{index = 0, parent = #blocked1}>>
+    %4 = tt.splat %arg20 : !tt.ptr<f16> -> tensor<32x32x!tt.ptr<f16>, #blocked1>
 
     // CHECK-DAG: %[[c1_i32:.*]] = arith.constant 1 : i32
     // CHECK-DAG: %[[c0_index:.*]] = arith.constant 0 : index
@@ -481,28 +481,28 @@ module attributes {"ttg.num-ctas" = 1 : i32, "ttg.num-warps" = 1 : i32, ttg.targ
       %pid_n_6 = arith.divsi %pid_n, %group_size_m_4 : i32
       %offs_am = arith.muli %pid_m_5, %c32_i32 : i32
       %offs_bn = arith.muli %pid_n_6, %c32_i32 : i32
-      %a_7 = tt.splat %offs_am : i32 -> tensor<32xi32, #ttg.slice<{dim = 1, parent = #triton_tenstorrent.register_encoding<{index = 0, parent = #blocked1}>}>>
-      %a_8 = arith.addi %a_7, %a : tensor<32xi32, #ttg.slice<{dim = 1, parent = #triton_tenstorrent.register_encoding<{index = 0, parent = #blocked1}>}>>
-      %a_9 = tt.expand_dims %a_8 {axis = 1 : i32} : tensor<32xi32, #ttg.slice<{dim = 1, parent = #triton_tenstorrent.register_encoding<{index = 0, parent = #blocked1}>}>> -> tensor<32x1xi32, #triton_tenstorrent.register_encoding<{index = 0, parent = #blocked1}>>
+      %a_7 = tt.splat %offs_am : i32 -> tensor<32xi32, #ttg.slice<{dim = 1, parent = #blocked1}>>
+      %a_8 = arith.addi %a_7, %a : tensor<32xi32, #ttg.slice<{dim = 1, parent = #blocked1}>>
+      %a_9 = tt.expand_dims %a_8 {axis = 1 : i32} : tensor<32xi32, #ttg.slice<{dim = 1, parent = #blocked1}>> -> tensor<32x1xi32, #blocked1>
       %a_10 = arith.divsi %offs_am, %c32_i32 : i32
-      %a_11 = arith.remui %a_9, %cst_0 : tensor<32x1xi32, #triton_tenstorrent.register_encoding<{index = 0, parent = #blocked1}>>
-      %a_12 = arith.muli %a_11, %cst_0 : tensor<32x1xi32, #triton_tenstorrent.register_encoding<{index = 0, parent = #blocked1}>>
-      %a_13 = tt.broadcast %a_12 : tensor<32x1xi32, #triton_tenstorrent.register_encoding<{index = 0, parent = #blocked1}>> -> tensor<32x32xi32, #triton_tenstorrent.register_encoding<{index = 0, parent = #blocked1}>>
-      %b = tt.splat %offs_bn : i32 -> tensor<32xi32, #ttg.slice<{dim = 0, parent = #triton_tenstorrent.register_encoding<{index = 0, parent = #blocked1}>}>>
-      %b_14 = arith.addi %b, %a_3 : tensor<32xi32, #ttg.slice<{dim = 0, parent = #triton_tenstorrent.register_encoding<{index = 0, parent = #blocked1}>}>>
-      %b_15 = tt.expand_dims %b_14 {axis = 0 : i32} : tensor<32xi32, #ttg.slice<{dim = 0, parent = #triton_tenstorrent.register_encoding<{index = 0, parent = #blocked1}>}>> -> tensor<1x32xi32, #triton_tenstorrent.register_encoding<{index = 0, parent = #blocked1}>>
+      %a_11 = arith.remui %a_9, %cst_0 : tensor<32x1xi32, #blocked1>
+      %a_12 = arith.muli %a_11, %cst_0 : tensor<32x1xi32, #blocked1>
+      %a_13 = tt.broadcast %a_12 : tensor<32x1xi32, #blocked1> -> tensor<32x32xi32, #blocked1>
+      %b = tt.splat %offs_bn : i32 -> tensor<32xi32, #ttg.slice<{dim = 0, parent = #blocked1}>>
+      %b_14 = arith.addi %b, %a_3 : tensor<32xi32, #ttg.slice<{dim = 0, parent = #blocked1}>>
+      %b_15 = tt.expand_dims %b_14 {axis = 0 : i32} : tensor<32xi32, #ttg.slice<{dim = 0, parent = #blocked1}>> -> tensor<1x32xi32, #blocked1>
       %b_16 = arith.divsi %offs_bn, %c32_i32 : i32
-      %b_17 = arith.remui %b_15, %cst : tensor<1x32xi32, #triton_tenstorrent.register_encoding<{index = 0, parent = #blocked1}>>
-      %b_18 = tt.broadcast %b_17 : tensor<1x32xi32, #triton_tenstorrent.register_encoding<{index = 0, parent = #blocked1}>> -> tensor<32x32xi32, #triton_tenstorrent.register_encoding<{index = 0, parent = #blocked1}>>
+      %b_17 = arith.remui %b_15, %cst : tensor<1x32xi32, #blocked1>
+      %b_18 = tt.broadcast %b_17 : tensor<1x32xi32, #blocked1> -> tensor<32x32xi32, #blocked1>
       %6 = arith.muli %a_10, %3 : i32
       %7 = arith.addi %6, %b_16 : i32
       %8 = arith.muli %7, %c1024_i32 : i32
-      %9 = arith.addi %a_13, %b_18 : tensor<32x32xi32, #triton_tenstorrent.register_encoding<{index = 0, parent = #blocked1}>>
-      %10 = tt.splat %8 : i32 -> tensor<32x32xi32, #triton_tenstorrent.register_encoding<{index = 0, parent = #blocked1}>>
-      %11 = arith.addi %10, %9 : tensor<32x32xi32, #triton_tenstorrent.register_encoding<{index = 0, parent = #blocked1}>>
-      %12 = tt.addptr %4, %11 : tensor<32x32x!tt.ptr<f16>, #triton_tenstorrent.register_encoding<{index = 0, parent = #blocked1}>>, tensor<32x32xi32, #triton_tenstorrent.register_encoding<{index = 0, parent = #blocked1}>>
-      %13 = ttg.local_load %0 : !ttg.memdesc<32x32xf16, #shared, #smem, mutable> -> tensor<32x32xf16, #triton_tenstorrent.register_encoding<{index = 0, parent = #blocked1}>>
-      tt.store %12, %13 : tensor<32x32x!tt.ptr<f16>, #triton_tenstorrent.register_encoding<{index = 0, parent = #blocked1}>>
+      %9 = arith.addi %a_13, %b_18 : tensor<32x32xi32, #blocked1>
+      %10 = tt.splat %8 : i32 -> tensor<32x32xi32, #blocked1>
+      %11 = arith.addi %10, %9 : tensor<32x32xi32, #blocked1>
+      %12 = tt.addptr %4, %11 : tensor<32x32x!tt.ptr<f16>, #blocked1>, tensor<32x32xi32, #blocked1>
+      %13 = ttg.local_load %0 : !ttg.memdesc<32x32xf16, #shared, #smem, mutable> -> tensor<32x32xf16, #blocked1>
+      tt.store %12, %13 : tensor<32x32x!tt.ptr<f16>, #blocked1>
     // CHECK: }
     // CHECK: return
     }
