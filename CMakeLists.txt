@@ -76,7 +76,7 @@ if(TRITON_BUILD_PYTHON_MODULE)
   set(TTMLIR_HEADER_SRC_DIR "${TENSTORRENT_MLIR}/build/include")
   set(TTMLIR_HEADER_DST_DIR "${CMAKE_CURRENT_BINARY_DIR}")
   add_custom_target(copy_ttmlir_headers ALL
-     COMMAND ${CMAKE_COMMAND} -E rm -r "${TTMLIR_HEADER_DST_DIR}/ttmlir"
+    COMMAND ${CMAKE_COMMAND} -E rm -rf "${TTMLIR_HEADER_DST_DIR}/ttmlir"
     COMMAND ${CMAKE_COMMAND} -E make_directory "${TTMLIR_HEADER_DST_DIR}"
     COMMAND ${CMAKE_COMMAND} -E copy_directory "${TTMLIR_HEADER_SRC_DIR}" "${TTMLIR_HEADER_DST_DIR}"
     COMMENT "Copying tt-mlir headers to build directory"
