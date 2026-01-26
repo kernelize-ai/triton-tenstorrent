@@ -98,32 +98,23 @@ public:
   }
 
   void insertTileRegsAcquireOps() {
-    // if copy tile init ops are non-empty then we can insert before the first
-    // op. Otherwise, we need to find the block containing pack tile and move to
-    // the start of that block.
-    if (!copyTileInitOps.empty()) {
-      OpBuilder builder(copyTileInitOps.front());
-      ttkernel::TileRegsAcquireOp::create(builder,
-                                          copyTileInitOps.front().getLoc());
-    } else {
-      SmallVector<ttkernel::PackTileOp, 4> packTileOps;
-      funcOp.walk([&](ttkernel::PackTileOp op) { packTileOps.push_back(op); });
-      assert(!packTileOps.empty() && "expecting at least one pack tile op");
-      auto firstPackTileOp = packTileOps.front();
-      Block *parentBlock = firstPackTileOp->getBlock();
-      OpBuilder builder(parentBlock, parentBlock->begin());
-      // put the tile regs acquire ops after any get arg val ops. This seems to
-      // be mostly cosmetic.
-      // Note that GetArgVal ops are per-core parameters (e.g. block start,
-      // block end), which are added during SPMD lowering and so should always
-      // exist
-      auto getArgValOpItr = parentBlock->getOps<ttkernel::GetArgValOp>();
-      if (!getArgValOpItr.empty()) {
-        auto argValOps = llvm::reverse(getArgValOpItr);
-        builder.setInsertionPointAfter(*argValOps.begin());
-      }
-      ttkernel::TileRegsAcquireOp::create(builder, firstPackTileOp->getLoc());
+    SmallVector<ttkernel::PackTileOp, 4> packTileOps;
+    funcOp.walk([&](ttkernel::PackTileOp op) { packTileOps.push_back(op); });
+    assert(!packTileOps.empty() && "expecting at least one pack tile op");
+    auto firstPackTileOp = packTileOps.front();
+    Block *parentBlock = firstPackTileOp->getBlock();
+    OpBuilder builder(parentBlock, parentBlock->begin());
+    // Put the tile regs acquire op after the last GetCompileArgValOp.
+    // GetCompileArgValOps correspond to CBs. TileRegsAcquire is used for
+    // locating SFPU/FPU init ops, which take CBs as input. Putting tile regs
+    // acquire after the last CB guarantees CBs will exist for initialization
+    // ops.
+    auto getArgValOpItr = parentBlock->getOps<ttkernel::GetCompileArgValOp>();
+    if (!getArgValOpItr.empty()) {
+      auto argValOps = llvm::reverse(getArgValOpItr);
+      builder.setInsertionPointAfter(*argValOps.begin());
     }
+    ttkernel::TileRegsAcquireOp::create(builder, firstPackTileOp->getLoc());
   }
 
   void insertComputeInitializationOps() {
@@ -162,13 +153,19 @@ public:
 
       Value latest = getLatestValue({aCb, bCb, outCb});
       builder.setInsertionPointAfterValue(latest);
+      if (addSFPUInit) {
+        // init sfpu above matmul init
+        Value inCb = copyTileOps.begin()->first.getCb0();
+        Value outCb = packTileOp.getOutCb();
+
+        ttkernel::InitSFPUOp::create(builder, loc, inCb, outCb);
+      }
 
       // TODO: support transpose. we cannot grab the transpose from the matmul
       // op as transpose could be defined inside the matmul loop
       Value transpose = arith::createConstantI32(loc, builder, 0);
       ttkernel::MatmulInitOp::create(builder, loc, aCb, bCb, outCb, transpose);
-    }
-    if (addSFPUInit) {
+    } else if (addSFPUInit) {
       SmallVector<ttkernel::TileRegsAcquireOp, 4> tileRegsAcquireOps;
       funcOp.walk([&](ttkernel::TileRegsAcquireOp op) {
         tileRegsAcquireOps.push_back(op);
