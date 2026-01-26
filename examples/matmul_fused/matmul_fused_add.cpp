@@ -239,7 +239,7 @@ void matmul_multi_core(
     
     auto reader_id = tt_metal::CreateKernel(
         program,
-        OVERRIDE_KERNEL_PREFIX "matmul_tensor_descriptor/kernels/dataflow/reader.cpp",
+        OVERRIDE_KERNEL_PREFIX "matmul_fused/kernels/dataflow/reader.cpp",
         all_cores,
         tt_metal::DataMovementConfig{
             .processor = DataMovementProcessor::RISCV_1,
@@ -249,7 +249,7 @@ void matmul_multi_core(
 
     auto writer_id = tt_metal::CreateKernel(
         program,
-        OVERRIDE_KERNEL_PREFIX "matmul_tensor_descriptor/kernels/dataflow/writer.cpp",
+        OVERRIDE_KERNEL_PREFIX "matmul_fused/kernels/dataflow/writer.cpp",
         all_cores,
         tt_metal::DataMovementConfig{
             .processor = DataMovementProcessor::RISCV_0,
@@ -258,7 +258,7 @@ void matmul_multi_core(
 
     auto compute_kernel_id = tt_metal::CreateKernel(
         program,
-        OVERRIDE_KERNEL_PREFIX "matmul_tensor_descriptor/kernels/compute/matmul_triton.cpp",
+        OVERRIDE_KERNEL_PREFIX "matmul_fused/kernels/compute/matmul_triton.cpp",
         all_cores,
         tt_metal::ComputeConfig{.math_fidelity = math_fidelity, .compile_args = compile_args});
 
@@ -296,16 +296,6 @@ void matmul_multi_core(
                         N, // shape[1]
                         stride_BK, // strides[0]
                         1, // strides[1]
-                        bias_dram_buffer->address(),
-                        M, // shape[0]
-                        N, // shape[1]
-                        stride_CM, // strides[0]
-                        1, // strides[1]
-                        0, //padding (bool)
-                        M,
-                        N,
-                        stride_CM,
-                        1,
                         dst_dram_buffer->address(),
                         M, // shape[0]
                         N, // shape[1]
@@ -316,6 +306,16 @@ void matmul_multi_core(
                         N, // shape[1]
                         stride_CM, // strides[0]
                         1, // strides[1]
+                        bias_dram_buffer->address(),
+                        M, // shape[0]
+                        N, // shape[1]
+                        stride_CM, // strides[0]
+                        1, // strides[1]
+                        0, //padding (bool)
+                        M,
+                        N,
+                        stride_CM,
+                        1,
                         M,                           
                         N,                           
                         K};
