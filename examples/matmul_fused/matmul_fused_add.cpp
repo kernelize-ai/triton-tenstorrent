@@ -216,6 +216,12 @@ void matmul_multi_core(
     tt_metal::CreateCircularBuffer(
         program,
         all_cores,  // create on all cores
+        CircularBufferConfig(C_tiles_per_block * cb_buffer_depth * single_tile_size, {{CBIndex::c_2, cb_data_format}})
+            .set_page_size(CBIndex::c_2, single_tile_size));
+
+    tt_metal::CreateCircularBuffer(
+        program,
+        all_cores,  // create on all cores
         CircularBufferConfig(C_tiles_per_block * cb_buffer_depth * single_tile_size, {{CBIndex::c_16, cb_data_format}})
             .set_page_size(CBIndex::c_16, single_tile_size));
 
@@ -228,6 +234,7 @@ void matmul_multi_core(
     
     std::vector<uint32_t> compile_args = {static_cast<uint32_t>(CBIndex::c_0),
                                         static_cast<uint32_t>(CBIndex::c_1),
+                                        static_cast<uint32_t>(CBIndex::c_2),
                                         static_cast<uint32_t>(CBIndex::c_16)};
     
     auto reader_id = tt_metal::CreateKernel(
