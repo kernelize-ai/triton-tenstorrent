@@ -1,4 +1,4 @@
-// matmul_kernel_tma__compute
+// matmul_kernel_fused__compute
 #include <cstdint>
 #include "tools/profiler/kernel_profiler.hpp"
 #include "internal/firmware_common.h"
@@ -46,59 +46,46 @@ namespace NAMESPACE {
 void kernel_main() {
   size_t v1 = 0;
   size_t v2 = 1;
-  size_t v3 = 2;
-  int32_t v4 = 0;
-  int32_t v5 = 1;
-  int32_t v6 = 2;
-  int32_t v7 = 4;
-  int32_t v8 = get_common_arg_val<uint32_t>(42);
-  init_sfpu(get_compile_time_arg_val(2), get_compile_time_arg_val(3));
-  mm_init(get_compile_time_arg_val(0), get_compile_time_arg_val(1), get_compile_time_arg_val(3), v4);
-  int32_t v9 = get_arg_val<uint32_t>(v2);
-  int32_t v10 = get_arg_val<uint32_t>(v1);
-  for (int32_t i11 = v10; i11 < v9; i11 += v5) {
-    for (int32_t j12 = v4; j12 < ((int32_t) ((uint32_t) v8 + (uint32_t) 63) / 64); j12 += v5) {
+  int32_t v3 = 0;
+  int32_t v4 = 1;
+  int32_t v5 = get_common_arg_val<uint32_t>(42);
+  mm_init(get_compile_time_arg_val(0), get_compile_time_arg_val(1), get_compile_time_arg_val(3), v3);
+  int32_t v6 = get_arg_val<uint32_t>(v2);
+  int32_t v7 = get_arg_val<uint32_t>(v1);
+  for (int32_t i8 = v7; i8 < v6; i8 += v4) {
+    for (int32_t j9 = v3; j9 < ((int32_t) ((uint32_t) v5 + (uint32_t) 31) / 32); j9 += v4) {
       {
       DeviceZoneScopedN("cb_wait_front");
-      cb_wait_front(get_compile_time_arg_val(0), v6);
+      cb_wait_front(get_compile_time_arg_val(0), v4);
       }
       {
       DeviceZoneScopedN("cb_wait_front");
-      cb_wait_front(get_compile_time_arg_val(1), v7);
+      cb_wait_front(get_compile_time_arg_val(1), v4);
       }
-      size_t v13;
-      v13 = v1;
-      for (int32_t k14 = v4; k14 < v6; k14 += v5) {
-        size_t v15 = v13;
-        for (int32_t l16 = v4; l16 < v6; l16 += v5) {
-          int32_t v17 = (int32_t) ((uint32_t) ((int32_t) ((uint32_t) l16 * (uint32_t) v6)) + (uint32_t) k14);
-          matmul_tiles(get_compile_time_arg_val(0), get_compile_time_arg_val(1), l16, v17, v15);
-        }
-        v13 = v15 + v2;
-      }
-      cb_pop_front(get_compile_time_arg_val(0), v6);
-      cb_pop_front(get_compile_time_arg_val(1), v7);
+      matmul_tiles(get_compile_time_arg_val(0), get_compile_time_arg_val(1), v3, v3, v1);
+      cb_pop_front(get_compile_time_arg_val(0), v4);
+      cb_pop_front(get_compile_time_arg_val(1), v4);
     }
     {
     DeviceZoneScopedN("cb_wait_front");
-    cb_wait_front(get_compile_time_arg_val(2), v6);
+    cb_wait_front(get_compile_time_arg_val(2), v4);
     }
-    acquire_dst();
+    init_sfpu(get_compile_time_arg_val(2), get_compile_time_arg_val(3));
+    tile_regs_acquire();
     copy_tile_init(get_compile_time_arg_val(2));
-    copy_tile(get_compile_time_arg_val(2), v1, v3);
-    cb_pop_front(get_compile_time_arg_val(2), v6);
+    copy_tile(get_compile_time_arg_val(2), v1, v2);
+    cb_pop_front(get_compile_time_arg_val(2), v4);
     add_binary_tile_init();
-    add_binary_tile(v1, v3, v1);
-    cb_reserve_back(get_compile_time_arg_val(3), v6);
+    add_binary_tile(v1, v2, v1);
+    cb_reserve_back(get_compile_time_arg_val(3), v4);
     tile_regs_commit();
     {
     DeviceZoneScopedN("tile_regs_wait");
     tile_regs_wait();
     }
-    pack_tile<false>(v4, get_compile_time_arg_val(3), v4);
-    pack_tile<false>(v5, get_compile_time_arg_val(3), v5);
-    release_dst();
-    cb_push_back(get_compile_time_arg_val(3), v6);
+    pack_tile<false>(v3, get_compile_time_arg_val(3), v3);
+    tile_regs_release();
+    cb_push_back(get_compile_time_arg_val(3), v4);
   }
   return;
 }
