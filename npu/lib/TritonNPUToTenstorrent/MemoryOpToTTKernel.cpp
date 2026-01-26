@@ -488,10 +488,6 @@ struct ConvertLocalLoadOp : public OpConversionPattern<gpu::LocalLoadOp> {
       rewriter.replaceOp(op, src);
       return success();
     }
-
-    // release the MATH thread lock on DEST
-    ttkernel::TileRegsCommitOp::create(rewriter, loc);
-
     // Ops that read from registers, so wait for the data to be ready
     ttkernel::CBWaitFrontOp::create(rewriter, loc, src, numPages);
 
