@@ -81,6 +81,7 @@ def TritonTenstorrentConvertComputeOps : Pass<"tritontenstorrent-convert-compute
 
     let dependentDialects = ["mlir::triton::npu::tt::TritonTenstorrentDialect",
                              "mlir::triton::TritonDialect",
+                             "mlir::triton::gpu::TritonGPUDialect",
                              "arith::ArithDialect"
                             ];
 }
