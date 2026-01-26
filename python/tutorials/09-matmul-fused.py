@@ -102,7 +102,7 @@ def matmul_tma_set_block_size_hook(nargs):
     key=["M", "N", "K", "WARP_SPECIALIZE"],
 )
 @triton.jit(launch_metadata=_matmul_launch_metadata)
-def matmul_kernel_tma(a_desc, b_desc, c_desc, bias_desc,  #
+def matmul_kernel_fused(a_desc, b_desc, c_desc, bias_desc,  #
                       M, N, K,  #
                       BLOCK_SIZE_M: tl.constexpr,  #
                       BLOCK_SIZE_N: tl.constexpr,  #
@@ -172,7 +172,7 @@ def matmul_tma(a, b, bias, warp_specialize: bool):
         BLOCK_N = META["BLOCK_SIZE_N"]
         return (triton.cdiv(M, BLOCK_M) * triton.cdiv(N, BLOCK_N), )
 
-    matmul_kernel_tma[grid](
+    matmul_kernel_fused[grid](
         a_desc, b_desc, c_desc, bias_desc,  #
         M, N, K,  #
         FP8_OUTPUT=dtype == torch.float8_e4m3fn,  #
