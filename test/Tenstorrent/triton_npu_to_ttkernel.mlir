@@ -18,15 +18,14 @@ module attributes {"ttg.num-ctas" = 1 : i32, "ttg.num-warps" = 1 : i32, ttg.targ
     // CHECK-DAG: %[[X:.*]] = ttkernel.get_compile_time_arg_val(0)
     // CHECK-DAG: %[[Y:.*]] = ttkernel.get_compile_time_arg_val(1)
     // CHECK-DAG: %[[OUTPUT:.*]] = ttkernel.get_compile_time_arg_val(2)
+    // CHECK: ttkernel.init_sfpu(%[[X]], %[[OUTPUT]])
+    // CHECK: ttkernel.tile_regs_acquire
     %0 = ttg.local_alloc {alloc_idx = 2 : i32} : () -> !ttg.memdesc<1024xf32, #shared, #smem, mutable>
     %y = ttg.local_alloc {alloc_idx = 1 : i32} : () -> !ttg.memdesc<1024xf32, #shared, #smem, mutable>
     %x = ttg.local_alloc {alloc_idx = 0 : i32} : () -> !ttg.memdesc<1024xf32, #shared, #smem, mutable>
     %x_0 = ttg.local_load %x {triton_tenstorrent.alloc_offset = 0 : i32, triton_tenstorrent.alloc_size = 1 : i32} : !ttg.memdesc<1024xf32, #shared, #smem, mutable> -> tensor<1024xf32, #blocked>
     %y_1 = ttg.local_load %y {triton_tenstorrent.alloc_offset = 1 : i32, triton_tenstorrent.alloc_size = 1 : i32} : !ttg.memdesc<1024xf32, #shared, #smem, mutable> -> tensor<1024xf32, #blocked>
     // CHECK: ttkernel.cb_wait_front(%[[X]], %[[c1_i32]])
-
-    // CHECK: ttkernel.init_sfpu(%[[X]], %[[OUTPUT]])
-    // CHECK: ttkernel.tile_regs_acquire
 
     // CHECK: ttkernel.copy_tile_init(%[[X]])
     // CHECK: ttkernel.copy_tile(%[[X]], %[[c0_index]], %[[c0_index]])
