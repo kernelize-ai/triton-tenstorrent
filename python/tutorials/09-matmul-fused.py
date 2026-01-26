@@ -103,14 +103,14 @@ def matmul_tma_set_block_size_hook(nargs):
 )
 @triton.jit(launch_metadata=_matmul_launch_metadata)
 def matmul_kernel_fused(a_desc, b_desc, c_desc, bias_desc,  #
-                      M, N, K,  #
-                      BLOCK_SIZE_M: tl.constexpr,  #
-                      BLOCK_SIZE_N: tl.constexpr,  #
-                      BLOCK_SIZE_K: tl.constexpr,  #
-                      GROUP_SIZE_M: tl.constexpr,  #
-                      FP8_OUTPUT: tl.constexpr,  #
-                      WARP_SPECIALIZE: tl.constexpr,  #
-                      ):
+                        M, N, K,  #
+                        BLOCK_SIZE_M: tl.constexpr,  #
+                        BLOCK_SIZE_N: tl.constexpr,  #
+                        BLOCK_SIZE_K: tl.constexpr,  #
+                        GROUP_SIZE_M: tl.constexpr,  #
+                        FP8_OUTPUT: tl.constexpr,  #
+                        WARP_SPECIALIZE: tl.constexpr,  #
+                        ):
     dtype = tl.float8e4nv if FP8_OUTPUT else tl.float16
 
     pid = tl.program_id(axis=0)
