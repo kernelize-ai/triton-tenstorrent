@@ -52,6 +52,7 @@ void kernel_main() {
   int32_t v6 = 2;
   int32_t v7 = 4;
   int32_t v8 = get_common_arg_val<uint32_t>(42);
+  init_sfpu(get_compile_time_arg_val(2), get_compile_time_arg_val(3));
   mm_init(get_compile_time_arg_val(0), get_compile_time_arg_val(1), get_compile_time_arg_val(3), v4);
   int32_t v9 = get_arg_val<uint32_t>(v2);
   int32_t v10 = get_arg_val<uint32_t>(v1);
@@ -82,8 +83,7 @@ void kernel_main() {
     DeviceZoneScopedN("cb_wait_front");
     cb_wait_front(get_compile_time_arg_val(2), v6);
     }
-    init_sfpu(get_compile_time_arg_val(2), get_compile_time_arg_val(3));
-    tile_regs_acquire();
+    acquire_dst();
     copy_tile_init(get_compile_time_arg_val(2));
     copy_tile(get_compile_time_arg_val(2), v1, v3);
     cb_pop_front(get_compile_time_arg_val(2), v6);
@@ -97,7 +97,7 @@ void kernel_main() {
     }
     pack_tile<false>(v4, get_compile_time_arg_val(3), v4);
     pack_tile<false>(v5, get_compile_time_arg_val(3), v5);
-    tile_regs_release();
+    release_dst();
     cb_push_back(get_compile_time_arg_val(3), v6);
   }
   return;
