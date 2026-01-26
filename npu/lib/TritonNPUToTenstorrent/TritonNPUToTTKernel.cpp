@@ -181,6 +181,20 @@ public:
     }
   }
 
+  void insertTileRegsOps() {
+    // look for groups of `ttkernel::PackTileOp` and insert sequences of
+    // TileRegsCommitOp, TileRegsWaitOp, and then (later) TileRegsReleaseOp
+    assert(!packTileOps.empty() && "expecting at least one pack tile op");
+    ttkernel::PackTileOp firstPackTileOp = *packTileOps.begin();
+    OpBuilder builder(firstPackTileOp);
+    ttkernel::TileRegsCommitOp::create(builder, firstPackTileOp.getLoc());
+    ttkernel::TileRegsWaitOp::create(builder, firstPackTileOp.getLoc());
+
+    ttkernel::PackTileOp lastPackTileOp = *packTileOps.rbegin();
+    builder.setInsertionPointAfter(lastPackTileOp);
+    ttkernel::TileRegsReleaseOp::create(builder, lastPackTileOp.getLoc());
+  }
+
 private:
   SmallVector<ttkernel::CopyTileInitOp, 4> copyTileInitOps;
   llvm::MapVector<ttkernel::CopyTileOp, unsigned> copyTileOps;
@@ -335,6 +349,7 @@ struct ConvertTritonNPUToTTKernelPass
       InitializationHelper initHelper(funcOp);
       initHelper.insertTileRegsAcquireOps();
       initHelper.insertComputeInitializationOps();
+      initHelper.insertTileRegsOps();
     });
   }
 };

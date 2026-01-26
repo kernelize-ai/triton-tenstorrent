@@ -230,9 +230,6 @@ class CPUBackend(BaseBackend):
         # TODO(adb): remove this pass
         # cpu.passes.tenstorrent.add_finalize_cb_transactions(pm)
 
-        # tt-mlir pipeline
-        cpu.passes.tenstorrent.add_ttkernel_control_dst_selection(pm)
-
         pm.run(mod, "make_ttmlir")
         return mod
 
