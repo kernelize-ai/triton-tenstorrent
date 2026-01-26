@@ -81,7 +81,12 @@ struct RemoveLoadOpToDotCvt
   }
 };
 
-struct RemoveDescriptorLoadOpToDotCvt
+inline bool hasTiledEncoding(RankedTensorType type) {
+  return isa<npu::tt::TiledEncodingAttr>(type.getEncoding()) ||
+         isa<npu::tt::TiledDotOperandEncodingAttr>(type.getEncoding());
+}
+
+struct RemoveDescriptorLoadOpToTiledCvt
     : public mlir::OpRewritePattern<triton::gpu::ConvertLayoutOp> {
   using OpRewritePattern::OpRewritePattern;
 
@@ -97,8 +102,7 @@ struct RemoveDescriptorLoadOpToDotCvt
 
     auto descriptorLoadOp = dyn_cast<triton::DescriptorLoadOp>(srcOp);
     auto cvtResultType = cast<RankedTensorType>(cvtOp.getType());
-    if (descriptorLoadOp && isa<npu::tt::TiledDotOperandEncodingAttr>(
-                                cvtResultType.getEncoding())) {
+    if (descriptorLoadOp && hasTiledEncoding(cvtResultType)) {
       LDBG("Remove cvtOp " << *cvtOp
                            << " and push tiled_dot_op encoding into load");
 
@@ -176,7 +180,7 @@ public:
     constexpr int benefitDefault = 1;
 
     patterns.add<RemoveLoadOpToDotCvt>(context, benefitDefault);
-    patterns.add<RemoveDescriptorLoadOpToDotCvt>(context, benefitDefault);
+    patterns.add<RemoveDescriptorLoadOpToTiledCvt>(context, benefitDefault);
     patterns.add<RemoveDotToDescriptorStoreOpCvt>(context, benefitDefault);
 
     if (applyPatternsGreedily(m, std::move(patterns)).failed()) {

@@ -208,11 +208,9 @@ class CPUBackend(BaseBackend):
         pm = ir.pass_manager(mod.context)
         pm.enable_debug()
 
-        cpu.passes.tenstorrent.add_convert_compute_ops(pm)
-        passes.ttgpuir.add_remove_layout_conversions(pm)
-
         cpu.passes.tenstorrent.add_accelerate_matmul(pm)
         passes.ttgpuir.add_remove_layout_conversions(pm)
+        cpu.passes.tenstorrent.add_convert_compute_ops(pm)
         cpu.passes.tenstorrent.add_remove_dot_load_layout_conversions(pm)
         passes.ttgpuir.add_remove_layout_conversions(pm)
         cpu.passes.tenstorrent.remove_redundant_masks(pm)

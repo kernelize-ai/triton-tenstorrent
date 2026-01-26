@@ -182,10 +182,10 @@ struct ConvertTensorDescLoadOp
     rewriter.restoreInsertionPoint(opInsertionPt);
 
     auto loadResultType = cast<RankedTensorType>(op.getResult().getType());
-    auto dotOpEncoding = cast<npu::tt::TiledDotOperandEncodingAttr>(
-        loadResultType.getEncoding());
-    LDBG("Lowering load op with encoding " << dotOpEncoding << "\n");
-    auto layout = gpu::toLinearLayout(loadResultType.getShape(), dotOpEncoding);
+    LDBG("Lowering load op with encoding " << loadResultType.getEncoding()
+                                           << "\n");
+    auto layout = gpu::toLinearLayout(loadResultType.getShape(),
+                                      loadResultType.getEncoding());
     layout = layout.sublayout({S("register"), S("tile")},
                               llvm::to_vector(layout.getOutDimNames()));
     LDBG("Register/Tile layout:\n" << layout << "\n");
@@ -194,8 +194,12 @@ struct ConvertTensorDescLoadOp
     LDBG("Generating " << numTiles << " tile loads");
 
     auto outDimNames = llvm::to_vector(layout.getOutDimNames());
+    auto dotOpEncoding = dyn_cast<npu::tt::TiledDotOperandEncodingAttr>(
+        loadResultType.getEncoding());
     auto tiledParent =
-        cast<npu::tt::TiledEncodingAttr>(dotOpEncoding.getParent());
+        dotOpEncoding
+            ? cast<npu::tt::TiledEncodingAttr>(dotOpEncoding.getParent())
+            : cast<npu::tt::TiledEncodingAttr>(loadResultType.getEncoding());
     auto tileShape = tiledParent.getTileShape();
     auto order = tiledParent.getOrder();
     auto offsets = op.getIndices();

@@ -5,6 +5,7 @@
 #include "mlir/Transforms/GreedyPatternRewriteDriver.h"
 #include "llvm/Support/Debug.h"
 
+#include "npu/include/Dialect/TritonTenstorrent/IR/Attributes.h"
 #include "npu/include/Dialect/TritonTenstorrent/IR/Dialect.h"
 
 using namespace mlir;
@@ -33,8 +34,6 @@ struct RewriteBinaryComputeOp : OpRewritePattern<OpType> {
       return failure();
 
     if (!llvm::all_of(op->getOperands(), [](Value val) {
-          // TODO: is isa<LoadOp> a strong enough condition by itself?
-          // probably not if we have convert layout ops
           return isa<RankedTensorType>(val.getType());
         }))
       return failure();
@@ -42,14 +41,45 @@ struct RewriteBinaryComputeOp : OpRewritePattern<OpType> {
     auto opcode = rewriter.getStringAttr(op->getName().getStringRef());
     LDBG("Rewriting binary compute op: " << opcode);
 
-    SmallVector<Type> resultTys(op->getResultTypes().begin(),
-                                op->getResultTypes().end());
+    // TODO: create a TiledEncodingAttr builder and unify with AccelerateMatmul
+    auto rowMajorOrder = SmallVector<unsigned>{1, 0};
+    static constexpr std::array<unsigned, 2> tileSize = {32, 32};
 
-    auto lhs = op->getOperand(0);
-    auto rhs = op->getOperand(1);
+    // if any of the tiled operands are loaded from a DescriptorLoadOp, we can
+    // use tiled encoding for all operands
+    const bool canUseTiledEncoding =
+        llvm::any_of(op->getOperands(), [](Value val) {
+          auto definingOp = val.getDefiningOp();
+          return definingOp && isa<triton::DescriptorLoadOp>(definingOp);
+        });
 
-    auto newOp = npu::tt::BinaryComputeOp::create(rewriter, op.getLoc(),
-                                                  resultTys, lhs, rhs, opcode);
+    auto updateOperandEncoding = [&](Value v) -> Value {
+      if (!canUseTiledEncoding)
+        return v;
+
+      auto vType = cast<RankedTensorType>(v.getType());
+      auto vShape = vType.getShape();
+      assert(vShape.size() <= 2 &&
+             "expected <= rank 2 tensor for binary compute op conversion");
+
+      SmallVector<unsigned> tiledShape(vShape.size());
+      for (auto [idx, dim] : llvm::enumerate(vShape)) {
+        tiledShape[idx] = static_cast<unsigned>(dim / tileSize[idx]);
+      }
+
+      auto tiledEncoding = npu::tt::TiledEncodingAttr::get(
+          v.getContext(), tiledShape, rowMajorOrder,
+          /*tileShape=*/ArrayRef<unsigned>{tileSize[0], tileSize[1]});
+      auto newVType = vType.cloneWithEncoding(tiledEncoding);
+      return gpu::ConvertLayoutOp::create(rewriter, v.getLoc(), newVType, v)
+          .getResult();
+    };
+
+    Value lhs = updateOperandEncoding(op->getOperand(0));
+    Value rhs = updateOperandEncoding(op->getOperand(1));
+
+    auto newOp = npu::tt::BinaryComputeOp::create(
+        rewriter, op.getLoc(), lhs.getType(), lhs, rhs, opcode);
     rewriter.replaceOp(op, newOp.getResults());
 
     return success();
