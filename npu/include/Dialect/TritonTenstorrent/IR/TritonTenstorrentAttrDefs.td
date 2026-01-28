@@ -2,11 +2,29 @@
 #define TRITONTENSTORRENT_ATTRDEFS
 
 include "mlir/IR/AttrTypeBase.td"
+include "mlir/IR/EnumAttr.td"
 
 include "npu/include/Dialect/TritonTenstorrent/IR/TritonTenstorrentDialect.td"
 include "triton/Dialect/Triton/IR/TritonInterfaces.td" // might not need this?
 include "triton/Dialect/TritonGPU/IR/TritonGPUAttrDefs.td" // might not need this?
 
+/// Attribute Enumerations
+def ReaderFunc : I32EnumCase<"ReaderFunc", 0, "reader_func">;
+def WriterFunc : I32EnumCase<"WriterFunc", 1, "writer_func">;
+def ComputeFunc : I32EnumCase<"ComputeFunc", 2, "compute_func">;
+
+def DerivedFuncType : I32Enum<"DerivedFuncType",
+                                    "Tenstorrent derived function type",
+                                    [ReaderFunc, WriterFunc, ComputeFunc]> {
+  let cppNamespace = "::mlir::triton::npu::tt";
+}
+
+def DerivedFuncTypeAttr : EnumAttr<TritonTenstorrent_Dialect, DerivedFuncType,
+                                         "derived_func_type"> {
+  let assemblyFormat = "$value";
+}
+
+/// Memory encodings
 def TiledEncodingAttr : AttrDef<TritonTenstorrent_Dialect, "TiledEncoding", [DistributedEncodingTrait, LayoutEncodingTrait]> {
   let mnemonic = "tiled_encoding";
 

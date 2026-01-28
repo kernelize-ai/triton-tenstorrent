@@ -16,6 +16,7 @@ using namespace mlir::triton::npu;
 
 #define GET_ATTRDEF_CLASSES
 #include "npu/include/Dialect/TritonTenstorrent/IR/AttrDefs.cpp.inc"
+#include "npu/include/Dialect/TritonTenstorrent/IR/Enums.cpp.inc"
 
 namespace mlir::triton::npu::tt {
 

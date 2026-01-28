@@ -29,19 +29,6 @@ namespace {
 
 #define S(v) StringAttr::get(context, (v))
 
-static int64_t findAllocIdx(Operation *op) {
-  if (auto localLoadOp = dyn_cast<gpu::LocalLoadOp>(op)) {
-    return findAllocIdx(localLoadOp.getSrc().getDefiningOp());
-  }
-  if (auto localStoreOp = dyn_cast<gpu::LocalStoreOp>(op)) {
-    return findAllocIdx(localStoreOp.getDst().getDefiningOp());
-  }
-  if (auto localAllocOp = dyn_cast<gpu::LocalAllocOp>(op)) {
-    return localAllocOp->getAttrOfType<IntegerAttr>("alloc_idx").getInt();
-  }
-  return -1;
-}
-
 struct ConvertLoadOp : public OpConversionPattern<triton::LoadOp> {
   using OpConversionPattern<triton::LoadOp>::OpConversionPattern;
 
@@ -668,14 +655,13 @@ struct ConvertLocalAllocOp : public OpConversionPattern<gpu::LocalAllocOp> {
     Location loc = op.getLoc();
     auto typeConverter = getTypeConverter();
 
-    // replace the local allocs with cbs from the function signature
-    int64_t allocIdx = -1;
-    for (auto user : op.getResult().getUsers()) {
-      allocIdx = std::max(allocIdx, findAllocIdx(user));
-    }
-    if (allocIdx == -1) {
+    auto dialect =
+        op->getContext()->getLoadedDialect<tt::TritonTenstorrentDialect>();
+    auto allocIndexHelper = dialect->getAllocIndexAttrHelper();
+    if (!allocIndexHelper.isAttrPresent(op)) {
       return rewriter.notifyMatchFailure(op, "missing alloc_idx attribute");
     }
+    int64_t allocIdx = allocIndexHelper.getAttr(op).getInt();
 
     auto cbMemRefType = cast<ttkernel::CBType>(
         typeConverter->convertType(op.getResult().getType()));

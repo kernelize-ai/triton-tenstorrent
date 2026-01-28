@@ -1,5 +1,6 @@
 #include "npu/include/Dialect/TritonTenstorrent/Transforms/Passes.h"
 
+#include "npu/include/Dialect/TritonTenstorrent/IR/Dialect.h"
 #include "npu/include/Dialect/TritonTenstorrent/Transforms/Utility.h"
 
 #include "mlir/IR/BuiltinAttributes.h"
@@ -23,9 +24,6 @@ namespace npu {
 
 namespace {
 
-static constexpr llvm::StringLiteral kAllocIdxAttrName =
-    "__core_specialize.alloc_idx";
-
 static Type getLoadLikeResultType(Operation *op) {
   if (auto l = dyn_cast<triton::LoadOp>(op))
     return l.getType();
@@ -45,12 +43,11 @@ static bool isDependentLoadLike(Operation *loadLike) {
 }
 
 static std::optional<int64_t> getAllocIdx(Operation *op) {
-  // alloc_idx is used elsewhere in the Tenstorrent lowering, while
-  // kAllocIdxAttrName is specific to this pass and erased afterwards
-  llvm::StringRef attrName =
-      isa<triton::gpu::LocalAllocOp>(op) ? "alloc_idx" : kAllocIdxAttrName;
-  if (auto a = op->getAttrOfType<IntegerAttr>(attrName))
-    return a.getInt();
+  auto dialect =
+      op->getContext()->getLoadedDialect<tt::TritonTenstorrentDialect>();
+  auto allocIndexHelper = dialect->getAllocIndexAttrHelper();
+  if (allocIndexHelper.isAttrPresent(op))
+    return allocIndexHelper.getAttr(op).getInt();
   return std::nullopt;
 }
 
@@ -60,29 +57,58 @@ class Specializer {
 
 public:
   Specializer(ModuleOp m, triton::FuncOp _func) : func(_func) {
+    auto context = func->getContext();
+    auto *dialect = context->getLoadedDialect<tt::TritonTenstorrentDialect>();
+    auto funcTypeHelper = dialect->getFuncTypeAttrHelper();
+    auto initialFuncHelper = dialect->getInitialFuncAttrHelper();
+    auto allocIndexHelper = dialect->getAllocIndexAttrHelper();
+    auto cbTileSizesHelper = dialect->getCbTileSizesAttrHelper();
+
     // Collect load/store ops and create shared buffers (one per op).
+    SmallVector<int64_t> allocIdxs;
+    SmallVector<int32_t> allocSizes;
+    auto addSharedBuffer = [&](Operation *op, Type valueType) {
+      int64_t idx = allocIdxs.size();
+      allocIdxs.push_back(idx);
+      allocIndexHelper.setAttr(
+          op, IntegerAttr::get(IntegerType::get(func.getContext(), 64), idx));
+      createSharedBuffer(op, valueType, idx);
+      allocSizes.push_back(getNumTiles(valueType));
+    };
     func.walk([&](Operation *op) {
       if (isStoreLike(op)) {
-        int64_t idx = allocs.size();
-        createSharedBuffer(op, getStoreLikeValue(op).getType(), idx);
-        op->setAttr(
-            kAllocIdxAttrName,
-            IntegerAttr::get(IntegerType::get(func.getContext(), 64), idx));
+        addSharedBuffer(op, getStoreLikeValue(op).getType());
       } else if (isLoadLike(op)) {
         if (isDependentLoadLike(op))
           return;
 
-        int64_t idx = allocs.size();
-        createSharedBuffer(op, getLoadLikeResultType(op), idx);
-        op->setAttr(
-            kAllocIdxAttrName,
-            IntegerAttr::get(IntegerType::get(func.getContext(), 64), idx));
+        addSharedBuffer(op, getLoadLikeResultType(op));
       }
     });
 
+    // Set the initial func attribute, all clones will inherit this
+    auto funcNameAttr = StringAttr::get(func.getContext(), func.getName());
+    initialFuncHelper.setAttr(func, funcNameAttr);
+
+    // Set the alloc sizes attribute
+    auto cbTileSizesAttr =
+        DenseI32ArrayAttr::get(func.getContext(), allocSizes);
+    cbTileSizesHelper.setAttr(func, cbTileSizesAttr);
+
     auto readerFunc = makeReader(func);
+    auto funcTypeValueAttr =
+        tt::DerivedFuncTypeAttr::get(context, tt::DerivedFuncType::ReaderFunc);
+    funcTypeHelper.setAttr(readerFunc, funcTypeValueAttr);
+
     auto computeFunc = makeCompute(func);
+    funcTypeValueAttr =
+        tt::DerivedFuncTypeAttr::get(context, tt::DerivedFuncType::ComputeFunc);
+    funcTypeHelper.setAttr(computeFunc, funcTypeValueAttr);
+
     auto writerFunc = makeWriter(func);
+    funcTypeValueAttr =
+        tt::DerivedFuncTypeAttr::get(context, tt::DerivedFuncType::WriterFunc);
+    funcTypeHelper.setAttr(writerFunc, funcTypeValueAttr);
 
     m.insert(func, readerFunc);
     m.insert(func, computeFunc);
@@ -111,7 +137,10 @@ public:
         triton::gpu::SharedMemorySpaceAttr::get(ctx), true);
 
     auto alloc = triton::gpu::LocalAllocOp::create(b, op->getLoc(), memdesc);
-    alloc->setAttr("alloc_idx", b.getI32IntegerAttr(idx));
+    auto *dialect =
+        alloc->getContext()->getLoadedDialect<tt::TritonTenstorrentDialect>();
+    auto allocIndexHelper = dialect->getAllocIndexAttrHelper();
+    allocIndexHelper.setAttr(alloc, b.getI32IntegerAttr(idx));
 
     allocs.push_back(alloc);
   }
@@ -294,9 +323,6 @@ public:
       Specializer spec(m, func);
       func.erase();
     }
-
-    // remove all temporary attributes
-    m.walk([&](Operation *op) { op->removeAttr(kAllocIdxAttrName); });
   }
 };
 

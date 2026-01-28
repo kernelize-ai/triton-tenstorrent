@@ -6,6 +6,7 @@
 #include "llvm/Support/Debug.h"
 
 #include "npu/include/Dialect/TritonTenstorrent/IR/Dialect.h"
+#include "npu/include/Dialect/TritonTenstorrent/Transforms/Utility.h"
 
 using namespace mlir;
 using namespace mlir::triton;
@@ -28,11 +29,6 @@ struct RemoveUnusedPointerArgs : public OpRewritePattern<scf::ForOp> {
 
   LogicalResult matchAndRewrite(scf::ForOp forOp,
                                 PatternRewriter &rewriter) const override {
-    auto func = forOp->getParentOfType<FunctionOpInterface>();
-    if (!func.getName().ends_with("__compute")) {
-      return failure();
-    }
-
     unsigned ivCount = forOp.getNumInductionVars();
 
     Block &body = forOp.getRegion().front();
@@ -145,11 +141,14 @@ public:
   void runOnOperation() override {
     MLIRContext *context = &getContext();
     ModuleOp mod = getOperation();
+
+    auto computeKernel = findComputeKernel(mod);
+    if (!computeKernel) {
+      return;
+    }
     RewritePatternSet patterns(context);
-
     patterns.add<RemoveUnusedPointerArgs>(patterns.getContext());
-
-    if (applyPatternsGreedily(mod, std::move(patterns)).failed())
+    if (failed(applyPatternsGreedily(computeKernel, std::move(patterns))))
       signalPassFailure();
   }
 };

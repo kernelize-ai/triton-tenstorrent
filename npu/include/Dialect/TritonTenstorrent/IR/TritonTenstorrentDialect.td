@@ -17,8 +17,15 @@ def TritonTenstorrent_Dialect : Dialect {
   ];
 
   let discardableAttrs = (ins
-    "::mlir::IntegerAttr":$alloc_offset,
-    "::mlir::IntegerAttr":$alloc_size
+    // Derived ttkernel func attributes
+    "::mlir::StringAttr":$initial_func,
+    "::mlir::triton::npu::tt::DerivedFuncTypeAttr":$func_type,
+    "::mlir::DenseI32ArrayAttr":$cb_tile_sizes,
+    // Index of allocated CB
+    "::mlir::IntegerAttr":$alloc_index,
+    // Register Offset and Size
+    "::mlir::IntegerAttr":$reg_offset,
+    "::mlir::IntegerAttr":$reg_size
   );
 
   let useDefaultAttributePrinterParser = 1;

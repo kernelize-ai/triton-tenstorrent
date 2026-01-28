@@ -1,3 +1,4 @@
+#include "npu/include/Dialect/TritonTenstorrent/IR/Dialect.h"
 #include "npu/include/TritonNPUToTenstorrent/Passes.h"
 
 #include "PatternTritonNPUToTenstorrent.h"
@@ -23,14 +24,21 @@ namespace npu {
 
 namespace {
 
-inline tt::ttkernel::ThreadType
-getThreadTypeFromFunctionName(StringRef funcName) {
-  if (funcName.ends_with("__compute"))
-    return tt::ttkernel::ThreadType::Compute;
-  else if (funcName.ends_with("__reader") || funcName.ends_with("__writer"))
-    return tt::ttkernel::ThreadType::Noc;
-
-  llvm_unreachable("unexpected function name suffix");
+inline ttkernel::ThreadType
+getThreadTypeFromFunctionType(triton::FuncOp funcOp) {
+  auto dialect =
+      funcOp->getContext()
+          ->getLoadedDialect<mlir::triton::npu::tt::TritonTenstorrentDialect>();
+  auto helper = dialect->getFuncTypeAttrHelper();
+  auto type = helper.getAttr(funcOp).getValue();
+  if (type == mlir::triton::npu::tt::DerivedFuncType::ComputeFunc)
+    return ttkernel::ThreadType::Compute;
+  else if (type == mlir::triton::npu::tt::DerivedFuncType::ReaderFunc)
+    return ttkernel::ThreadType::Noc;
+  else if (type == mlir::triton::npu::tt::DerivedFuncType::WriterFunc)
+    return ttkernel::ThreadType::Noc;
+  else
+    llvm_unreachable("unexpected function type");
 }
 
 struct ConvertTritonFunc : public OpConversionPattern<triton::FuncOp> {
@@ -76,9 +84,9 @@ struct ConvertTritonFunc : public OpConversionPattern<triton::FuncOp> {
             SymbolTable::getVisibilityAttrName()))
       newFunc->setAttr(SymbolTable::getVisibilityAttrName(), vis);
 
-    newFunc->setAttr(tt::ttkernel::ThreadTypeAttr::name,
-                     rewriter.getAttr<tt::ttkernel::ThreadTypeAttr>(
-                         getThreadTypeFromFunctionName(funcOp.getName())));
+    newFunc->setAttr(ttkernel::ThreadTypeAttr::name,
+                     rewriter.getAttr<ttkernel::ThreadTypeAttr>(
+                         getThreadTypeFromFunctionType(funcOp)));
 
     SmallVector<ttkernel::ArgAttr> rtArgs;
 
