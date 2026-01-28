@@ -48,12 +48,25 @@ struct ConvertBinaryComputeOp
     auto operandType = cast<RankedTensorType>(op.getLhs().getType());
     auto tiledEncoding =
         dyn_cast<npu::tt::TiledEncodingAttr>(operandType.getEncoding());
-    // TODO: fallback if not tiled?
+    if (!tiledEncoding) {
+      LDBG("Compute op has non-tiled type: " << operandType);
+      // synthesize tiled encoding with 1 tile
+      unsigned rank = operandType.getShape().size();
+      SmallVector<unsigned> order(rank);
+      SmallVector<unsigned> tileShape(rank, 32);
+      if (rank > 1)
+        std::iota(order.rbegin(), order.rend(), 0);
+      else
+        tileShape[0] *= 32;
+      tiledEncoding = npu::tt::TiledEncodingAttr::get(
+          context, /*tilesPerCore=*/SmallVector<unsigned>(rank, 1), order,
+          tileShape);
+      LDBG("Synthesized tiled encoding attr: " << tiledEncoding);
+    }
     assert(tiledEncoding && "expecting tiled layouts for compute ops");
     auto tileShape = tiledEncoding.getTileShape();
     auto order = tiledEncoding.getOrder();
 
-    llvm::errs() << "tiledEncoding = " << tiledEncoding << "\n";
     auto layout = gpu::toLinearLayout(operandType.getShape(), tiledEncoding);
     layout = layout.sublayout({S("register"), S("tile")},
                               llvm::to_vector(layout.getOutDimNames()));
@@ -69,7 +82,6 @@ struct ConvertBinaryComputeOp
       // we need something similar to applyLinearLayout from the TritonGPUToLLVM
       // side)
       auto crtIndex = layout.apply({{S("tile"), i}, {S("register"), 0}});
-      assert(crtIndex.size() == 2);
       LLVM_DEBUG({
         DBGS() << "Tile " << i << " has start index: ";
         for (auto [dim, idx] : crtIndex) {
@@ -78,12 +90,20 @@ struct ConvertBinaryComputeOp
         DBGS() << "\n";
       });
 
-      int32_t elem0 = crtIndex[0].second;
-      int32_t elem1 = crtIndex[1].second;
+      int32_t slot = 0;
+      SmallVector<int32_t> localTiles(tileShape.size());
+      for (size_t d = 0; d < tileShape.size(); ++d) {
+        int32_t elem = crtIndex[d].second;
+        localTiles[d] = elem / tileShape[d];
+      }
 
-      int32_t localTile0 = elem0 / tileShape[0];
-      int32_t localTile1 = elem1 / tileShape[1];
-      int32_t slot = localTile0 * tilesPerCore[order[0]] + localTile1;
+      // Linearize index based on order
+      int32_t stride = 1;
+      for (size_t d = 0; d < tileShape.size(); ++d) {
+        unsigned dim = order[d];
+        slot += localTiles[dim] * stride;
+        stride *= tilesPerCore[dim];
+      }
 
       int64_t lhsReg = lhsRegStart + slot;
       int64_t rhsReg = rhsRegStart + slot;
