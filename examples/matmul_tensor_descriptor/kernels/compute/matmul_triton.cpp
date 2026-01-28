@@ -45,36 +45,49 @@ inline uint32_t float_to_bits(float f) { uint32_t r; __builtin_memcpy(&r, &f, si
 namespace NAMESPACE {
 void kernel_main() {
   size_t v1 = 0;
-  int32_t v2 = 0;
-  int32_t v3 = 1;
-  int32_t v4 = get_common_arg_val<uint32_t>(32);
-  mm_init(get_compile_time_arg_val(0), get_compile_time_arg_val(1), get_compile_time_arg_val(2), v2);
-  int32_t v5 = get_arg_val<uint32_t>(1);
-  int32_t v6 = get_arg_val<uint32_t>(v1);
-  for (int32_t i7 = v6; i7 < v5; i7 += v3) {
+  size_t v2 = 1;
+  int32_t v3 = 0;
+  int32_t v4 = 1;
+  int32_t v5 = 2;
+  int32_t v6 = 4;
+  int32_t v7 = get_common_arg_val<uint32_t>(32);
+  mm_init(get_compile_time_arg_val(0), get_compile_time_arg_val(1), get_compile_time_arg_val(2), v3);
+  int32_t v8 = get_arg_val<uint32_t>(v2);
+  int32_t v9 = get_arg_val<uint32_t>(v1);
+  for (int32_t i10 = v9; i10 < v8; i10 += v4) {
     tile_regs_acquire();
-    for (int32_t j8 = v2; j8 < ((int32_t) ((uint32_t) v4 + (uint32_t) 31) / 32); j8 += v3) {
+    for (int32_t j11 = v3; j11 < ((int32_t) ((uint32_t) v7 + (uint32_t) 63) / 64); j11 += v4) {
       {
       DeviceZoneScopedN("cb_wait_front");
-      cb_wait_front(get_compile_time_arg_val(0), v3);
+      cb_wait_front(get_compile_time_arg_val(0), v5);
       }
       {
       DeviceZoneScopedN("cb_wait_front");
-      cb_wait_front(get_compile_time_arg_val(1), v3);
+      cb_wait_front(get_compile_time_arg_val(1), v6);
       }
-      matmul_tiles(get_compile_time_arg_val(0), get_compile_time_arg_val(1), v2, v2, v1);
-      cb_pop_front(get_compile_time_arg_val(0), v3);
-      cb_pop_front(get_compile_time_arg_val(1), v3);
+      size_t v12;
+      v12 = v1;
+      for (int32_t k13 = v3; k13 < v5; k13 += v4) {
+        size_t v14 = v12;
+        for (int32_t l15 = v3; l15 < v5; l15 += v4) {
+          int32_t v16 = (int32_t) ((uint32_t) ((int32_t) ((uint32_t) l15 * (uint32_t) v5)) + (uint32_t) k13);
+          matmul_tiles(get_compile_time_arg_val(0), get_compile_time_arg_val(1), l15, v16, v14);
+        }
+        v12 = v14 + v2;
+      }
+      cb_pop_front(get_compile_time_arg_val(0), v5);
+      cb_pop_front(get_compile_time_arg_val(1), v6);
     }
-    cb_reserve_back(get_compile_time_arg_val(2), v3);
+    cb_reserve_back(get_compile_time_arg_val(2), v5);
     tile_regs_commit();
     {
     DeviceZoneScopedN("tile_regs_wait");
     tile_regs_wait();
     }
-    pack_tile<false>(v2, get_compile_time_arg_val(2), v2);
+    pack_tile<false>(v3, get_compile_time_arg_val(2), v3);
+    pack_tile<false>(v4, get_compile_time_arg_val(2), v4);
     tile_regs_release();
-    cb_push_back(get_compile_time_arg_val(2), v3);
+    cb_push_back(get_compile_time_arg_val(2), v5);
   }
   return;
 }
