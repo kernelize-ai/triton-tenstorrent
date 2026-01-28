@@ -3,7 +3,6 @@ add_triton_library(TritonNPUToTenstorrent
     DotOpToTTKernel.cpp
     DropFunctionPass.cpp
     ElementwiseOpsToTTKernel.cpp
-    FinalizeCBTransaction.cpp
     MakeRangeOpToTTKernel.cpp
     MemoryOpToTTKernel.cpp
     PointerInfoAnalysis.cpp
