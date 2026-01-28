@@ -1,3 +1,4 @@
+#include "npu/include/Dialect/TritonTenstorrent/IR/Dialect.h"
 #include "npu/include/TritonNPUToTenstorrent/Passes.h"
 
 #include "mlir/Analysis/SliceAnalysis.h"
@@ -15,7 +16,7 @@
 #include "Utility.h"
 
 #include "npu/include/Dialect/TritonTenstorrent/IR/Attributes.h"
-#include "npu/include/Dialect/TritonTenstorrent/IR/Dialect.h"
+#include "npu/include/Dialect/TritonTenstorrent/Transforms/Utility.h"
 
 #include "cpu/include/Dialect/TritonCPU/IR/Dialect.h" // BlockIndexOps from MakePersistentKernel
 
@@ -97,35 +98,45 @@ public:
   }
 
   void insertTileRegsAcquireOps() {
-    // if copy tile init ops are non-empty then we can insert before the first
-    // op. Otherwise, we need to find the block containing pack tile and move to
-    // the start of that block.
-    if (!copyTileInitOps.empty()) {
-      OpBuilder builder(copyTileInitOps.front());
-      ttkernel::TileRegsAcquireOp::create(builder,
-                                          copyTileInitOps.front().getLoc());
-    } else {
-      SmallVector<ttkernel::PackTileOp, 4> packTileOps;
-      funcOp.walk([&](ttkernel::PackTileOp op) { packTileOps.push_back(op); });
-      assert(!packTileOps.empty() && "expecting at least one pack tile op");
-      auto firstPackTileOp = packTileOps.front();
-      Block *parentBlock = firstPackTileOp->getBlock();
-      OpBuilder builder(parentBlock, parentBlock->begin());
-      // put the tile regs acquire ops after any get arg val ops. This seems to
-      // be mostly cosmetic.
-      // Note that GetArgVal ops are per-core parameters (e.g. block start,
-      // block end), which are added during SPMD lowering and so should always
-      // exist
-      auto getArgValOpItr = parentBlock->getOps<ttkernel::GetArgValOp>();
-      if (!getArgValOpItr.empty()) {
-        auto argValOps = llvm::reverse(getArgValOpItr);
-        builder.setInsertionPointAfter(*argValOps.begin());
-      }
-      ttkernel::TileRegsAcquireOp::create(builder, firstPackTileOp->getLoc());
+    SmallVector<ttkernel::PackTileOp, 4> packTileOps;
+    funcOp.walk([&](ttkernel::PackTileOp op) { packTileOps.push_back(op); });
+    assert(!packTileOps.empty() && "expecting at least one pack tile op");
+    auto firstPackTileOp = packTileOps.front();
+    Block *parentBlock = firstPackTileOp->getBlock();
+    OpBuilder builder(parentBlock, parentBlock->begin());
+    // Put the tile regs acquire op after the last GetCompileArgValOp.
+    // GetCompileArgValOps correspond to CBs. TileRegsAcquire is used for
+    // locating SFPU/FPU init ops, which take CBs as input. Putting tile regs
+    // acquire after the last CB guarantees CBs will exist for initialization
+    // ops.
+    auto getArgValOpItr = parentBlock->getOps<ttkernel::GetCompileArgValOp>();
+    if (!getArgValOpItr.empty()) {
+      auto argValOps = llvm::reverse(getArgValOpItr);
+      builder.setInsertionPointAfter(*argValOps.begin());
     }
+    ttkernel::TileRegsAcquireOp::create(builder, firstPackTileOp->getLoc());
   }
 
   void insertComputeInitializationOps() {
+    auto getLatestValue = [](ArrayRef<Value> values) -> Value {
+      Operation *latestOp = nullptr;
+      Value latestValue;
+
+      for (Value val : values) {
+        Operation *defOp = val.getDefiningOp();
+        if (!defOp)
+          continue; // Skip block arguments
+
+        if (!latestOp || latestOp->isBeforeInBlock(defOp)) {
+          latestOp = defOp;
+          latestValue = val;
+        }
+      }
+
+      return latestValue;
+    };
+
+    // mminit also does sfpu init
     if (addMMInit) {
       // mm_init goes after cb initialization ops. but we need to collect the
       // circular buffers first
@@ -141,24 +152,6 @@ public:
       ttkernel::PackTileOp packTileOp = *packTileOps.begin();
       Value outCb = packTileOp.getOutCb();
 
-      auto getLatestValue = [](ArrayRef<Value> values) -> Value {
-        Operation *latestOp = nullptr;
-        Value latestValue;
-
-        for (Value val : values) {
-          Operation *defOp = val.getDefiningOp();
-          if (!defOp)
-            continue; // Skip block arguments
-
-          if (!latestOp || latestOp->isBeforeInBlock(defOp)) {
-            latestOp = defOp;
-            latestValue = val;
-          }
-        }
-
-        return latestValue;
-      };
-
       Value latest = getLatestValue({aCb, bCb, outCb});
       builder.setInsertionPointAfterValue(latest);
 
@@ -166,8 +159,18 @@ public:
       // op as transpose could be defined inside the matmul loop
       Value transpose = arith::createConstantI32(loc, builder, 0);
       ttkernel::MatmulInitOp::create(builder, loc, aCb, bCb, outCb, transpose);
-    }
-    if (addSFPUInit) {
+
+      SmallVector<ttkernel::TileRegsAcquireOp, 4> tileRegsAcquireOps;
+      funcOp.walk([&](ttkernel::TileRegsAcquireOp op) {
+        tileRegsAcquireOps.push_back(op);
+      });
+      assert(!tileRegsAcquireOps.empty() && "expecting tile regs acquire op");
+      Operation *acquireOp = tileRegsAcquireOps.front();
+
+      builder.setInsertionPointAfter(acquireOp);
+      ttkernel::MatmulInitShortOp::create(builder, loc, aCb, bCb, transpose);
+
+    } else if (addSFPUInit) {
       SmallVector<ttkernel::TileRegsAcquireOp, 4> tileRegsAcquireOps;
       funcOp.walk([&](ttkernel::TileRegsAcquireOp op) {
         tileRegsAcquireOps.push_back(op);
@@ -179,8 +182,25 @@ public:
       Value inCb = copyTileOps.begin()->first.getCb0();
       Value outCb = packTileOp.getOutCb();
 
+      Value latest = getLatestValue({inCb, outCb});
+      builder.setInsertionPointAfterValue(latest);
+
       ttkernel::InitSFPUOp::create(builder, acquireOp->getLoc(), inCb, outCb);
     }
+  }
+
+  void insertTileRegsOps() {
+    // look for groups of `ttkernel::PackTileOp` and insert sequences of
+    // TileRegsCommitOp, TileRegsWaitOp, and then (later) TileRegsReleaseOp
+    assert(!packTileOps.empty() && "expecting at least one pack tile op");
+    ttkernel::PackTileOp firstPackTileOp = *packTileOps.begin();
+    OpBuilder builder(firstPackTileOp);
+    ttkernel::TileRegsCommitOp::create(builder, firstPackTileOp.getLoc());
+    ttkernel::TileRegsWaitOp::create(builder, firstPackTileOp.getLoc());
+
+    ttkernel::PackTileOp lastPackTileOp = *packTileOps.rbegin();
+    builder.setInsertionPointAfter(lastPackTileOp);
+    ttkernel::TileRegsReleaseOp::create(builder, lastPackTileOp.getLoc());
   }
 
 private:
@@ -193,25 +213,6 @@ private:
   const bool addSFPUInit;
   const bool addMMInit;
 };
-
-inline SmallVector<int64_t, 2>
-convertShapeToTileShape(ArrayRef<int64_t> shape) {
-  if (shape.size() == 1) {
-    return SmallVector<int64_t, 2>{shape[0] / (32 * 32)};
-  }
-  SmallVector<int64_t, 2> tileShape;
-  tileShape.reserve(shape.size());
-  for (unsigned i = 0; i < shape.size(); ++i) {
-    if (shape[i] == 1) {
-      tileShape.push_back(1);
-      continue;
-    }
-    assert(shape[i] % 32 == 0 &&
-           "expecting shape dimensions to be multiple of 32");
-    tileShape.push_back(shape[i] / 32);
-  }
-  return tileShape;
-}
 
 } // namespace
 
@@ -245,31 +246,12 @@ struct ConvertTritonNPUToTTKernelPass
       if (!type.getEncoding()) {
         return type;
       }
-      if (isa<npu::tt::RegisterEncodingAttr>(type.getEncoding())) {
-        auto shape = convertShapeToTileShape(type.getShape());
-        auto ttcoreTileType = ttcore::TileType::get(
-            type.getContext(), ttcore::TileType::getDefaultShape(),
-            ttcore::elementTypeToDataType(etype));
-        MemRefType cbMemRefType = MemRefType::get(
-            shape, ttcoreTileType, MemRefLayoutAttrInterface{},
-            ttcore::MemorySpaceAttr::get(type.getContext(),
-                                         ttcore::MemorySpace::DeviceL1));
-        return ttkernel::CBType::get(cbMemRefType);
-      }
       if (isa<npu::tt::TiledDotOperandEncodingAttr>(type.getEncoding()) ||
           isa<gpu::DotOperandEncodingAttr>(type.getEncoding())) {
         // dot operands read directly from cbs, so convert to cb type
         assert(type.getShape().size() == 2 &&
                "expecting rank 2 tensor for dot operand");
-        auto shape = convertShapeToTileShape(type.getShape());
-        auto ttcoreTileType = ttcore::TileType::get(
-            type.getContext(), ttcore::TileType::getDefaultShape(),
-            ttcore::elementTypeToDataType(etype));
-        MemRefType cbMemRefType = MemRefType::get(
-            shape, ttcoreTileType, MemRefLayoutAttrInterface{},
-            ttcore::MemorySpaceAttr::get(type.getContext(),
-                                         ttcore::MemorySpace::DeviceL1));
-        return ttkernel::CBType::get(cbMemRefType);
+        return convertTypeToCBType(type);
       }
       return type;
     });
@@ -375,6 +357,7 @@ struct ConvertTritonNPUToTTKernelPass
       InitializationHelper initHelper(funcOp);
       initHelper.insertTileRegsAcquireOps();
       initHelper.insertComputeInitializationOps();
+      initHelper.insertTileRegsOps();
     });
   }
 };

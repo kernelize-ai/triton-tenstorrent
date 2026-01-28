@@ -1,4 +1,4 @@
-// matmul_kernel_tma__compute
+// matmul_kernel_fused__compute
 #include <cstdint>
 #include "tools/profiler/kernel_profiler.hpp"
 #include "internal/firmware_common.h"
@@ -46,49 +46,62 @@ namespace NAMESPACE {
 void kernel_main() {
   size_t v1 = 0;
   size_t v2 = 1;
-  int32_t v3 = 0;
-  int32_t v4 = 1;
-  int32_t v5 = 2;
-  int32_t v6 = 4;
-  int32_t v7 = get_common_arg_val<uint32_t>(32);
-  mm_init(get_compile_time_arg_val(0), get_compile_time_arg_val(1), get_compile_time_arg_val(2), v3);
-  int32_t v8 = get_arg_val<uint32_t>(v2);
-  int32_t v9 = get_arg_val<uint32_t>(v1);
-  for (int32_t i10 = v9; i10 < v8; i10 += v4) {
+  size_t v3 = 2;
+  size_t v4 = 3;
+  int32_t v5 = 0;
+  int32_t v6 = 1;
+  int32_t v7 = 2;
+  int32_t v8 = 4;
+  int32_t v9 = get_common_arg_val<uint32_t>(42);
+  mm_init(get_compile_time_arg_val(0), get_compile_time_arg_val(1), get_compile_time_arg_val(3), v5);
+  int32_t v10 = get_arg_val<uint32_t>(v2);
+  int32_t v11 = get_arg_val<uint32_t>(v1);
+  for (int32_t i12 = v11; i12 < v10; i12 += v6) {
     tile_regs_acquire();
-    mm_init_short(get_compile_time_arg_val(0), get_compile_time_arg_val(1), v3);
-    for (int32_t j11 = v3; j11 < ((int32_t) ((uint32_t) v7 + (uint32_t) 63) / 64); j11 += v4) {
+    mm_init_short(get_compile_time_arg_val(0), get_compile_time_arg_val(1), v5);
+    for (int32_t j13 = v5; j13 < ((int32_t) ((uint32_t) v9 + (uint32_t) 63) / 64); j13 += v6) {
       {
       DeviceZoneScopedN("cb_wait_front");
-      cb_wait_front(get_compile_time_arg_val(0), v5);
+      cb_wait_front(get_compile_time_arg_val(0), v7);
       }
       {
       DeviceZoneScopedN("cb_wait_front");
-      cb_wait_front(get_compile_time_arg_val(1), v6);
+      cb_wait_front(get_compile_time_arg_val(1), v8);
       }
-      size_t v12;
-      v12 = v1;
-      for (int32_t k13 = v3; k13 < v5; k13 += v4) {
-        size_t v14 = v12;
-        for (int32_t l15 = v3; l15 < v5; l15 += v4) {
-          int32_t v16 = (int32_t) ((uint32_t) ((int32_t) ((uint32_t) l15 * (uint32_t) v5)) + (uint32_t) k13);
-          matmul_tiles(get_compile_time_arg_val(0), get_compile_time_arg_val(1), l15, v16, v14);
+      size_t v14;
+      v14 = v1;
+      for (int32_t k15 = v5; k15 < v7; k15 += v6) {
+        size_t v16 = v14;
+        for (int32_t l17 = v5; l17 < v7; l17 += v6) {
+          int32_t v18 = (int32_t) ((uint32_t) ((int32_t) ((uint32_t) l17 * (uint32_t) v7)) + (uint32_t) k15);
+          matmul_tiles(get_compile_time_arg_val(0), get_compile_time_arg_val(1), l17, v18, v16);
         }
-        v12 = v14 + v2;
+        v14 = v16 + v2;
       }
-      cb_pop_front(get_compile_time_arg_val(0), v5);
-      cb_pop_front(get_compile_time_arg_val(1), v6);
+      cb_pop_front(get_compile_time_arg_val(0), v7);
+      cb_pop_front(get_compile_time_arg_val(1), v8);
     }
-    cb_reserve_back(get_compile_time_arg_val(2), v5);
+    {
+    DeviceZoneScopedN("cb_wait_front");
+    cb_wait_front(get_compile_time_arg_val(2), v7);
+    }
+    copy_tile_init(get_compile_time_arg_val(2));
+    copy_tile(get_compile_time_arg_val(2), v1, v3);
+    copy_tile(get_compile_time_arg_val(2), v2, v4);
+    cb_pop_front(get_compile_time_arg_val(2), v7);
+    add_binary_tile_init();
+    add_binary_tile(v1, v3, v1);
+    add_binary_tile(v2, v4, v2);
+    cb_reserve_back(get_compile_time_arg_val(3), v7);
     tile_regs_commit();
     {
     DeviceZoneScopedN("tile_regs_wait");
     tile_regs_wait();
     }
-    pack_tile<false>(v3, get_compile_time_arg_val(2), v3);
-    pack_tile<false>(v4, get_compile_time_arg_val(2), v4);
+    pack_tile<false>(v5, get_compile_time_arg_val(3), v5);
+    pack_tile<false>(v6, get_compile_time_arg_val(3), v6);
     tile_regs_release();
-    cb_push_back(get_compile_time_arg_val(2), v5);
+    cb_push_back(get_compile_time_arg_val(3), v7);
   }
   return;
 }

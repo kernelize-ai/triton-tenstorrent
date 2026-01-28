@@ -55,6 +55,19 @@ protected:
   Value paddingOption;
 };
 
+/// Walk up the stack to find the offset of the register buffer for the given
+/// value.
+int64_t lookupRegisterIndex(Value v);
+
+/// Tile dim size
+const int64_t kTileDimSize = 32;
+
+/// Calculate the number of tiles to cover a type shape
+int64_t getNumTiles(Type type);
+
+/// Convert a elements shape to a tiles shape
+SmallVector<int64_t, 2> convertShapeToTileShape(ArrayRef<int64_t> shape);
+
 } // namespace npu
 } // namespace triton
 } // namespace mlir

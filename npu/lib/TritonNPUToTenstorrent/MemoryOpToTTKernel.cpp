@@ -182,10 +182,10 @@ struct ConvertTensorDescLoadOp
     rewriter.restoreInsertionPoint(opInsertionPt);
 
     auto loadResultType = cast<RankedTensorType>(op.getResult().getType());
-    auto dotOpEncoding = cast<npu::tt::TiledDotOperandEncodingAttr>(
-        loadResultType.getEncoding());
-    LDBG("Lowering load op with encoding " << dotOpEncoding << "\n");
-    auto layout = gpu::toLinearLayout(loadResultType.getShape(), dotOpEncoding);
+    LDBG("Lowering load op with encoding " << loadResultType.getEncoding()
+                                           << "\n");
+    auto layout = gpu::toLinearLayout(loadResultType.getShape(),
+                                      loadResultType.getEncoding());
     layout = layout.sublayout({S("register"), S("tile")},
                               llvm::to_vector(layout.getOutDimNames()));
     LDBG("Register/Tile layout:\n" << layout << "\n");
@@ -194,8 +194,12 @@ struct ConvertTensorDescLoadOp
     LDBG("Generating " << numTiles << " tile loads");
 
     auto outDimNames = llvm::to_vector(layout.getOutDimNames());
+    auto dotOpEncoding = dyn_cast<npu::tt::TiledDotOperandEncodingAttr>(
+        loadResultType.getEncoding());
     auto tiledParent =
-        cast<npu::tt::TiledEncodingAttr>(dotOpEncoding.getParent());
+        dotOpEncoding
+            ? cast<npu::tt::TiledEncodingAttr>(dotOpEncoding.getParent())
+            : cast<npu::tt::TiledEncodingAttr>(loadResultType.getEncoding());
     auto tileShape = tiledParent.getTileShape();
     auto order = tiledParent.getOrder();
     auto offsets = op.getIndices();
@@ -313,8 +317,14 @@ struct ConvertStoreOp : public OpConversionPattern<triton::StoreOp> {
                   ConversionPatternRewriter &rewriter) const override {
     Location loc = op.getLoc();
 
-    auto cb = adaptor.getValue();
-    LDBG("Store op value: " << cb << "\nwith type: " << cb.getType());
+    auto localLoadOp = op.getValue().getDefiningOp();
+    if (!isa<gpu::LocalLoadOp>(localLoadOp)) {
+      assert(false && "expected store from a local load op");
+      return failure();
+    }
+    auto loadOp = cast<gpu::LocalLoadOp>(localLoadOp);
+    auto cb = rewriter.getRemappedValue(loadOp.getSrc());
+    LDBG("Store op cb: " << cb << "\nwith type: " << cb.getType());
     assert(isa<ttkernel::CBType>(cb.getType()) && "expected cb type");
 
     auto ptrInfo = pointerInfoAnalysis->getInfo(op);
@@ -344,6 +354,7 @@ struct ConvertStoreOp : public OpConversionPattern<triton::StoreOp> {
 
     // determine how many tiles we need to load by converting the shape to tiles
     const int32_t numTiles = cast<ttkernel::CBType>(cb.getType()).getNumTiles();
+    // const int32_t numTiles = getNumTiles(cb.getType());
     Value numPages = arith::createConstantI32(loc, rewriter, numTiles);
 
     Value l1Addr = ttkernel::GetReadPtrOp::create(rewriter, loc, cb);
@@ -404,16 +415,7 @@ struct ConvertLocalStoreOp : public OpConversionPattern<gpu::LocalStoreOp> {
       // reserve back the cb for pack tile
       ttkernel::CBReserveBackOp::create(rewriter, loc, dst, numPages);
 
-      auto srcType = cast<RankedTensorType>(op.getSrc().getType());
-      unsigned destIndexOffset = 0;
-      if (auto registerEncodingAttr =
-              dyn_cast<npu::tt::RegisterEncodingAttr>(srcType.getEncoding())) {
-        destIndexOffset = registerEncodingAttr.getIndex();
-      }
-
-      // commit and wait before packing tiles
-      ttkernel::TileRegsCommitOp::create(rewriter, loc);
-      ttkernel::TileRegsWaitOp::create(rewriter, loc);
+      auto destIndexOffset = lookupRegisterIndex(op.getSrc());
 
       for (unsigned i = destIndexOffset;
            i < destIndexOffset + dstCBType.getNumTiles(); ++i) {
@@ -422,8 +424,6 @@ struct ConvertLocalStoreOp : public OpConversionPattern<gpu::LocalStoreOp> {
             rewriter, loc, arith::createConstantI32(loc, rewriter, i), dst,
             arith::createConstantI32(loc, rewriter, i - destIndexOffset));
       }
-
-      ttkernel::TileRegsReleaseOp::create(rewriter, loc);
 
       ttkernel::CBPushBackOp::create(rewriter, loc, dst, numPages);
       rewriter.eraseOp(op);
@@ -445,55 +445,55 @@ struct ConvertLocalLoadOp : public OpConversionPattern<gpu::LocalLoadOp> {
                   ConversionPatternRewriter &rewriter) const override {
     Location loc = op.getLoc();
 
+    auto dst = op.getResult();
     auto src = adaptor.getSrc();
+    assert(isa<ttkernel::CBType>(src.getType()) &&
+           "expected memref type for type converted load src");
     auto srcType = cast<ttkernel::CBType>(src.getType());
+    // Q: can this be replaced with
+    // tt::TritonTenstorrentDialect::getNumTiles(src.getType())?
     Value numPages =
         arith::createConstantI32(loc, rewriter, srcType.getNumTiles());
 
     LDBG("Converted load src type = " << src.getType() << "\n");
-    assert(isa<ttkernel::CBType>(src.getType()) &&
-           "expected memref type for type converted load src");
 
-    const bool hasDotUser = llvm::any_of(op->getUsers(), [](Operation *user) {
-      return isa<triton::DotOp>(user);
-    });
-
-    // 1. wait front on the cb to know data is ready
-    if (!hasDotUser) {
-      // Dot ops read directly from cbs and handle their own waits
-      // TODO: consider verifying that all users are dot ops?
-      // TODO: could we sink this into last block (3. copy data...)?
-      auto waitFrontOp =
-          ttkernel::CBWaitFrontOp::create(rewriter, loc, src, numPages);
-    }
-
-    // 2. for ops that operate directly on data in cbs, just replace the load op
-    // with its ptr
-    assert(op->hasOneUse() &&
-           "expected local load with store user to have one use");
-    if (isStoreLike(*op->getUsers().begin())) {
-      rewriter.replaceOp(op, src);
-      return success();
-    }
-
-    auto dst = op.getResult();
-    auto dstType = cast<RankedTensorType>(dst.getType());
-    if (isa<npu::tt::TiledDotOperandEncodingAttr>(dstType.getEncoding()) ||
-        isa<gpu::DotOperandEncodingAttr>(dstType.getEncoding())) {
-      // Dot ops read directly from cbs, so skip the copy tile and just replace
+    int64_t registerIndex = lookupRegisterIndex(dst);
+    if (registerIndex == -1) {
+      // Ops that read directly from cbs, so skip the copy tile and just replace
       // the load with its cb src
+      if (isStoreLike(*op->getUsers().begin())) {
+        assert(op->hasOneUse() &&
+               "expected local load with store user to have one use");
+        ttkernel::CBWaitFrontOp::create(rewriter, loc, src, numPages);
+      } else {
+        // Dot ops handle their own waits
+        const bool hasDotUser =
+            llvm::all_of(op->getUsers(), [](Operation *user) {
+              return isa<triton::DotOp>(user);
+            });
+        assert(hasDotUser && "expected local load with only dot users");
+
+        auto dstType = cast<RankedTensorType>(dst.getType());
+        assert(
+            isa<npu::tt::TiledDotOperandEncodingAttr>(dstType.getEncoding()) ||
+            isa<gpu::DotOperandEncodingAttr>(dstType.getEncoding()));
+      }
+
       rewriter.replaceOp(op, src);
       return success();
     }
+    // Ops that read from registers, so wait for the data to be ready
+    ttkernel::CBWaitFrontOp::create(rewriter, loc, src, numPages);
 
-    // 3. copy data from the cb into DST register
+    // Copy data from the cb into DST register
     ttkernel::CopyTileInitOp::create(rewriter, loc, src);
-    Value c0 = arith::createIndexConstant(loc, rewriter, 0);
-    npu::tt::RegisterEncodingAttr loadEncoding =
-        cast<npu::tt::RegisterEncodingAttr>(dstType.getEncoding());
-    Value destRegisterIndex =
-        arith::createIndexConstant(loc, rewriter, loadEncoding.getIndex());
-    ttkernel::CopyTileOp::create(rewriter, loc, src, c0, destRegisterIndex);
+
+    for (unsigned i = 0; i < srcType.getNumTiles(); ++i) {
+      Value cBindex = arith::createIndexConstant(loc, rewriter, i);
+      Value regConst =
+          arith::createIndexConstant(loc, rewriter, registerIndex + i);
+      ttkernel::CopyTileOp::create(rewriter, loc, src, cBindex, regConst);
+    }
     ttkernel::CBPopFrontOp::create(rewriter, loc, src, numPages);
     rewriter.replaceOp(op, src);
     return success();

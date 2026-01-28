@@ -23,3 +23,22 @@ module attributes {"ttg.num-ctas" = 1 : i32, "ttg.num-warps" = 1 : i32, ttg.targ
         tt.return
     }
 }
+
+// -----
+
+// CHECK-DAG: #[[BLOCKED1:.+]] = #ttg.blocked<{sizePerThread = [1, 8], threadsPerWarp = [1, 1], warpsPerCTA = [1, 1], order = [1, 0]}>
+// CHECK-DAG: #[[TILED:.+]] = #triton_tenstorrent.tiled_encoding<{tilesPerCore = [1, 2], order = [1, 0], tileShape = [32, 32]}>
+
+#blocked1 = #ttg.blocked<{sizePerThread = [1, 8], threadsPerWarp = [1, 1], warpsPerCTA = [1, 1], order = [1, 0]}>
+module attributes {"ttg.num-ctas" = 1 : i32, "ttg.num-warps" = 1 : i32, "ttg.threads-per-warp" = 1 : i32} {
+    tt.func public @fused_dot_binary_op(%arg10: !tt.tensordesc<tensor<32x64xf16>>, %arg15: !tt.tensordesc<tensor<32x64xf16>>, %offs_am: i32, %offs_bn: i32, %c_6: tensor<32x64xf16, #blocked1>) {
+        %bias = tt.descriptor_load %arg15[%offs_am, %offs_bn] : !tt.tensordesc<tensor<32x64xf16>> -> tensor<32x64xf16, #blocked1>
+        // CHECK: %[[BIAS:.*]] = tt.descriptor_load
+        // CHECK-DAG: %[[RHS:.*]] = ttg.convert_layout %[[BIAS]] : tensor<32x64xf16, #[[BLOCKED1]]> -> tensor<32x64xf16, #[[TILED]]>
+        // CHECK-DAG: %[[LHS:.*]] = ttg.convert_layout %{{.*}} : tensor<32x64xf16, #[[BLOCKED1]]> -> tensor<32x64xf16, #[[TILED]]>
+        // CHECK: triton_tenstorrent.binary_compute["arith.addf"] %[[LHS]], %[[RHS]] : (tensor<32x64xf16, #[[TILED]]>, tensor<32x64xf16, #[[TILED]]>)
+        %c_7 = arith.addf %c_6, %bias : tensor<32x64xf16, #blocked1>
+        tt.descriptor_store %arg10[%offs_am, %offs_bn], %c_7 : !tt.tensordesc<tensor<32x64xf16>>, tensor<32x64xf16, #blocked1>
+        tt.return
+    }
+}

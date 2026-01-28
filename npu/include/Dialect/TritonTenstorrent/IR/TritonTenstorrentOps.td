@@ -4,6 +4,7 @@
 include "TritonTenstorrentDialect.td"
 include "triton/Dialect/Triton/IR/TritonTypes.td"
 include "triton/Dialect/Triton/IR/TritonAttrDefs.td"
+include "triton/Dialect/Triton/IR/TritonInterfaces.td"
 
 include "mlir/Interfaces/SideEffectInterfaces.td"  // Pure
 
@@ -12,7 +13,7 @@ class TTTS_Op<string mnemonic, list<Trait> traits = []> :
        !listconcat(traits, [])> {
 }
 
-def TTTS_BinaryComputeOp : TTTS_Op<"binary_compute", [Pure, SameOperandsAndResultShape]> {
+def TTTS_BinaryComputeOp : TTTS_Op<"binary_compute", [Pure, SameOperandsAndResultShape, SameOperandsAndResultEncoding]> {
   let summary = "Binary compute operation in Tenstorrent compute kernel.";
 
   let arguments = (ins AnyRankedTensor:$lhs,

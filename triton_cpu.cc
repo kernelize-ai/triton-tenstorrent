@@ -54,9 +54,8 @@ void init_triton_npu_passes_tenstorrent(py::module &&m) {
   m.def("add_core_specialize", [](mlir::PassManager &pm) {
     pm.addPass(mlir::triton::npu::createCoreSpecialize());
   });
-  m.def("add_propagate_register_indices", [](mlir::PassManager &pm) {
-    pm.addPass(
-        mlir::triton::npu::createTritonTenstorrentPropagateTileEncoding());
+  m.def("add_register_allocation", [](mlir::PassManager &pm) {
+    pm.addPass(mlir::triton::npu::createTritonTenstorrentRegAlloc());
   });
   m.def("remove_redundant_masks", [](mlir::PassManager &pm) {
     pm.addPass(
@@ -82,9 +81,6 @@ void init_triton_npu_passes_tenstorrent(py::module &&m) {
   });
   m.def("add_to_ttkernel_dialect", [](mlir::PassManager &pm) {
     pm.addPass(mlir::triton::npu::createConvertTritonNPUToTTKernel());
-  });
-  m.def("add_finalize_cb_transactions", [](mlir::PassManager &pm) {
-    pm.addPass(mlir::triton::npu::createFinalizeCBTransaction());
   });
 
   m.def("add_drop_function",

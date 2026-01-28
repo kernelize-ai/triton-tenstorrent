@@ -208,12 +208,9 @@ class CPUBackend(BaseBackend):
         pm = ir.pass_manager(mod.context)
         pm.enable_debug()
 
-        cpu.passes.tenstorrent.add_convert_compute_ops(pm)
-        cpu.passes.tenstorrent.add_propagate_register_indices(pm)
-        passes.ttgpuir.add_remove_layout_conversions(pm)
-
         cpu.passes.tenstorrent.add_accelerate_matmul(pm)
         passes.ttgpuir.add_remove_layout_conversions(pm)
+        cpu.passes.tenstorrent.add_convert_compute_ops(pm)
         cpu.passes.tenstorrent.add_remove_dot_load_layout_conversions(pm)
         passes.ttgpuir.add_remove_layout_conversions(pm)
         cpu.passes.tenstorrent.remove_redundant_masks(pm)
@@ -225,15 +222,10 @@ class CPUBackend(BaseBackend):
         passes.common.add_cse(pm)
         passes.common.add_canonicalizer(pm)
 
+        cpu.passes.tenstorrent.add_register_allocation(pm)
         cpu.passes.tenstorrent.add_canonicalize_matmul_loops(pm)
         cpu.passes.tenstorrent.add_to_ttkernel_dialect(pm)
         passes.common.add_canonicalizer(pm)
-
-        # TODO(adb): remove this pass
-        # cpu.passes.tenstorrent.add_finalize_cb_transactions(pm)
-
-        # tt-mlir pipeline
-        cpu.passes.tenstorrent.add_ttkernel_control_dst_selection(pm)
 
         pm.run(mod, "make_ttmlir")
         return mod
