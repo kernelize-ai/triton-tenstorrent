@@ -118,6 +118,25 @@ public:
   }
 
   void insertComputeInitializationOps() {
+    auto getLatestValue = [](ArrayRef<Value> values) -> Value {
+      Operation *latestOp = nullptr;
+      Value latestValue;
+
+      for (Value val : values) {
+        Operation *defOp = val.getDefiningOp();
+        if (!defOp)
+          continue; // Skip block arguments
+
+        if (!latestOp || latestOp->isBeforeInBlock(defOp)) {
+          latestOp = defOp;
+          latestValue = val;
+        }
+      }
+
+      return latestValue;
+    };
+
+    // mminit also does sfpu init
     if (addMMInit) {
       // mm_init goes after cb initialization ops. but we need to collect the
       // circular buffers first
@@ -133,33 +152,8 @@ public:
       ttkernel::PackTileOp packTileOp = *packTileOps.begin();
       Value outCb = packTileOp.getOutCb();
 
-      auto getLatestValue = [](ArrayRef<Value> values) -> Value {
-        Operation *latestOp = nullptr;
-        Value latestValue;
-
-        for (Value val : values) {
-          Operation *defOp = val.getDefiningOp();
-          if (!defOp)
-            continue; // Skip block arguments
-
-          if (!latestOp || latestOp->isBeforeInBlock(defOp)) {
-            latestOp = defOp;
-            latestValue = val;
-          }
-        }
-
-        return latestValue;
-      };
-
       Value latest = getLatestValue({aCb, bCb, outCb});
       builder.setInsertionPointAfterValue(latest);
-      if (addSFPUInit) {
-        // init sfpu above matmul init
-        Value inCb = copyTileOps.begin()->first.getCb0();
-        Value outCb = packTileOp.getOutCb();
-
-        ttkernel::InitSFPUOp::create(builder, loc, inCb, outCb);
-      }
 
       // TODO: support transpose. we cannot grab the transpose from the matmul
       // op as transpose could be defined inside the matmul loop
@@ -176,6 +170,9 @@ public:
       ttkernel::PackTileOp packTileOp = *packTileOps.begin();
       Value inCb = copyTileOps.begin()->first.getCb0();
       Value outCb = packTileOp.getOutCb();
+
+      Value latest = getLatestValue({inCb, outCb});
+      builder.setInsertionPointAfterValue(latest);
 
       ttkernel::InitSFPUOp::create(builder, acquireOp->getLoc(), inCb, outCb);
     }
