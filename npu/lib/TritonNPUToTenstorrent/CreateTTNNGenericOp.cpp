@@ -105,8 +105,10 @@ populateBlockStartEndArgs(Builder &b,
         auto coord = ttnn::CoreCoordAttr::get(ctx, r, c);
 
         uint32_t id = r * cols + c;
-        Attribute blockStartAttr = b.getI32IntegerAttr(id);
-        Attribute blockEndAttr = b.getI32IntegerAttr(id + 1);
+        // TODO: fix the printer so quotes are not required
+        Attribute blockStartAttr = ttnn::KernelNamedArgAttr::get(ctx, std::string("\"block_start\""), id);
+        Attribute blockEndAttr = ttnn::KernelNamedArgAttr::get(ctx, std::string("\"block_end\""), id + 1);
+
         auto rt = ttnn::CoreRuntimeArgsAttr::get(
             ctx, coord,
             ArrayRef<mlir::Attribute>{blockStartAttr, blockEndAttr});
