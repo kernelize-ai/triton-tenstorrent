@@ -67,7 +67,7 @@ void kernel_main() {
       matmul_tiles(get_compile_time_arg_val(0), get_compile_time_arg_val(1), v3, v3, v1);
       cb_pop_front(get_compile_time_arg_val(0), v4);
       cb_pop_front(get_compile_time_arg_val(1), v4);
-    } 
+    }
     {
     DeviceZoneScopedN("cb_wait_front");
     cb_wait_front(get_compile_time_arg_val(2), v4);
@@ -91,3 +91,4 @@ void kernel_main() {
 }
 void MAIN { kernel_main(); }
 }
+
