@@ -118,6 +118,25 @@ public:
   }
 
   void insertComputeInitializationOps() {
+    auto getLatestValue = [](ArrayRef<Value> values) -> Value {
+      Operation *latestOp = nullptr;
+      Value latestValue;
+
+      for (Value val : values) {
+        Operation *defOp = val.getDefiningOp();
+        if (!defOp)
+          continue; // Skip block arguments
+
+        if (!latestOp || latestOp->isBeforeInBlock(defOp)) {
+          latestOp = defOp;
+          latestValue = val;
+        }
+      }
+
+      return latestValue;
+    };
+
+    // mminit also does sfpu init
     if (addMMInit) {
       // mm_init goes after cb initialization ops. but we need to collect the
       // circular buffers first
@@ -133,38 +152,24 @@ public:
       ttkernel::PackTileOp packTileOp = *packTileOps.begin();
       Value outCb = packTileOp.getOutCb();
 
-      auto getLatestValue = [](ArrayRef<Value> values) -> Value {
-        Operation *latestOp = nullptr;
-        Value latestValue;
-
-        for (Value val : values) {
-          Operation *defOp = val.getDefiningOp();
-          if (!defOp)
-            continue; // Skip block arguments
-
-          if (!latestOp || latestOp->isBeforeInBlock(defOp)) {
-            latestOp = defOp;
-            latestValue = val;
-          }
-        }
-
-        return latestValue;
-      };
-
       Value latest = getLatestValue({aCb, bCb, outCb});
       builder.setInsertionPointAfterValue(latest);
-      if (addSFPUInit) {
-        // init sfpu above matmul init
-        Value inCb = copyTileOps.begin()->first.getCb0();
-        Value outCb = packTileOp.getOutCb();
-
-        ttkernel::InitSFPUOp::create(builder, loc, inCb, outCb);
-      }
 
       // TODO: support transpose. we cannot grab the transpose from the matmul
       // op as transpose could be defined inside the matmul loop
       Value transpose = arith::createConstantI32(loc, builder, 0);
       ttkernel::MatmulInitOp::create(builder, loc, aCb, bCb, outCb, transpose);
+
+      SmallVector<ttkernel::TileRegsAcquireOp, 4> tileRegsAcquireOps;
+      funcOp.walk([&](ttkernel::TileRegsAcquireOp op) {
+        tileRegsAcquireOps.push_back(op);
+      });
+      assert(!tileRegsAcquireOps.empty() && "expecting tile regs acquire op");
+      Operation *acquireOp = tileRegsAcquireOps.front();
+
+      builder.setInsertionPointAfter(acquireOp);
+      ttkernel::MatmulInitShortOp::create(builder, loc, aCb, bCb, transpose);
+
     } else if (addSFPUInit) {
       SmallVector<ttkernel::TileRegsAcquireOp, 4> tileRegsAcquireOps;
       funcOp.walk([&](ttkernel::TileRegsAcquireOp op) {
@@ -177,8 +182,25 @@ public:
       Value inCb = copyTileOps.begin()->first.getCb0();
       Value outCb = packTileOp.getOutCb();
 
+      Value latest = getLatestValue({inCb, outCb});
+      builder.setInsertionPointAfterValue(latest);
+
       ttkernel::InitSFPUOp::create(builder, acquireOp->getLoc(), inCb, outCb);
     }
+  }
+
+  void insertTileRegsOps() {
+    // look for groups of `ttkernel::PackTileOp` and insert sequences of
+    // TileRegsCommitOp, TileRegsWaitOp, and then (later) TileRegsReleaseOp
+    assert(!packTileOps.empty() && "expecting at least one pack tile op");
+    ttkernel::PackTileOp firstPackTileOp = *packTileOps.begin();
+    OpBuilder builder(firstPackTileOp);
+    ttkernel::TileRegsCommitOp::create(builder, firstPackTileOp.getLoc());
+    ttkernel::TileRegsWaitOp::create(builder, firstPackTileOp.getLoc());
+
+    ttkernel::PackTileOp lastPackTileOp = *packTileOps.rbegin();
+    builder.setInsertionPointAfter(lastPackTileOp);
+    ttkernel::TileRegsReleaseOp::create(builder, lastPackTileOp.getLoc());
   }
 
 private:
@@ -335,6 +357,7 @@ struct ConvertTritonNPUToTTKernelPass
       InitializationHelper initHelper(funcOp);
       initHelper.insertTileRegsAcquireOps();
       initHelper.insertComputeInitializationOps();
+      initHelper.insertTileRegsOps();
     });
   }
 };

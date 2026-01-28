@@ -251,6 +251,7 @@ module attributes {"ttg.num-ctas" = 1 : i32, "ttg.num-warps" = 1 : i32, ttg.targ
         %6 = arith.addi %K, %c31_i32 : i32
         %7 = arith.divsi %6, %c32_i32 : i32
         // CHECK: ttkernel.tile_regs_acquire()
+        // CHECK: ttkernel.mm_init_short(%[[A_CB]], %[[B_CB]], %[[c0_i32]])
         // CHECK: %[[K_PLUS_31:.*]] = arith.addi %[[K_SIZE]], %[[c31_i32]]
         // CHECK: %[[K_TILES_END:.*]] = arith.divsi %[[K_PLUS_31]], %[[c32_i32]]
         // CHECK: scf.for %[[ARG0:.*]] = %[[c0_i32]] to %[[K_TILES_END]] step %[[c1_i32]] : i32 {
@@ -269,7 +270,10 @@ module attributes {"ttg.num-ctas" = 1 : i32, "ttg.num-warps" = 1 : i32, ttg.targ
         // CHECK-DAG: ttkernel.cb_pop_front(%[[B_CB]], %[[c1_i32]])
         // CHECK: }
         // CHECK: ttkernel.cb_reserve_back(%[[C_CB]], %[[c1_i32]])
+        // CHECK: ttkernel.tile_regs_commit()
+        // CHECK: ttkernel.tile_regs_wait()
         // CHECK: ttkernel.pack_tile(%[[c0_i32]], %[[C_CB]], %[[c0_i32]], false)
+        // CHECK: ttkernel.tile_regs_release()
         // CHECK: ttkernel.cb_push_back(%[[C_CB]], %[[c1_i32]])
         // CHECK: return
         tt.return
@@ -409,12 +413,15 @@ module attributes {"ttg.num-ctas" = 1 : i32, "ttg.num-warps" = 1 : i32, ttg.targ
     // CHECK-DAG: %[[c1_i32:.*]] = arith.constant 1 : i32
     // CHECK-DAG: %[[c0_index:.*]] = arith.constant 0 : index
     // CHECK-DAG: %[[c1_index:.*]] = arith.constant 1 : index
+    // CHECK: ttkernel.mm_init
     // CHECK-DAG: %[[START:.*]] = ttkernel.get_arg_val(%[[c0_index]])
     // CHECK-DAG: %[[END:.*]] = ttkernel.get_arg_val(%[[c1_index]])
 
     %k_tiles = arith.addi %arg32, %c31_i32 : i32
     %k_tiles_0 = arith.divsi %k_tiles, %c32_i32 : i32
     // CHECK: scf.for %[[arg0:.*]] = %[[START]] to %[[END]] step %[[c1_i32]] : i32 {
+    // CHECK: ttkernel.tile_regs_acquire()
+    // CHECK: ttkernel.mm_init_short
     scf.for %arg33 = %2 to %1 step %c1_i32  : i32 {
       %3 = ttc.current_block %arg33 : i32
       %accumulator = scf.for %accumulator_1 = %c0_i32 to %k_tiles_0 step %c1_i32 iter_args(%arg35 = %cst) -> (tensor<32x32xf32, #blocked>)  : i32 {
@@ -427,6 +434,10 @@ module attributes {"ttg.num-ctas" = 1 : i32, "ttg.num-warps" = 1 : i32, ttg.targ
       ttg.local_store %c, %0 : tensor<32x32xf16, #blocked> -> !ttg.memdesc<32x32xf16, #shared, #smem, mutable>
     }
     // CHECK: }
+    // CHECK: ttkernel.tile_regs_commit()
+    // CHECK: ttkernel.tile_regs_wait()
+    // CHECK: ttkernel.pack_tile
+    // CHECK: ttkernel.tile_regs_release()
     // CHECK: return
     tt.return
   }

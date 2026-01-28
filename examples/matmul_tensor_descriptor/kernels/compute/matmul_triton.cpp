@@ -56,6 +56,7 @@ void kernel_main() {
   int32_t v9 = get_arg_val<uint32_t>(v1);
   for (int32_t i10 = v9; i10 < v8; i10 += v4) {
     tile_regs_acquire();
+    mm_init_short(get_compile_time_arg_val(0), get_compile_time_arg_val(1), v3);
     for (int32_t j11 = v3; j11 < ((int32_t) ((uint32_t) v7 + (uint32_t) 63) / 64); j11 += v4) {
       {
       DeviceZoneScopedN("cb_wait_front");

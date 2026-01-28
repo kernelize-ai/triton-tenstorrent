@@ -41,7 +41,10 @@ module attributes {"ttg.num-ctas" = 1 : i32, "ttg.num-warps" = 1 : i32, ttg.targ
     %output = triton_tenstorrent.binary_compute["arith.addf"] %x_0, %y_1 {triton_tenstorrent.alloc_offset = 2 : i32, triton_tenstorrent.alloc_size = 1 : i32} : (tensor<1024xf32, #blocked>, tensor<1024xf32, #blocked>) -> tensor<1024xf32, #blocked>
 
     // CHECK-DAG: ttkernel.cb_reserve_back(%[[OUTPUT]], %[[c1_i32]])
+    // CHECK: ttkernel.tile_regs_commit()
+    // CHECK: ttkernel.tile_regs_wait()
     // CHECK: ttkernel.pack_tile(%[[c2_i32]], %[[OUTPUT]], %[[c0_i32]], false)
+    // CHECK: ttkernel.tile_regs_release()
     // CHECK: ttkernel.cb_push_back(%[[OUTPUT]], %[[c1_i32]])
     ttg.local_store %output, %0 : tensor<1024xf32, #blocked> -> !ttg.memdesc<1024xf32, #shared, #smem, mutable>
     // CHECK: return

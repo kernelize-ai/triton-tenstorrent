@@ -31,8 +31,8 @@ void kernel_main() {
     int32_t v19 = (int32_t) ((uint32_t) i18 * (uint32_t) 2048);
     cb_reserve_back(get_compile_time_arg_val(0), v3);
     int32_t v20 = get_write_ptr(get_compile_time_arg_val(0));
-    uint64_t temp_85 = v15.get_noc_addr((int32_t) ((uint32_t) v19 / (uint32_t) v13), v5);
-    noc_async_read(temp_85, v20, v13);
+    uint64_t temp_83 = v15.get_noc_addr((int32_t) ((uint32_t) v19 / (uint32_t) v13), v5);
+    noc_async_read(temp_83, v20, v13);
     {
     DeviceZoneScopedN("noc_async_read_barrier");
     noc_async_read_barrier();
@@ -40,8 +40,8 @@ void kernel_main() {
     cb_push_back(get_compile_time_arg_val(0), v3);
     cb_reserve_back(get_compile_time_arg_val(1), v3);
     int32_t v21 = get_write_ptr(get_compile_time_arg_val(1));
-    uint64_t temp_94 = v11.get_noc_addr((int32_t) ((uint32_t) v19 / (uint32_t) v9), v5);
-    noc_async_read(temp_94, v21, v9);
+    uint64_t temp_92 = v11.get_noc_addr((int32_t) ((uint32_t) v19 / (uint32_t) v9), v5);
+    noc_async_read(temp_92, v21, v9);
     {
     DeviceZoneScopedN("noc_async_read_barrier");
     noc_async_read_barrier();
