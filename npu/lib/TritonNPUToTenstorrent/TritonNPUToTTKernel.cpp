@@ -159,6 +159,17 @@ public:
       // op as transpose could be defined inside the matmul loop
       Value transpose = arith::createConstantI32(loc, builder, 0);
       ttkernel::MatmulInitOp::create(builder, loc, aCb, bCb, outCb, transpose);
+
+      SmallVector<ttkernel::TileRegsAcquireOp, 4> tileRegsAcquireOps;
+      funcOp.walk([&](ttkernel::TileRegsAcquireOp op) {
+        tileRegsAcquireOps.push_back(op);
+      });
+      assert(!tileRegsAcquireOps.empty() && "expecting tile regs acquire op");
+      Operation *acquireOp = tileRegsAcquireOps.front();
+
+      builder.setInsertionPointAfter(acquireOp);
+      ttkernel::MatmulInitShortOp::create(builder, loc, aCb, bCb, transpose);
+
     } else if (addSFPUInit) {
       SmallVector<ttkernel::TileRegsAcquireOp, 4> tileRegsAcquireOps;
       funcOp.walk([&](ttkernel::TileRegsAcquireOp op) {
