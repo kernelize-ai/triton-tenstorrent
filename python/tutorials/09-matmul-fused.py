@@ -76,8 +76,8 @@ def matmul_get_configs(pre_hook=None):
         triton.Config({'BLOCK_SIZE_M': BM, 'BLOCK_SIZE_N': BN, "BLOCK_SIZE_K": BK, "GROUP_SIZE_M": 1}, num_stages=s,
                       num_warps=w, pre_hook=pre_hook)
         for BM in [32]
-        for BN in [64]
-        for BK in [64]
+        for BN in [32]
+        for BK in [32]
         for s in ([1])
         for w in [1]
     ]
@@ -102,15 +102,15 @@ def matmul_tma_set_block_size_hook(nargs):
     key=["M", "N", "K", "WARP_SPECIALIZE"],
 )
 @triton.jit(launch_metadata=_matmul_launch_metadata)
-def matmul_kernel_tma(a_desc, b_desc, c_desc, bias_desc,  #
-                      M, N, K,  #
-                      BLOCK_SIZE_M: tl.constexpr,  #
-                      BLOCK_SIZE_N: tl.constexpr,  #
-                      BLOCK_SIZE_K: tl.constexpr,  #
-                      GROUP_SIZE_M: tl.constexpr,  #
-                      FP8_OUTPUT: tl.constexpr,  #
-                      WARP_SPECIALIZE: tl.constexpr,  #
-                      ):
+def matmul_kernel_fused(a_desc, b_desc, c_desc, bias_desc,  #
+                        M, N, K,  #
+                        BLOCK_SIZE_M: tl.constexpr,  #
+                        BLOCK_SIZE_N: tl.constexpr,  #
+                        BLOCK_SIZE_K: tl.constexpr,  #
+                        GROUP_SIZE_M: tl.constexpr,  #
+                        FP8_OUTPUT: tl.constexpr,  #
+                        WARP_SPECIALIZE: tl.constexpr,  #
+                        ):
     dtype = tl.float8e4nv if FP8_OUTPUT else tl.float16
 
     pid = tl.program_id(axis=0)
@@ -172,7 +172,7 @@ def matmul_tma(a, b, bias, warp_specialize: bool):
         BLOCK_N = META["BLOCK_SIZE_N"]
         return (triton.cdiv(M, BLOCK_M) * triton.cdiv(N, BLOCK_N), )
 
-    matmul_kernel_tma[grid](
+    matmul_kernel_fused[grid](
         a_desc, b_desc, c_desc, bias_desc,  #
         M, N, K,  #
         FP8_OUTPUT=dtype == torch.float8_e4m3fn,  #
