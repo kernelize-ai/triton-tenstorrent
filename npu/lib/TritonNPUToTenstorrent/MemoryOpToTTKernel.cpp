@@ -487,10 +487,13 @@ struct ConvertLocalLoadOp : public OpConversionPattern<gpu::LocalLoadOp> {
 
     // Copy data from the cb into DST register
     ttkernel::CopyTileInitOp::create(rewriter, loc, src);
-    Value c0 = arith::createIndexConstant(loc, rewriter, 0);
 
-    Value regConst = arith::createIndexConstant(loc, rewriter, registerIndex);
-    ttkernel::CopyTileOp::create(rewriter, loc, src, c0, regConst);
+    for (unsigned i = 0; i < srcType.getNumTiles(); ++i) {
+      Value cBindex = arith::createIndexConstant(loc, rewriter, i);
+      Value regConst =
+          arith::createIndexConstant(loc, rewriter, registerIndex + i);
+      ttkernel::CopyTileOp::create(rewriter, loc, src, cBindex, regConst);
+    }
     ttkernel::CBPopFrontOp::create(rewriter, loc, src, numPages);
     rewriter.replaceOp(op, src);
     return success();
