@@ -46,7 +46,7 @@ void golden_matmul(
                 sum += static_cast<float>(a[idx_a + k]) *
                        static_cast<float>(b[idx_b + k * N]);
             }
-            output[j + i * N] = bfloat16(sum) + bias[j + i * N];
+            output[j + i * N] = bfloat16(sum + float(bias[j + i * N]));
         }
     }
 }
@@ -222,8 +222,8 @@ void matmul_multi_core(
     tt_metal::CreateCircularBuffer(
         program,
         all_cores,  // create on all cores
-        CircularBufferConfig(C_tiles_per_block * cb_buffer_depth * single_tile_size, {{CBIndex::c_16, cb_data_format}})
-            .set_page_size(CBIndex::c_16, single_tile_size));
+        CircularBufferConfig(C_tiles_per_block * cb_buffer_depth * single_tile_size, {{CBIndex::c_4, cb_data_format}})
+            .set_page_size(CBIndex::c_4, single_tile_size));
 
     // Create Kernels (Reader, Writer, Compute)
     // - Reader kernel: Handles reading input data from DRAM into circular buffers
@@ -235,7 +235,7 @@ void matmul_multi_core(
     std::vector<uint32_t> compile_args = {static_cast<uint32_t>(CBIndex::c_0),
                                         static_cast<uint32_t>(CBIndex::c_1),
                                         static_cast<uint32_t>(CBIndex::c_2),
-                                        static_cast<uint32_t>(CBIndex::c_16)};
+                                        static_cast<uint32_t>(CBIndex::c_4)};
     
     auto reader_id = tt_metal::CreateKernel(
         program,
@@ -260,7 +260,7 @@ void matmul_multi_core(
         program,
         OVERRIDE_KERNEL_PREFIX "matmul_fused/kernels/compute/matmul_triton.cpp",
         all_cores,
-        tt_metal::ComputeConfig{.math_fidelity = math_fidelity, .compile_args = compile_args});
+        tt_metal::ComputeConfig{.math_fidelity = math_fidelity, .fp32_dest_acc_en = false, .dst_full_sync_en = false, .compile_args = compile_args});
 
     // Set Runtime Arguments for Kernels
     // Each core needs to know which portion of the work it's responsible for. We are parallelizing across output
@@ -369,6 +369,7 @@ void matmul_multi_core(
     // returns, the output vector is fully populated).
     distributed::EnqueueWriteMeshBuffer(cq, src0_dram_buffer, a, false);
     distributed::EnqueueWriteMeshBuffer(cq, src1_dram_buffer, b, false);
+    distributed::EnqueueWriteMeshBuffer(cq, bias_dram_buffer, bias, false);
     workload.add_program(device_range, std::move(program));
     distributed::EnqueueMeshWorkload(cq, workload, false);
     // Blocking read waits for completion before returning and resizes 'output' as needed
@@ -462,6 +463,7 @@ int main(int argc, char* argv[]) {
         // and enables efficient operations on the accelerator.
         src0_vec = tilize_nfaces(src0_vec, M, K);
         src1_vec = tilize_nfaces(src1_vec, K, N);
+        bias_vec = tilize_nfaces(bias_vec, M, N);
 
 #ifdef DEBUG_PRINTS
         fmt::print("A post-tilize:\n{}\n", slice_to_string(src0_vec, /*start=*/0, /*stop=*/M * K, /*step=*/16, /*line_break_every=*/K / 16));
