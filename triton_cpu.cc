@@ -82,9 +82,6 @@ void init_triton_npu_passes_tenstorrent(py::module &&m) {
   m.def("add_to_ttkernel_dialect", [](mlir::PassManager &pm) {
     pm.addPass(mlir::triton::npu::createConvertTritonNPUToTTKernel());
   });
-  m.def("add_finalize_cb_transactions", [](mlir::PassManager &pm) {
-    pm.addPass(mlir::triton::npu::createFinalizeCBTransaction());
-  });
 
   m.def("add_drop_function",
         [](mlir::PassManager &pm, const std::string &funcName) {
