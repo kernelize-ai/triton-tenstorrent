@@ -12,6 +12,8 @@ add_mlir_doc(TritonTenstorrentOps TritonTenstorrentOps dialects/ -gen-op-doc)
 add_public_tablegen_target(TritonTenstorrentTableGen)
 
 set(LLVM_TARGET_DEFINITIONS TritonTenstorrentAttrDefs.td)
+mlir_tablegen(Enums.h.inc -gen-enum-decls)
+mlir_tablegen(Enums.cpp.inc -gen-enum-defs)
 mlir_tablegen(AttrDefs.h.inc -gen-attrdef-decls -attrdefs-dialect=triton_tenstorrent)
 mlir_tablegen(AttrDefs.cpp.inc -gen-attrdef-defs -attrdefs-dialect=triton_tenstorrent)
 add_public_tablegen_target(TritonTenstorrentAttrDefsIncGen)

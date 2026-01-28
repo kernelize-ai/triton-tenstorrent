@@ -328,14 +328,15 @@ struct ConvertTritonNPUToTTKernelPass
       return signalPassFailure();
 
     // insert tile regs acquire before copy tile ops
-    mod.walk([&](func::FuncOp funcOp) {
-      if (!funcOp.getSymName().ends_with("__compute"))
-        return;
-
-      InitializationHelper initHelper(funcOp);
-      initHelper.insertTileRegsAcquireOps();
-      initHelper.insertComputeInitializationOps();
-    });
+    for (auto funcOp : mod.getOps<func::FuncOp>()) {
+      auto attr = funcOp->getAttrOfType<ttkernel::ThreadTypeAttr>(
+          ttkernel::ThreadTypeAttr::name);
+      if (attr && attr.getValue() == ttkernel::ThreadType::Compute) {
+        InitializationHelper initHelper(funcOp);
+        initHelper.insertTileRegsAcquireOps();
+        initHelper.insertComputeInitializationOps();
+      }
+    }
   }
 };
 

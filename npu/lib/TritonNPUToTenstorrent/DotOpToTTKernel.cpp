@@ -30,8 +30,7 @@ struct ConvertDotOp : public OpConversionPattern<triton::DotOp> {
   LogicalResult
   matchAndRewrite(triton::DotOp op, OpAdaptor adaptor,
                   ConversionPatternRewriter &rewriter) const override {
-    auto func = op->getParentOfType<func::FuncOp>();
-    if (!func.getSymName().ends_with("__compute")) {
+    if (!isComputeKernel(op->getParentOfType<func::FuncOp>())) {
       // Hack until we can fix CoreSpecialize
       LDBG("Deleting dot op from non-compute kernel");
       rewriter.replaceOp(op, adaptor.getC());
@@ -42,8 +41,8 @@ struct ConvertDotOp : public OpConversionPattern<triton::DotOp> {
     auto dialect =
         op->getContext()->getLoadedDialect<tt::TritonTenstorrentDialect>();
     int64_t alloc_offset =
-        dialect->getAllocOffsetAttrHelper().getAttr(op).getInt();
-    int64_t alloc_size = dialect->getAllocSizeAttrHelper().getAttr(op).getInt();
+        dialect->getRegOffsetAttrHelper().getAttr(op).getInt();
+    int64_t alloc_size = dialect->getRegSizeAttrHelper().getAttr(op).getInt();
     LDBG("Dot op allocation offset: " << alloc_offset
                                       << " size: " << alloc_size);
 

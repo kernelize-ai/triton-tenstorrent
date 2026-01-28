@@ -233,11 +233,35 @@ TensorDescriptorUnpacked::TensorDescriptorUnpacked(TensorDescType type,
   paddingOption = pack[1 + 2 * rank];
 }
 
+FunctionOpInterface findComputeKernel(ModuleOp mod) {
+  auto dialect =
+      mod.getContext()->getLoadedDialect<tt::TritonTenstorrentDialect>();
+  auto helper = dialect->getFuncTypeAttrHelper();
+  for (auto func : mod.getOps<FunctionOpInterface>()) {
+    if (helper.isAttrPresent(func)) {
+      auto type = helper.getAttr(func).getValue();
+      if (type == triton::npu::tt::DerivedFuncType::ComputeFunc) {
+        return func;
+      }
+    }
+  }
+  return nullptr;
+}
+
+bool isComputeKernel(FunctionOpInterface func) {
+  auto dialect =
+      func->getContext()->getLoadedDialect<tt::TritonTenstorrentDialect>();
+  auto helper = dialect->getFuncTypeAttrHelper();
+  return helper.isAttrPresent(func) &&
+         helper.getAttr(func).getValue() ==
+             triton::npu::tt::DerivedFuncType::ComputeFunc;
+}
+
 int64_t lookupRegisterIndex(Value value) {
   if (auto op = value.getDefiningOp()) {
     auto dialect =
         op->getContext()->getLoadedDialect<tt::TritonTenstorrentDialect>();
-    auto helper = dialect->getAllocOffsetAttrHelper();
+    auto helper = dialect->getRegOffsetAttrHelper();
     if (helper.isAttrPresent(op)) {
       return helper.getAttr(op).getInt();
     }

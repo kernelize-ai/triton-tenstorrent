@@ -55,12 +55,16 @@ protected:
   Value paddingOption;
 };
 
+FunctionOpInterface findComputeKernel(ModuleOp mod);
+
+bool isComputeKernel(FunctionOpInterface func);
+
 /// Walk up the stack to find the offset of the register buffer for the given
 /// value.
 int64_t lookupRegisterIndex(Value v);
 
 /// Tile dim size
-const int64_t kTileDimSize = 32;
+constexpr int64_t kTileDimSize = 32;
 
 /// Calculate the number of tiles to cover a type shape
 int64_t getNumTiles(Type type);

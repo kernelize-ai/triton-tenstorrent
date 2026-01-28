@@ -477,9 +477,9 @@ class TritonTenstorrentRegAllocPass
     if (auto op = result.getDefiningOp()) {
       auto dialect =
           op->getContext()->getLoadedDialect<tt::TritonTenstorrentDialect>();
-      dialect->getAllocOffsetAttrHelper().setAttr(
+      dialect->getRegOffsetAttrHelper().setAttr(
           op, IntegerAttr::get(IntegerType::get(op->getContext(), 32), offset));
-      dialect->getAllocSizeAttrHelper().setAttr(
+      dialect->getRegSizeAttrHelper().setAttr(
           op, IntegerAttr::get(IntegerType::get(op->getContext(), 32), size));
       return;
     } else if (auto blockArg = dyn_cast<BlockArgument>(result)) {
@@ -500,27 +500,26 @@ public:
     ModuleOp m = getOperation();
     ModuleRegAllocation moduleRegAllocation(m);
 
-    m.walk([&](FuncOp funcOp) {
-      auto funcName = funcOp.getName();
-      LDBG("RegAllocPass: Processing compute function " << funcName);
-      if (funcName.ends_with("__compute")) {
-        auto *funcAllocation = moduleRegAllocation.getFuncData(funcOp);
-        assert(funcAllocation && "Function allocation not found");
-        RegAllocation::ValueBufferIdT liveBuffers =
-            funcAllocation->getLiveBuffers();
-        for (auto &[result, buffers] : liveBuffers) {
-          for (auto bufferId : buffers) {
-            LDBG("RegAllocPass: Buffer id " << bufferId << " for result "
-                                            << result);
-            int offset = funcAllocation->getOffset(bufferId);
-            int size = funcAllocation->getAllocatedSize(bufferId);
-            LDBG("RegAllocPass: Setting allocation.offset = "
-                 << offset << " with size " << size);
-            assignRegisterOffset(result, offset, size);
-          }
-        }
+    auto computeKernel = findComputeKernel(m);
+    if (!computeKernel) {
+      return;
+    }
+
+    auto *funcAllocation = moduleRegAllocation.getFuncData(computeKernel);
+    assert(funcAllocation && "Function allocation not found");
+    RegAllocation::ValueBufferIdT liveBuffers =
+        funcAllocation->getLiveBuffers();
+    for (auto &[result, buffers] : liveBuffers) {
+      for (auto bufferId : buffers) {
+        LDBG("RegAllocPass: Buffer id " << bufferId << " for result "
+                                        << result);
+        int offset = funcAllocation->getOffset(bufferId);
+        int size = funcAllocation->getAllocatedSize(bufferId);
+        LDBG("RegAllocPass: Setting allocation.offset = "
+             << offset << " with size " << size);
+        assignRegisterOffset(result, offset, size);
       }
-    });
+    }
   }
 };
 
