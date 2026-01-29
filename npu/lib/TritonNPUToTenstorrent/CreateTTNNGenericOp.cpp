@@ -11,6 +11,7 @@
 #include "ttmlir/Dialect/TTNN/IR/TTNNOps.h"
 #include "ttmlir/Dialect/TTNN/IR/TTNNOpsAttrs.h"
 
+#include "ttmlir/FunctionTypes.h"
 namespace mlir {
 using namespace tt;
 
@@ -368,6 +369,7 @@ void createMainFunc(MLIRContext *context, OpBuilder &builder,
   auto mainFunc =
       builder.create<func::FuncOp>(builder.getUnknownLoc(), "main", funcType);
   mainFunc.setPublic(); // does this do anything?
+  ttmlir::utils::setFunctionType(mainFunc, ttmlir::utils::FunctionType::ForwardDevice);
 
   Block *entryBlock = mainFunc.addEntryBlock();
   builder.setInsertionPointToStart(entryBlock);
