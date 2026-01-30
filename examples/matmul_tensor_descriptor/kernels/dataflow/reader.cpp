@@ -4,79 +4,76 @@
 #include "internal/firmware_common.h"
 #include "api/dataflow/dataflow_api.h"
 void kernel_main() {
-  uint32_t v1 = 0;
-  uint32_t v2 = 32;
-  bool v3 = false;
-  size_t v4 = 0;
-  int32_t v5 = 0;
-  int32_t v6 = 512;
-  int32_t v7 = 128;
-  int32_t v8 = 64;
-  int32_t v9 = 1;
-  bool v10 = true;
-  int32_t v11 = 32;
-  int32_t v12 = 2;
-  int32_t v13 = 16;
-  int32_t v14 = 4;
-  int32_t v15 = 3;
-  int32_t v16 = 8;
-  int32_t v17 = get_common_arg_val<uint32_t>(v4);
-  int32_t v18 = get_common_arg_val<uint32_t>(2);
-  int32_t v19 = get_common_arg_val<uint32_t>(10);
-  int32_t v20 = get_common_arg_val<uint32_t>(12);
-  int32_t v21 = get_common_arg_val<uint32_t>(30);
-  int32_t v22 = get_common_arg_val<uint32_t>(31);
-  int32_t v23 = get_common_arg_val<uint32_t>(32);
-  DataFormat v24 = get_dataformat(get_compile_time_arg_val(1));
-  int32_t v25 = get_tile_size(get_compile_time_arg_val(1));
-  InterleavedAddrGenFast<true> v26;
-  v26.bank_base_address = v19;
-  v26.page_size = v25;
-  v26.data_format = v24;
-  InterleavedAddrGenFast<true> v27 = v26;
-  DataFormat v28 = get_dataformat(get_compile_time_arg_val(0));
-  int32_t v29 = get_tile_size(get_compile_time_arg_val(0));
-  InterleavedAddrGenFast<true> v30;
-  v30.bank_base_address = v17;
-  v30.page_size = v29;
-  v30.data_format = v28;
-  InterleavedAddrGenFast<true> v31 = v30;
-  int32_t v32 = get_arg_val<uint32_t>(1);
-  int32_t v33 = get_arg_val<uint32_t>(v4);
-  int32_t v34 = (int32_t) ((uint32_t) v22 + (uint32_t) 127) / v7;
-  for (int32_t i35 = v33; i35 < v32; i35 += v9) {
-    int32_t v36 = i35 / v34;
-    int32_t v37 = (int32_t) ((uint32_t) ((int32_t) ((uint32_t) v21 + (uint32_t) 63) / v8) - (uint32_t) v36) < v9 ? (int32_t) ((uint32_t) ((int32_t) ((uint32_t) v21 + (uint32_t) 63) / v8) - (uint32_t) v36) : v9;
-    for (int32_t j38 = v5; j38 < ((int32_t) ((uint32_t) v23 + (uint32_t) 511) / v6); j38 += v9) {
-      int32_t v39 = (int32_t) ((uint32_t) j38 * (uint32_t) v6) / v11;
-      cb_reserve_back(get_compile_time_arg_val(0), v11);
-      int32_t v40 = get_write_ptr(get_compile_time_arg_val(0));
-      for (int32_t k41 = v5; k41 < v12; k41 += v9) {
-        for (int32_t l42 = v5; l42 < v13; l42 += v9) {
-          int32_t v43 = (int32_t) ((uint32_t) v40 + (uint32_t) ((int32_t) ((uint32_t) ((int32_t) ((uint32_t) ((int32_t) ((uint32_t) ((int32_t) ((uint32_t) k41 & (uint32_t) v9)) * (uint32_t) v13)) + (uint32_t) ((int32_t) ((uint32_t) ((int32_t) ((uint32_t) ((int32_t) ((uint32_t) ((int32_t) ((uint32_t) l42 & (uint32_t) v9)) + (uint32_t) ((int32_t) ((uint32_t) ((int32_t) ((uint32_t) ((int32_t) ((uint32_t) v9 < v2 ? (uint32_t) l42 >> (uint32_t) v9 : v1)) & (uint32_t) v9)) * (uint32_t) v12)))) + (uint32_t) ((int32_t) ((uint32_t) ((int32_t) ((uint32_t) ((int32_t) ((uint32_t) v12 < v2 ? (uint32_t) l42 >> (uint32_t) v12 : v1)) & (uint32_t) v9)) * (uint32_t) v14)))) + (uint32_t) ((int32_t) ((uint32_t) ((int32_t) ((uint32_t) ((int32_t) ((uint32_t) v15 < v2 ? (uint32_t) l42 >> (uint32_t) v15 : v1)) & (uint32_t) v9)) * (uint32_t) v16)))))) * (uint32_t) v29)));
-          uint64_t temp_461 = v31.get_noc_addr((int32_t) ((uint32_t) ((int32_t) ((uint32_t) ((int32_t) ((uint32_t) ((int32_t) ((uint32_t) ((int32_t) ((uint32_t) v36 + (uint32_t) (i35 % v37))) * (uint32_t) v8) / v11) + (uint32_t) k41)) * (uint32_t) (v18 != (int32_t) ((uint32_t) (v18 / v11) * (uint32_t) v11) & v18 < v5 == v3 ? (int32_t) ((uint32_t) (v18 / v11) + (uint32_t) v9) : v18 / v11))) + (uint32_t) ((int32_t) ((uint32_t) v39 + (uint32_t) l42))), v5);
-          noc_async_read(temp_461, v43, v29);
+  bool v1 = false;
+  size_t v2 = 0;
+  int32_t v3 = 0;
+  int32_t v4 = 512;
+  int32_t v5 = 128;
+  int32_t v6 = 64;
+  int32_t v7 = 1;
+  bool v8 = true;
+  int32_t v9 = 32;
+  int32_t v10 = 2;
+  int32_t v11 = 16;
+  int32_t v12 = 4;
+  int32_t v13 = 8;
+  int32_t v14 = get_common_arg_val<uint32_t>(v2);
+  int32_t v15 = get_common_arg_val<uint32_t>(2);
+  int32_t v16 = get_common_arg_val<uint32_t>(10);
+  int32_t v17 = get_common_arg_val<uint32_t>(12);
+  int32_t v18 = get_common_arg_val<uint32_t>(30);
+  int32_t v19 = get_common_arg_val<uint32_t>(31);
+  int32_t v20 = get_common_arg_val<uint32_t>(32);
+  DataFormat v21 = get_dataformat(get_compile_time_arg_val(1));
+  int32_t v22 = get_tile_size(get_compile_time_arg_val(1));
+  InterleavedAddrGenFast<true> v23;
+  v23.bank_base_address = v16;
+  v23.page_size = v22;
+  v23.data_format = v21;
+  InterleavedAddrGenFast<true> v24 = v23;
+  DataFormat v25 = get_dataformat(get_compile_time_arg_val(0));
+  int32_t v26 = get_tile_size(get_compile_time_arg_val(0));
+  InterleavedAddrGenFast<true> v27;
+  v27.bank_base_address = v14;
+  v27.page_size = v26;
+  v27.data_format = v25;
+  InterleavedAddrGenFast<true> v28 = v27;
+  int32_t v29 = get_arg_val<uint32_t>(1);
+  int32_t v30 = get_arg_val<uint32_t>(v2);
+  int32_t v31 = (int32_t) ((uint32_t) v19 + (uint32_t) 127) / v5;
+  for (int32_t i32 = v30; i32 < v29; i32 += v7) {
+    int32_t v33 = i32 / v31;
+    int32_t v34 = (int32_t) ((uint32_t) ((int32_t) ((uint32_t) v18 + (uint32_t) 63) / v6) - (uint32_t) v33) < v7 ? (int32_t) ((uint32_t) ((int32_t) ((uint32_t) v18 + (uint32_t) 63) / v6) - (uint32_t) v33) : v7;
+    for (int32_t j35 = v3; j35 < ((int32_t) ((uint32_t) v20 + (uint32_t) 511) / v4); j35 += v7) {
+      int32_t v36 = (int32_t) ((uint32_t) j35 * (uint32_t) v4) / v9;
+      cb_reserve_back(get_compile_time_arg_val(0), v9);
+      int32_t v37 = get_write_ptr(get_compile_time_arg_val(0));
+      for (int32_t k38 = v3; k38 < v10; k38 += v7) {
+        for (int32_t l39 = v3; l39 < v11; l39 += v7) {
+          int32_t v40 = (int32_t) ((uint32_t) v37 + (uint32_t) ((int32_t) ((uint32_t) ((int32_t) ((uint32_t) ((int32_t) ((uint32_t) ((int32_t) ((uint32_t) k38 & (uint32_t) v7)) * (uint32_t) v11)) + (uint32_t) ((int32_t) ((uint32_t) ((int32_t) ((uint32_t) ((int32_t) ((uint32_t) ((int32_t) ((uint32_t) l39 & (uint32_t) v7)) + (uint32_t) ((int32_t) ((uint32_t) l39 & (uint32_t) v10)))) + (uint32_t) ((int32_t) ((uint32_t) l39 & (uint32_t) v12)))) + (uint32_t) ((int32_t) ((uint32_t) l39 & (uint32_t) v13)))))) * (uint32_t) v26)));
+          uint64_t temp_412 = v28.get_noc_addr((int32_t) ((uint32_t) ((int32_t) ((uint32_t) ((int32_t) ((uint32_t) ((int32_t) ((uint32_t) ((int32_t) ((uint32_t) v33 + (uint32_t) (i32 % v34))) * (uint32_t) v6) / v9) + (uint32_t) k38)) * (uint32_t) (v15 != (int32_t) ((uint32_t) (v15 / v9) * (uint32_t) v9) & v15 < v3 == v1 ? (int32_t) ((uint32_t) (v15 / v9) + (uint32_t) v7) : v15 / v9))) + (uint32_t) ((int32_t) ((uint32_t) v36 + (uint32_t) l39))), v3);
+          noc_async_read(temp_412, v40, v26);
         }
       }
       {
       DeviceZoneScopedN("noc_async_read_barrier");
       noc_async_read_barrier();
       }
-      cb_push_back(get_compile_time_arg_val(0), v11);
-      cb_reserve_back(get_compile_time_arg_val(1), v8);
-      int32_t v44 = get_write_ptr(get_compile_time_arg_val(1));
-      for (int32_t k45 = v5; k45 < v13; k45 += v9) {
-        for (int32_t l46 = v5; l46 < v14; l46 += v9) {
-          int32_t v47 = (int32_t) ((uint32_t) v44 + (uint32_t) ((int32_t) ((uint32_t) ((int32_t) ((uint32_t) ((int32_t) ((uint32_t) ((int32_t) ((uint32_t) ((int32_t) ((uint32_t) ((int32_t) ((uint32_t) k45 & (uint32_t) v9)) + (uint32_t) ((int32_t) ((uint32_t) ((int32_t) ((uint32_t) ((int32_t) ((uint32_t) v9 < v2 ? (uint32_t) k45 >> (uint32_t) v9 : v1)) & (uint32_t) v9)) * (uint32_t) v12)))) + (uint32_t) ((int32_t) ((uint32_t) ((int32_t) ((uint32_t) ((int32_t) ((uint32_t) v12 < v2 ? (uint32_t) k45 >> (uint32_t) v12 : v1)) & (uint32_t) v9)) * (uint32_t) v14)))) + (uint32_t) ((int32_t) ((uint32_t) ((int32_t) ((uint32_t) ((int32_t) ((uint32_t) v15 < v2 ? (uint32_t) k45 >> (uint32_t) v15 : v1)) & (uint32_t) v9)) * (uint32_t) v16)))) + (uint32_t) ((int32_t) ((uint32_t) ((int32_t) ((uint32_t) ((int32_t) ((uint32_t) l46 & (uint32_t) v9)) * (uint32_t) v13)) + (uint32_t) ((int32_t) ((uint32_t) ((int32_t) ((uint32_t) ((int32_t) ((uint32_t) v9 < v2 ? (uint32_t) l46 >> (uint32_t) v9 : v1)) & (uint32_t) v9)) * (uint32_t) v11)))))) * (uint32_t) v25)));
-          uint64_t temp_458 = v27.get_noc_addr((int32_t) ((uint32_t) ((int32_t) ((uint32_t) ((int32_t) ((uint32_t) v39 + (uint32_t) k45)) * (uint32_t) (v20 != (int32_t) ((uint32_t) (v20 / v11) * (uint32_t) v11) & v20 < v5 == v3 ? (int32_t) ((uint32_t) (v20 / v11) + (uint32_t) v9) : v20 / v11))) + (uint32_t) ((int32_t) ((uint32_t) ((int32_t) ((uint32_t) ((i35 % v34) / v37) * (uint32_t) v7) / v11) + (uint32_t) l46))), v5);
-          noc_async_read(temp_458, v47, v25);
+      cb_push_back(get_compile_time_arg_val(0), v9);
+      cb_reserve_back(get_compile_time_arg_val(1), v6);
+      int32_t v41 = get_write_ptr(get_compile_time_arg_val(1));
+      for (int32_t k42 = v3; k42 < v11; k42 += v7) {
+        for (int32_t l43 = v3; l43 < v12; l43 += v7) {
+          int32_t v44 = (int32_t) ((uint32_t) v41 + (uint32_t) ((int32_t) ((uint32_t) ((int32_t) ((uint32_t) ((int32_t) ((uint32_t) ((int32_t) ((uint32_t) ((int32_t) ((uint32_t) ((int32_t) ((uint32_t) k42 & (uint32_t) v7)) + (uint32_t) ((int32_t) ((uint32_t) k42 & (uint32_t) v10)))) + (uint32_t) ((int32_t) ((uint32_t) k42 & (uint32_t) v12)))) + (uint32_t) ((int32_t) ((uint32_t) k42 & (uint32_t) v13)))) + (uint32_t) ((int32_t) ((uint32_t) ((int32_t) ((uint32_t) ((int32_t) ((uint32_t) l43 & (uint32_t) v7)) * (uint32_t) v11)) + (uint32_t) ((int32_t) ((uint32_t) ((int32_t) ((uint32_t) ((int32_t) ((uint32_t) v7 < 32 ? (uint32_t) l43 >> (uint32_t) v7 : 0)) & (uint32_t) v7)) * (uint32_t) v9)))))) * (uint32_t) v22)));
+          uint64_t temp_415 = v24.get_noc_addr((int32_t) ((uint32_t) ((int32_t) ((uint32_t) ((int32_t) ((uint32_t) v36 + (uint32_t) k42)) * (uint32_t) (v17 != (int32_t) ((uint32_t) (v17 / v9) * (uint32_t) v9) & v17 < v3 == v1 ? (int32_t) ((uint32_t) (v17 / v9) + (uint32_t) v7) : v17 / v9))) + (uint32_t) ((int32_t) ((uint32_t) ((int32_t) ((uint32_t) ((i32 % v31) / v34) * (uint32_t) v5) / v9) + (uint32_t) l43))), v3);
+          noc_async_read(temp_415, v44, v22);
         }
       }
       {
       DeviceZoneScopedN("noc_async_read_barrier");
       noc_async_read_barrier();
       }
-      cb_push_back(get_compile_time_arg_val(1), v8);
+      cb_push_back(get_compile_time_arg_val(1), v6);
     }
   }
   return;

@@ -43,31 +43,46 @@ static int64_t findAllocIdx(Operation *op) {
 }
 
 static Value applyLinearLayout(ConversionPatternRewriter &rewriter,
-                               Location loc, Value indexI32,
+                               Location loc, Value index,
                                const std::vector<int32_t> &bases) {
-  Value offset = arith::createConstantI32(loc, rewriter, 0);
-  // Value indexI32 =
-  // arith::IndexCastOp::create(rewriter, loc, rewriter.getI32Type(), index);
+  Value offset = Value(); // Initialize as null
+  Value zero = arith::createConstantI32(loc, rewriter, 0);
+  Value one = arith::createConstantI32(loc, rewriter, 1);
 
   for (size_t bit = 0; bit < bases.size(); ++bit) {
     if (bases[bit] == 0)
-      continue; // Optimization: Skip zero bases
-    // 1. Extract bit 'k' from index: (index >> k) & 1
-    Value shiftAmount = arith::createConstantI32(loc, rewriter, bit);
-    Value shifted =
-        arith::ShRUIOp::create(rewriter, loc, indexI32, shiftAmount);
-    Value one = arith::createConstantI32(loc, rewriter, 1);
-    Value bitVal = arith::AndIOp::create(rewriter, loc, shifted, one);
+      continue;
 
-    // 2. Multiply by basis: bitVal * basis[k]
-    //    (Since bitVal is 0 or 1, this is effectively a selection)
-    Value basisVal = arith::createConstantI32(loc, rewriter, bases[bit]);
-    Value term = arith::MulIOp::create(rewriter, loc, bitVal, basisVal);
+    Value term;
+    // OPTIMIZATION: Identity Basis
+    // If the basis for bit 'k' is '1 << k', the operation:
+    //   ((index >> k) & 1) * (1 << k)
+    // simplifies mathematically to:
+    //   index & (1 << k)
+    // This saves a Shift and a Mul.
+    if (bases[bit] == (1 << bit)) {
+      Value mask = arith::createConstantI32(loc, rewriter, bases[bit]);
+      term = arith::AndIOp::create(rewriter, loc, index, mask);
+    } else {
+      // 1. Extract bit 'k' from index: (index >> k) & 1
+      Value shiftAmount = arith::createConstantI32(loc, rewriter, bit);
+      Value shifted = arith::ShRUIOp::create(rewriter, loc, index, shiftAmount);
+      Value bitVal = arith::AndIOp::create(rewriter, loc, shifted, one);
+
+      // 2. Multiply by basis: bitVal * basis[k]
+      //    (Since bitVal is 0 or 1, this is effectively a selection)
+      Value basisVal = arith::createConstantI32(loc, rewriter, bases[bit]);
+      term = arith::MulIOp::create(rewriter, loc, bitVal, basisVal);
+    }
 
     // 3. Accumulate
-    offset = arith::AddIOp::create(rewriter, loc, offset, term);
+    if (offset) {
+      offset = arith::AddIOp::create(rewriter, loc, offset, term);
+    } else {
+      offset = term;
+    }
   }
-  return offset;
+  return offset ? offset : zero;
 }
 
 struct ConvertLoadOp : public OpConversionPattern<triton::LoadOp> {
