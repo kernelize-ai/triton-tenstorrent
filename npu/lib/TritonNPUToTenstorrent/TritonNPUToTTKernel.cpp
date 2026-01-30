@@ -140,8 +140,6 @@ public:
     if (addMMInit) {
       // mm_init goes after cb initialization ops. but we need to collect the
       // circular buffers first
-      assert(matmulTilesOps.size() == 1 &&
-             "only single matmul supported currently");
       auto matmulTilesOp = *matmulTilesOps.begin();
 
       Location loc = matmulTilesOp.getLoc();

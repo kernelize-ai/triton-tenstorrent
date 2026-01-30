@@ -27,6 +27,26 @@ namespace {
 struct ConvertDotOp : public OpConversionPattern<triton::DotOp> {
   using OpConversionPattern<triton::DotOp>::OpConversionPattern;
 
+  // TODO: adjust based on dest accumulation mode and/or double buffering mode
+  static constexpr unsigned kMaxMatmulDestRegisters = 8; 
+
+  std::pair<unsigned, unsigned> computeSubBlocksSizes(unsigned mTiles,
+                                                        unsigned nTiles,
+                                                        unsigned availableRegs) const {
+    unsigned mSubBlocks = 1;
+    unsigned nSubBlocks = 1;
+
+    while ((mTiles / mSubBlocks) * (nTiles / nSubBlocks) > availableRegs) {
+      if ((mTiles / mSubBlocks) >= (nTiles / nSubBlocks)) {
+        mSubBlocks++;
+      } else {
+        nSubBlocks++;
+      }
+    }
+
+    return {mSubBlocks, nSubBlocks};
+  }
+
   LogicalResult
   matchAndRewrite(triton::DotOp op, OpAdaptor adaptor,
                   ConversionPatternRewriter &rewriter) const override {
@@ -85,7 +105,43 @@ struct ConvertDotOp : public OpConversionPattern<triton::DotOp> {
     Value zeroI32 = arith::createConstantI32(loc, rewriter, 0);
     Value oneI32 = arith::createConstantI32(loc, rewriter, 1);
 
-    Value mTilesVal =
+    // We need at least 1 register available for the matmul destination
+    assert(alloc_offset < kMaxMatmulDestRegisters - 1 &&
+           "not enough registers available for matmul");
+    unsigned availableRegs = kMaxMatmulDestRegisters - alloc_offset;
+    
+    auto [mSubBlocks, nSubBlocks] = computeSubBlocksSizes(
+        static_cast<unsigned>(mTiles), static_cast<unsigned>(nTiles),
+        availableRegs);
+    LDBG("DotOp matmul tiles with mSubBlocks=" << mSubBlocks
+                                               << " nSubBlocks=" << nSubBlocks);
+#if 1
+    for (unsigned m = 0; m < static_cast<unsigned>(mTiles); ++m) {
+      for (unsigned n = 0; n < static_cast<unsigned>(nTiles); ++n) {
+        const unsigned destRegisterIndex = alloc_offset + m * static_cast<unsigned>(nTiles) + n;
+        Value destRegisterIndexValue = arith::createIndexConstant(
+            loc, rewriter, destRegisterIndex);
+        llvm::errs() << "DotOp matmul tiles for m=" << m << " n=" << n
+                     << " dest reg index=" << destRegisterIndex << "\n";
+        for (unsigned k = 0; k < static_cast<unsigned>(kTiles); ++k) {
+          Value kIv = arith::createIndexConstant(loc, rewriter, k);
+  
+          // aTile = m * kTiles + k
+          Value aTile = arith::createIndexConstant(
+              loc, rewriter, m * static_cast<unsigned>(kTiles) + k);
+
+          // bTile = k * nTiles + n
+          Value bTile = arith::createIndexConstant(
+              loc, rewriter, k * static_cast<unsigned>(nTiles) + n);
+
+          ttkernel::MatmulTilesOp::create(rewriter, loc, adaptor.getA(),
+                                          adaptor.getB(), aTile, bTile,
+                                          destRegisterIndexValue);
+        }
+      }
+    }
+#else
+   Value mTilesVal =
         arith::createConstantI32(loc, rewriter, static_cast<int32_t>(mTiles));
     Value nTilesVal =
         arith::createConstantI32(loc, rewriter, static_cast<int32_t>(nTiles));
@@ -140,6 +196,7 @@ struct ConvertDotOp : public OpConversionPattern<triton::DotOp> {
       scf::YieldOp::create(rewriter, loc, nLoop.getResult(0));
     }
     rewriter.setInsertionPointAfter(mLoop);
+#endif 
 
     ttkernel::CBPopFrontOp::create(rewriter, loc, adaptor.getA(),
                                    aNumInputTilesValue);
