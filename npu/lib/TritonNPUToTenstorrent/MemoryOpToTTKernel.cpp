@@ -349,8 +349,6 @@ struct ConvertTensorDescLoadOp
       DBGS() << "\n";
     });
 
-#if 1
-#if 1
     // DRAM ordered loop
     Value zero = arith::createConstantI32(loc, rewriter, 0);
     Value one = arith::createConstantI32(loc, rewriter, 1);
@@ -403,107 +401,6 @@ struct ConvertTensorDescLoadOp
       }
     }
     rewriter.setInsertionPointAfter(rowLoop);
-#else
-    Value loopStart = arith::createIndexConstant(loc, rewriter, 0);
-    Value loopEnd = arith::createIndexConstant(loc, rewriter, numTiles);
-    Value loopStep = arith::createIndexConstant(loc, rewriter, 1);
-
-    auto loadLoop =
-        scf::ForOp::create(rewriter, loc, loopStart, loopEnd, loopStep);
-    {
-      rewriter.setInsertionPointToStart(loadLoop.getBody());
-      Value iv = loadLoop.getInductionVar();
-
-      // Apply bases to get the element offset within the block for this tile
-      // index
-      Value intraOffsetElem0 = applyLinearLayout(rewriter, loc, iv, basesDim0);
-      Value intraOffsetElem1 = applyLinearLayout(rewriter, loc, iv, basesDim1);
-
-      // Convert element offsets into tile indices
-      Value localTileIndex0 = arith::DivSIOp::create(
-          rewriter, loc, intraOffsetElem0, tileSizeValues[0]);
-      Value localTileIndex1 = arith::DivSIOp::create(
-          rewriter, loc, intraOffsetElem1, tileSizeValues[1]);
-
-      // These indices give us the offset within the block in tile units
-      Value tileIndexDim0 =
-          arith::AddIOp::create(rewriter, loc, tileCoord[0], localTileIndex0);
-      Value tileIndexDim1 =
-          arith::AddIOp::create(rewriter, loc, tileCoord[1], localTileIndex1);
-
-      // linearize dim0 and dim1 indices
-      Value rowStride = tilesPerDim[1]; // Width of image in tiles
-      Value remoteTileIndex = arith::AddIOp::create(
-          rewriter, loc,
-          arith::MulIOp::create(rewriter, loc, tileIndexDim0, rowStride),
-          tileIndexDim1);
-
-      // local address is just the induction variable
-      Value ivI32 = arith::IndexCastOp::create(rewriter, loc, i32Ty, iv);
-      Value localOffset = arith::MulIOp::create(rewriter, loc, ivI32, pageSize);
-      Value crtL1Address =
-          arith::AddIOp::create(rewriter, loc, l1BaseAddr, localOffset);
-
-      Value nocAddr = ttkernel::InterleavedAddrGenFastGetNocAddrOp::create(
-          rewriter, loc, addrGen, remoteTileIndex, const0, Value());
-
-      ttkernel::NocAsyncReadOp::create(rewriter, loc, nocAddr, crtL1Address,
-                                       pageSize);
-    }
-    rewriter.setInsertionPointAfter(loadLoop);
-#endif
-#else
-    // re-roll using scf for to reduce code size?
-    for (int32_t i = 0; i < numTiles; ++i) {
-      auto crtIndex = layout.apply({{S("tile"), i}, {S("register"), 0}});
-      assert(crtIndex.size() == 2);
-      LLVM_DEBUG({
-        DBGS() << "Tile " << i << " has start index: ";
-        for (auto [dim, idx] : crtIndex) {
-          DBGS() << dim.getValue() << ": " << idx << ", ";
-        }
-        DBGS() << "\n";
-      });
-
-      // Element-space start of this tile within the block (from the layout).
-      int32_t elem0 = crtIndex[0].second;
-      int32_t elem1 = crtIndex[1].second;
-
-      // Tile coordinates within the block (0..tilesPerCore[d)-1).
-      int32_t localTile0 = elem0 / tileShape[0];
-      int32_t localTile1 = elem1 / tileShape[1];
-
-      // DRAM tile index
-      Value tileIndexDim0 = arith::AddIOp::create(
-          rewriter, loc, tileCoord[0],
-          arith::createConstantI32(loc, rewriter, localTile0));
-      Value tileIndexDim1 = arith::AddIOp::create(
-          rewriter, loc, tileCoord[1],
-          arith::createConstantI32(loc, rewriter, localTile1));
-
-      Value remoteTileIndex = arith::AddIOp::create(
-          rewriter, loc,
-          arith::MulIOp::create(rewriter, loc, tileIndexDim0,
-                                tilesPerDim[order[0]]),
-          tileIndexDim1);
-
-      // local circular buffer slot
-      int32_t slot = localTile0 * tilesPerCore[order[0]] + localTile1;
-      LDBG("Tile " << i << " maps to remote tile index " << remoteTileIndex
-                   << " and local slot " << slot << "\n");
-      Value localTileIndex = arith::createConstantI32(loc, rewriter, slot);
-      Value localTileIndexOffset =
-          arith::MulIOp::create(rewriter, loc, localTileIndex, pageSize);
-      Value crtL1Address =
-          arith::AddIOp::create(rewriter, loc, l1Addr, localTileIndexOffset);
-
-      Value nocAddr = ttkernel::InterleavedAddrGenFastGetNocAddrOp::create(
-          rewriter, loc, addrGen, remoteTileIndex, const0, Value());
-
-      ttkernel::NocAsyncReadOp::create(rewriter, loc, nocAddr, crtL1Address,
-                                       pageSize);
-    }
-#endif
 
     ttkernel::NocAsyncReadBarrierOp::create(rewriter, loc);
 
@@ -830,7 +727,7 @@ struct ConvertTensorDescStoreOp
     Value const0 = arith::createConstantI32(loc, rewriter, 0);
     SmallVector tilesPerCore = llvm::to_vector(llvm::map_range(
         layout.getOutDimSizes(), [](auto v) { return v / 32; }));
-#if 1
+
     Value zero = arith::createConstantI32(loc, rewriter, 0);
     Value one = arith::createConstantI32(loc, rewriter, 1);
     Value loopLimitRow = arith::createConstantI32(loc, rewriter, blockTilesH);
@@ -877,56 +774,6 @@ struct ConvertTensorDescStoreOp
     }
     rewriter.setInsertionPointAfter(rowLoop);
 
-#else
-    for (int32_t i = 0; i < numTiles; ++i) {
-      auto crtIndex = layout.apply({{S("tile"), i}, {S("register"), 0}});
-      assert(crtIndex.size() == 2);
-      LLVM_DEBUG({
-        DBGS() << "Tile " << i << " has start index: ";
-        for (auto [dim, idx] : crtIndex) {
-          DBGS() << dim.getValue() << ": " << idx << ", ";
-        }
-        DBGS() << "\n";
-      });
-
-      // Element-space start of this tile within the block (from the layout).
-      int32_t elem0 = crtIndex[0].second;
-      int32_t elem1 = crtIndex[1].second;
-
-      // Tile coordinates within the block (0..tilesPerCore[d)-1).
-      int32_t localTile0 = elem0 / tileShape[0];
-      int32_t localTile1 = elem1 / tileShape[1];
-
-      // DRAM tile index
-      Value tileIndexDim0 = arith::AddIOp::create(
-          rewriter, loc, tileCoord[0],
-          arith::createConstantI32(loc, rewriter, localTile0));
-      Value tileIndexDim1 = arith::AddIOp::create(
-          rewriter, loc, tileCoord[1],
-          arith::createConstantI32(loc, rewriter, localTile1));
-
-      Value remoteTileIndex = arith::AddIOp::create(
-          rewriter, loc,
-          arith::MulIOp::create(rewriter, loc, tileIndexDim0,
-                                tilesPerDim[order[0]]),
-          tileIndexDim1);
-
-      // local circular buffer slot
-      int32_t slot = localTile0 * tilesPerCore[order[0]] + localTile1;
-
-      Value localTileIndex = arith::createConstantI32(loc, rewriter, slot);
-      Value localTileIndexOffset =
-          arith::MulIOp::create(rewriter, loc, localTileIndex, pageSize);
-      Value crtL1Address =
-          arith::AddIOp::create(rewriter, loc, l1Addr, localTileIndexOffset);
-
-      Value nocAddr = ttkernel::InterleavedAddrGenFastGetNocAddrOp::create(
-          rewriter, loc, addrGen, remoteTileIndex, const0, Value());
-
-      ttkernel::NocAsyncWriteOp::create(rewriter, loc, crtL1Address, nocAddr,
-                                        pageSize);
-    }
-#endif
     ttkernel::NocAsyncWriteBarrierOp::create(rewriter, loc);
     ttkernel::CBPopFrontOp::create(rewriter, loc, cb, numPages);
 
