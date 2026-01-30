@@ -225,7 +225,6 @@ struct ConvertTensorDescLoadOp
     auto numTiles = layout.getInDimSize(S("tile"));
     LDBG("Generating " << numTiles << " tile loads");
 
-    auto outDimNames = llvm::to_vector(layout.getOutDimNames());
     auto dotOpEncoding = dyn_cast<npu::tt::TiledDotOperandEncodingAttr>(
         loadResultType.getEncoding());
     auto tiledParent =
@@ -233,18 +232,7 @@ struct ConvertTensorDescLoadOp
             ? cast<npu::tt::TiledEncodingAttr>(dotOpEncoding.getParent())
             : cast<npu::tt::TiledEncodingAttr>(loadResultType.getEncoding());
     auto tileShape = tiledParent.getTileShape();
-    auto order = tiledParent.getOrder();
-    for (auto o : order) {
-      LDBG("Tile order dim: " << o << "\n");
-    }
-    auto dotOrder =
-        dotOpEncoding
-            ? gpu::getOrderForDotOperand(dotOpEncoding.getOpIdx(),
-                                         tileShape.size(), /*kContig=*/true)
-            : ArrayRef<unsigned>{};
-    for (auto o : dotOrder) {
-      LDBG("Dot operand order dim: " << o << "\n");
-    }
+
     auto offsets = op.getIndices();
 
     auto i32Ty = rewriter.getI32Type();
@@ -270,8 +258,6 @@ struct ConvertTensorDescLoadOp
                                                        tileSizeValues[i]));
     }
 
-    Value const0 = arith::createConstantI32(loc, rewriter, 0);
-
     // determine how many tiles we need to load by converting the shape to tiles
     const int32_t numCbTiles =
         cast<ttkernel::CBType>(cb.getType()).getNumTiles();
@@ -283,12 +269,7 @@ struct ConvertTensorDescLoadOp
 
     Value l1BaseAddr = ttkernel::GetWritePtrOp::create(rewriter, loc, cb);
 
-    SmallVector tilesPerCore = llvm::to_vector(llvm::map_range(
-        layout.getOutDimSizes(), [](auto v) { return v / 32; }));
-
     StringAttr tileDimName = S("tile");
-    int32_t tileDimSize = layout.getInDimSize(tileDimName);
-    int32_t numBits = llvm::Log2_32(tileDimSize);
 
     // bit shifts for element to tile conversion
     int32_t rowShift = llvm::Log2_32(tileShape[0]);
@@ -304,7 +285,6 @@ struct ConvertTensorDescLoadOp
     int32_t rowBits = llvm::Log2_32_Ceil(blockTilesH);
     int32_t colBits = llvm::Log2_32_Ceil(blockTilesW);
 
-    // maybe SmallVector?
     std::vector<int32_t> rowToL1Bases;
     std::vector<int32_t> colToL1Bases;
 
@@ -323,31 +303,6 @@ struct ConvertTensorDescLoadOp
                                             k + colShift, tileDimName);
       colToL1Bases.push_back(val);
     }
-
-    // OLD: remove?
-    std::vector<int32_t> basesDim0;
-    std::vector<int32_t> basesDim1;
-
-    // "tile" bits allow us to jump around the image.
-    // We collect the contribution of each bit to the output dims.
-    for (int32_t k = 0; k < numBits; ++k) {
-      // getBasis(InDim, Bit, OutDim)
-      basesDim0.push_back(layout.getBasis(tileDimName, k, outDimNames[0]));
-      basesDim1.push_back(layout.getBasis(tileDimName, k, outDimNames[1]));
-    }
-
-    LLVM_DEBUG({
-      DBGS() << "tileDimSize: " << tileDimSize << ", numBits: " << numBits
-             << "\n";
-      DBGS() << "basesDim0: ";
-      for (auto b : basesDim0)
-        DBGS() << b << ", ";
-      DBGS() << "\n";
-      DBGS() << "basesDim1: ";
-      for (auto b : basesDim1)
-        DBGS() << b << ", ";
-      DBGS() << "\n";
-    });
 
     // DRAM ordered loop
     Value zero = arith::createConstantI32(loc, rewriter, 0);
@@ -641,7 +596,7 @@ struct ConvertTensorDescStoreOp
     auto dataFormat = ttkernel::GetDataFormatOp::create(rewriter, loc, cb);
     auto pageSize = ttkernel::GetTileSizeOp::create(rewriter, loc, cb);
 
-    Value trueVal = arith::createConstantI1(loc, rewriter, 1);
+    Value trueVal = arith::createConstantI1(loc, rewriter, true);
     Value baseAddr = desc.getPtr();
     Value addrGen = ttkernel::GetInterleavedAddrGenFastOp::create(
         rewriter, loc, /*dram=*/trueVal, baseAddr, pageSize, dataFormat);
@@ -663,18 +618,14 @@ struct ConvertTensorDescStoreOp
     LDBG("Generating " << numTiles << " tile stores");
 
     auto tileShape = tiledEncoding.getTileShape();
-    auto order = tiledEncoding.getOrder();
     auto offsets = op.getIndices();
-
-    auto i32Ty = rewriter.getI32Type();
 
     // Note: unlike the tensor descriptor base case we normalize the shape into
     // 32x32 tiles here
     SmallVector<Value, 4> tileSizeValues;
     for (unsigned i = 0; i < tileShape.size(); ++i) {
-      tileSizeValues.push_back(arith::ConstantOp::create(
-          rewriter, loc, i32Ty,
-          IntegerAttr::get(i32Ty, static_cast<int32_t>(tileShape[i]))));
+      tileSizeValues.push_back(arith::createConstantI32(
+          loc, rewriter, static_cast<int32_t>(tileShape[i])));
     }
 
     // tileCoord[i] = tileBaseOffset[i] / blockShape[i]
@@ -725,8 +676,6 @@ struct ConvertTensorDescStoreOp
     Value l1Addr = ttkernel::GetReadPtrOp::create(rewriter, loc, cb);
 
     Value const0 = arith::createConstantI32(loc, rewriter, 0);
-    SmallVector tilesPerCore = llvm::to_vector(llvm::map_range(
-        layout.getOutDimSizes(), [](auto v) { return v / 32; }));
 
     Value zero = arith::createConstantI32(loc, rewriter, 0);
     Value one = arith::createConstantI32(loc, rewriter, 1);
