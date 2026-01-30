@@ -557,22 +557,21 @@ module attributes {"ttg.num-ctas" = 1 : i32, "ttg.num-warps" = 1 : i32, "ttg.thr
     // CHECK: %[[CB_WRITE_PTR:.*]] = ttkernel.get_write_ptr(%[[CB]]) : (!ttkernel.cb<2, !ttcore.tile<32x32, f16>>) -> i32
 
     %a_6 = tt.descriptor_load %arg0[%offs_am, %offs_k] : !tt.tensordesc<tensor<32x64xf16>> -> tensor<32x64xf16, #triton_tenstorrent.tiled_dot_op<{opIdx = 0, parent = #tiled}>>
+    // CHECK: scf.for %[[IV:.*]] = %[[c0_i32]] to %[[c2_i32]] step %[[c1_i32]] : i32 {
 
-    // COM: linearized tile id
-    // CHECK: %[[TILE_ID_ROW_OFFSET:.*]] = arith.muli %[[X_TILE_ID]], %[[TILES_PER_DIM0]] : i32
-    // CHECK: %[[TILE_ID:.*]] = arith.addi %[[TILE_ID_ROW_OFFSET]], %[[Y_TILE_ID]] : i32
-    // COM: tile 0
-    // CHECK: %[[NOC_ADDR:.*]] = ttkernel.interleaved_addr_gen_fast.get_noc_addr(%[[ADDR_GEN]], %[[TILE_ID]], %[[c0_i32]], )
-    // CHECK: ttkernel.noc_async_read(%[[NOC_ADDR]], %[[CB_WRITE_PTR]], %[[TILESIZE]]) : (!ttkernel.noc_addr, i32, i32) -> ()
+    // COM: Calculate DRAM Address
+    // CHECK: %[[COL_OFFSET:.*]] = arith.addi %[[Y_TILE_ID]], %[[IV]] : i32
+    // CHECK: %[[ROW_BASE:.*]] = arith.muli %[[X_TILE_ID]], %[[TILES_PER_DIM0]] : i32
+    // CHECK: %[[DRAM_ID:.*]] = arith.addi %[[ROW_BASE]], %[[COL_OFFSET]] : i32
 
-    // COM: tile 1
-    // CHECK: %[[NEXT_COL_TILE:.*]] = arith.addi %[[Y_TILE_ID]], %[[c1_i32]] : i32
-    // CHECK: %[[TILE_ID_ROW_OFFSET_OLD:.*]] = arith.muli %[[X_TILE_ID]], %[[TILES_PER_DIM0]] : i32
-    // CHECK: %[[TILE_ID_ROW_OFFSET_1:.*]] = arith.addi %[[TILE_ID_ROW_OFFSET_OLD]], %[[NEXT_COL_TILE]] : i32
-    // CHECK: %[[NEXT_CB_WRITE_PTR:.*]] = arith.addi %[[CB_WRITE_PTR]], %[[TILESIZE]] : i32
+    // COM: Calculate L1 Address
+    // CHECK: %[[L1_MASK:.*]] = arith.andi %[[IV]], %[[c1_i32]] : i32
+    // CHECK: %[[L1_OFFSET:.*]] = arith.muli %[[L1_MASK]], %[[TILESIZE]] : i32
+    // CHECK: %[[L1_ADDR:.*]] = arith.addi %[[CB_WRITE_PTR]], %[[L1_OFFSET]] : i32
 
-    // CHECK: %[[NOC_ADDR_1:.*]] = ttkernel.interleaved_addr_gen_fast.get_noc_addr(%[[ADDR_GEN]], %[[TILE_ID_ROW_OFFSET_1]], %[[c0_i32]], ) : (!ttkernel.interleaved_addr_gen_fast, i32, i32) -> !ttkernel.noc_addr
-    // CHECK: ttkernel.noc_async_read(%[[NOC_ADDR_1]], %[[NEXT_CB_WRITE_PTR]], %[[TILESIZE]]) : (!ttkernel.noc_addr, i32, i32) -> ()
+    // CHECK:   %[[NOC_ADDR:.*]] = ttkernel.interleaved_addr_gen_fast.get_noc_addr(%[[ADDR_GEN]], %[[DRAM_ID]], %[[c0_i32]], )
+    // CHECK:   ttkernel.noc_async_read(%[[NOC_ADDR]], %[[L1_ADDR]], %[[TILESIZE]])
+    // CHECK: }
     // CHECK: ttkernel.noc_async_read_barrier() : () -> ()
     ttg.local_store %a_6, %a : tensor<32x64xf16, #triton_tenstorrent.tiled_dot_op<{opIdx = 0, parent = #tiled}>> -> !ttg.memdesc<32x64xf16, #shared1, #smem, mutable>
     // CHECK: ttkernel.cb_push_back(%[[CB]], %[[c2_i32]]) : (!ttkernel.cb<2, !ttcore.tile<32x32, f16>>, i32) -> ()
