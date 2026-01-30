@@ -811,12 +811,12 @@ struct ConvertTensorDescStoreOp
     std::vector<int32_t> colToL1Bases;
 
     for (int k = 0; k < rowBits; ++k)
-      rowToL1Bases.push_back(
-          invertedLayout.getBasis(invertedInDimsNames[0], k + rowShift, outTileDim));
+      rowToL1Bases.push_back(invertedLayout.getBasis(invertedInDimsNames[0],
+                                                     k + rowShift, outTileDim));
 
     for (int k = 0; k < colBits; ++k)
-      colToL1Bases.push_back(
-          invertedLayout.getBasis(invertedInDimsNames[1], k + colShift, outTileDim));
+      colToL1Bases.push_back(invertedLayout.getBasis(invertedInDimsNames[1],
+                                                     k + colShift, outTileDim));
     // determine how many tiles we need to store by converting the shape to
     // tiles
     const int32_t numCbTiles =
