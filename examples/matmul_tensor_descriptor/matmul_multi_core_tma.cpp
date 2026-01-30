@@ -93,8 +93,8 @@ void matmul_multi_core(
         N,
         TILE_HW);
 
-    uint32_t BM = 32;  // block M in elements
-    uint32_t BN = 256;  // block N in elements
+    uint32_t BM = 64;  // block M in elements
+    uint32_t BN = 128;  // block N in elements
     uint32_t BK = 512;  // block K in elements
 
     TT_ASSERT(BM % TILE_HEIGHT == 0 && BN % TILE_WIDTH == 0 && BK % TILE_WIDTH == 0,

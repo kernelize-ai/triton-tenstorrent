@@ -43,11 +43,11 @@ static int64_t findAllocIdx(Operation *op) {
 }
 
 static Value applyLinearLayout(ConversionPatternRewriter &rewriter,
-                               Location loc, Value index,
+                               Location loc, Value indexI32,
                                const std::vector<int32_t> &bases) {
   Value offset = arith::createConstantI32(loc, rewriter, 0);
-  Value indexI32 =
-      arith::IndexCastOp::create(rewriter, loc, rewriter.getI32Type(), index);
+  // Value indexI32 =
+  // arith::IndexCastOp::create(rewriter, loc, rewriter.getI32Type(), index);
 
   for (size_t bit = 0; bit < bases.size(); ++bit) {
     if (bases[bit] == 0)
@@ -218,6 +218,8 @@ struct ConvertTensorDescLoadOp
     layout = layout.sublayout({S("register"), S("tile")},
                               llvm::to_vector(layout.getOutDimNames()));
     LDBG("Register/Tile layout:\n" << layout << "\n");
+    auto invertedLayout = layout.invert();
+    LDBG("Inverted layout:\n" << invertedLayout << "\n");
 
     auto numTiles = layout.getInDimSize(S("tile"));
     LDBG("Generating " << numTiles << " tile loads");
@@ -287,6 +289,41 @@ struct ConvertTensorDescLoadOp
     int32_t tileDimSize = layout.getInDimSize(tileDimName);
     int32_t numBits = llvm::Log2_32(tileDimSize);
 
+    // bit shifts for element to tile conversion
+    int32_t rowShift = llvm::Log2_32(tileShape[0]);
+    int32_t colShift = llvm::Log2_32(tileShape[1]);
+
+    // extract basis vectors from inverted layout
+    auto invertedInDimsNames = llvm::to_vector(invertedLayout.getInDimNames());
+
+    int32_t blockTilesH = static_cast<int32_t>(blockShape[0] / tileShape[0]);
+    int32_t blockTilesW = static_cast<int32_t>(blockShape[1] / tileShape[1]);
+
+    // How many bits in the loop counters?
+    int32_t rowBits = llvm::Log2_32_Ceil(blockTilesH);
+    int32_t colBits = llvm::Log2_32_Ceil(blockTilesW);
+
+    // maybe SmallVector?
+    std::vector<int32_t> rowToL1Bases;
+    std::vector<int32_t> colToL1Bases;
+
+    // Populate Row Bases (Maps RowIV -> L1 Index)
+    for (int k = 0; k < rowBits; ++k) {
+      // Look up dim0 bit (k + 5)
+      int32_t val = invertedLayout.getBasis(invertedInDimsNames[0],
+                                            k + rowShift, tileDimName);
+      rowToL1Bases.push_back(val);
+    }
+
+    // Populate Col Bases (Maps ColIV -> L1 Index)
+    for (int k = 0; k < colBits; ++k) {
+      // Look up dim1 bit (k + 5)
+      int32_t val = invertedLayout.getBasis(invertedInDimsNames[1],
+                                            k + colShift, tileDimName);
+      colToL1Bases.push_back(val);
+    }
+
+    // OLD: remove?
     std::vector<int32_t> basesDim0;
     std::vector<int32_t> basesDim1;
 
@@ -312,7 +349,60 @@ struct ConvertTensorDescLoadOp
     });
 
 #if 1
+#if 1
+    // DRAM ordered loop
+    Value zero = arith::createConstantI32(loc, rewriter, 0);
+    Value one = arith::createConstantI32(loc, rewriter, 1);
+    Value loopLimitRow = arith::createConstantI32(loc, rewriter, blockTilesH);
+    Value loopLimitCol = arith::createConstantI32(loc, rewriter, blockTilesW);
 
+    auto rowLoop = scf::ForOp::create(rewriter, loc, zero, loopLimitRow, one);
+    {
+      rewriter.setInsertionPointToStart(rowLoop.getBody());
+      Value rowIv = rowLoop.getInductionVar();
+
+      auto colLoop = scf::ForOp::create(rewriter, loc, zero, loopLimitCol, one);
+      {
+        rewriter.setInsertionPointToStart(colLoop.getBody());
+        Value colIv = colLoop.getInductionVar();
+
+        Value globalRow =
+            arith::AddIOp::create(rewriter, loc, tileCoord[0], rowIv);
+        Value globalCol =
+            arith::AddIOp::create(rewriter, loc, tileCoord[1], colIv);
+
+        Value globalStride = tilesPerDim[1];
+        Value remoteTileIndex = arith::AddIOp::create(
+            rewriter, loc,
+            arith::MulIOp::create(rewriter, loc, globalRow, globalStride),
+            globalCol);
+
+        // -----------------------------------------------------------
+        // B. L1 Index Calculation (Using INVERTED Bases)
+        // -----------------------------------------------------------
+        // "Scatters" the linear DRAM reads into the correct L1 slot
+
+        Value l1PartRow = applyLinearLayout(rewriter, loc, rowIv, rowToL1Bases);
+        Value l1PartCol = applyLinearLayout(rewriter, loc, colIv, colToL1Bases);
+        Value l1TileIndex =
+            arith::AddIOp::create(rewriter, loc, l1PartRow, l1PartCol);
+
+        // C. Issue Read
+        Value l1OffsetBytes =
+            arith::MulIOp::create(rewriter, loc, l1TileIndex, pageSize);
+        Value crtL1Address =
+            arith::AddIOp::create(rewriter, loc, l1BaseAddr, l1OffsetBytes);
+
+        Value const0 = arith::createConstantI32(loc, rewriter, 0);
+        Value nocAddr = ttkernel::InterleavedAddrGenFastGetNocAddrOp::create(
+            rewriter, loc, addrGen, remoteTileIndex, const0, Value());
+
+        ttkernel::NocAsyncReadOp::create(rewriter, loc, nocAddr, crtL1Address,
+                                         pageSize);
+      }
+    }
+    rewriter.setInsertionPointAfter(rowLoop);
+#else
     Value loopStart = arith::createIndexConstant(loc, rewriter, 0);
     Value loopEnd = arith::createIndexConstant(loc, rewriter, numTiles);
     Value loopStep = arith::createIndexConstant(loc, rewriter, 1);
@@ -360,7 +450,7 @@ struct ConvertTensorDescLoadOp
                                        pageSize);
     }
     rewriter.setInsertionPointAfter(loadLoop);
-
+#endif
 #else
     // re-roll using scf for to reduce code size?
     for (int32_t i = 0; i < numTiles; ++i) {
