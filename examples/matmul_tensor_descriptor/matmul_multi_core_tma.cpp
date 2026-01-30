@@ -169,7 +169,7 @@ void matmul_multi_core(
         M,
         N,
         Mt * Nt);
-
+        return;
     // Create DRAM buffers for input and output matrices (replicated per device across the mesh).
     // We allocate DRAM buffers for the input matrices and output matrix.
     // Setting page_size to single_tile_size is the most common configuration for memory buffers in Metalium
