@@ -94,8 +94,8 @@ void matmul_multi_core(
         TILE_HW);
 
     uint32_t BM = 32;  // block M in elements
-    uint32_t BN = 64;  // block N in elements
-    uint32_t BK = 64;  // block K in elements
+    uint32_t BN = 256;  // block N in elements
+    uint32_t BK = 512;  // block K in elements
 
     TT_ASSERT(BM % TILE_HEIGHT == 0 && BN % TILE_WIDTH == 0 && BK % TILE_WIDTH == 0,
           "Block sizes must be tile-multiple (32).");
@@ -390,9 +390,9 @@ int main(int argc, char* argv[]) {
 
         // Create source data with specified matrix dimensions
         // Matrix dimensions - use command line args if provided, otherwise use defaults
-        uint32_t M = 256;  // Number of rows in matrix A (default)
-        uint32_t N = 128;  // Number of columns in matrix B (default)
-        uint32_t K = 64;   // Inner dimension for multiplication (default)
+        uint32_t M = 64;  // Number of rows in matrix A (default)
+        uint32_t N = 2560;  // Number of columns in matrix B (default)
+        uint32_t K = 9728;   // Inner dimension for multiplication (default)
         
         if (argc >= 4) {
             M = std::atoi(argv[1]);
