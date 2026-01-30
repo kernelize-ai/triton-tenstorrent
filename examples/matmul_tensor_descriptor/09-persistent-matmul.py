@@ -91,7 +91,7 @@ def matmul_tma_set_block_size_hook(nargs):
     BLOCK_N = nargs["BLOCK_SIZE_N"]
     BLOCK_K = nargs["BLOCK_SIZE_K"]
     nargs["a_desc"].block_shape = [BLOCK_M, BLOCK_K]
-    nargs["b_desc"].block_shape = [BLOCK_N, BLOCK_K]
+    nargs["b_desc"].block_shape = [BLOCK_K, BLOCK_N]
     if EPILOGUE_SUBTILE:
         nargs["c_desc"].block_shape = [BLOCK_M, BLOCK_N // 2]
     else:
