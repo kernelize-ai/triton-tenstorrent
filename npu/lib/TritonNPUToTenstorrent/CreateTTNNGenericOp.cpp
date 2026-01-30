@@ -461,8 +461,23 @@ struct CreateTTNNGenericOp
     OpBuilder builder(m);
 
     SmallVector<ttnn::CoreRuntimeArgsAttr> kernelRTArgs;
+#if 0
 #if 1
-    // 32x256x1024
+ // 32x256x512 but using only 10 cores ({[(x=0,y=0) - (x=0,y=6)], [(x=1,y=0) - (x=1,y=2)]})
+    ttnn::CoreRangeSetAttr coreRangeSet1 = ttnn::CoreRangeSetAttr::get(
+        context, {getCoreRange(0, 0, 0, 6), getCoreRange(1, 0, 1, 2)});
+    unsigned mBlocks = M / 32;
+    unsigned nBlocks = N / 256;
+    unsigned totalBlocks = mBlocks * nBlocks;
+    unsigned totalCores = 10;
+    assert(totalBlocks % totalCores == 0 &&
+           "expected total blocks to be evenly divisible by total cores");
+    unsigned totalBlocksPerCore = totalBlocks / totalCores;
+    llvm::errs() << "totalBlocksPerCore = " << totalBlocksPerCore << " (mBlocks=" << mBlocks << ", nBlocks=" << nBlocks << ")\n";
+    populateBlockStartEndArgsForSet(builder, coreRangeSet1, /*tilesPerCore=*/totalBlocksPerCore,
+                                    kernelRTArgs);
+#else
+    // 32x256x512
     // Distributing 20 output tiles across 20 cores: 20 cores ({[(x=0,y=0) - (x=1,y=6)], [(x=2,y=0) - (x=2,y=5)]}) x 1 tiles/core + 0 cores ({}) x 0 tiles/core
    ttnn::CoreRangeSetAttr coreRangeSet1 = ttnn::CoreRangeSetAttr::get(
         context, {getCoreRange(0, 0, 1, 6), getCoreRange(2, 0, 2, 5)});
@@ -470,8 +485,9 @@ struct CreateTTNNGenericOp
                                     kernelRTArgs);
     assert(kernelRTArgs.size() == 20 && "expected dispatch mismatch");
 #endif 
-    #if 0
-    // 64x128x1024
+#endif 
+#if 1
+    // 64x128xK
     // Distributing 20 output tiles across 20 cores: 20 cores ({[(x=0,y=0) -
     // (x=1,y=6)], [(x=2,y=0) - (x=2,y=5)]}) x 1 tiles/core + 0 cores ({}) x 0
     // tiles/core
