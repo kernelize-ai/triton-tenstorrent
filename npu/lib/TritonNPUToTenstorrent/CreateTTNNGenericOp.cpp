@@ -457,7 +457,7 @@ struct CreateTTNNGenericOp
     OpBuilder builder(m);
 
     SmallVector<ttnn::CoreRuntimeArgsAttr> kernelRTArgs;
-#if 1
+#if 0
     // 64x128x128
     // Distributing 20 output tiles across 20 cores: 20 cores ({[(x=0,y=0) -
     // (x=1,y=6)], [(x=2,y=0) - (x=2,y=5)]}) x 1 tiles/core + 0 cores ({}) x 0
@@ -467,7 +467,7 @@ struct CreateTTNNGenericOp
     populateBlockStartEndArgsForSet(builder, coreRangeSet1, /*tilesPerCore=*/1,
                                     kernelRTArgs);
     assert(kernelRTArgs.size() == 20 && "expected dispatch mismatch");
-
+#endif 
 #if 0
     // did not work - out of DEST?
     // 64x256x256
@@ -480,6 +480,20 @@ struct CreateTTNNGenericOp
      assert(kernelRTArgs.size() == 10 && "expected dispatch for 10 cores");
 #endif
 #if 1
+    // ~64x64x64 but using only 8 cores~ (getCoreRange(0, 0, 7, 0))
+    // 64x128x128 but using only 10 cores ({[(x=0,y=0) - (x=0,y=6)], [(x=1,y=0) - (x=1,y=2)]})
+    ttnn::CoreRangeSetAttr coreRangeSet1 = ttnn::CoreRangeSetAttr::get(
+        context, {getCoreRange(0, 0, 0, 6), getCoreRange(1, 0, 1, 2)});
+    unsigned mBlocks = M / 64;
+    unsigned nBlocks = N / 128;
+    unsigned totalBlocks = mBlocks * nBlocks;
+    unsigned totalCores = 10;
+    assert(totalBlocks % totalCores == 0 &&
+           "expected total blocks to be evenly divisible by total cores");
+    unsigned totalBlocksPerCore = totalBlocks / totalCores;
+    llvm::errs() << "totalBlocksPerCore = " << totalBlocksPerCore << " (mBlocks=" << mBlocks << ", nBlocks=" << nBlocks << ")\n";
+    populateBlockStartEndArgsForSet(builder, coreRangeSet1, /*tilesPerCore=*/totalBlocksPerCore,
+                                    kernelRTArgs);
 #else
     // 64x64x64
     // Distributing 40 output tiles across 40 cores: 40 cores ({[(x=0,y=0) -
@@ -491,7 +505,7 @@ struct CreateTTNNGenericOp
                                     kernelRTArgs);
 #endif
 
-#else
+#if 0
     // TODO: these are hardcoded as the TTKernel arg spec does not support RT
     // args We will need to use CoreRuntimeArgsAttr
     ttnn::CoreRangeSetAttr coreRangeSet1 = ttnn::CoreRangeSetAttr::get(
