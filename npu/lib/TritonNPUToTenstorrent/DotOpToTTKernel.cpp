@@ -120,15 +120,15 @@ struct ConvertDotOp : public OpConversionPattern<triton::DotOp> {
               rewriter, loc,
               (arith::MulIOp::create(rewriter, loc, mIv, kTilesVal)), kIv);
 
-          // bTile = k * nTiles + n
+          // TODO: support generic ordering
+          // bTile = n * kTiles + k
           Value bTile = arith::AddIOp::create(
               rewriter, loc,
-              (arith::MulIOp::create(rewriter, loc, kIv, nTilesVal)), nIv);
+              (arith::MulIOp::create(rewriter, loc, nIv, kTilesVal)), kIv);
 
           ttkernel::MatmulTilesOp::create(rewriter, loc, adaptor.getA(),
                                           adaptor.getB(), aTile, bTile,
                                           destRegisterIndexN);
-          // scf::YieldOp::create(rewriter, loc);
         }
         rewriter.setInsertionPointAfter(kLoop);
         Value nextDestRegisterIndex =

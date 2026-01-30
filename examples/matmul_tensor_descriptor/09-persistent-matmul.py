@@ -78,9 +78,9 @@ def matmul_get_configs(pre_hook=None):
     return [
         triton.Config({'BLOCK_SIZE_M': BM, 'BLOCK_SIZE_N': BN, "BLOCK_SIZE_K": BK, "GROUP_SIZE_M": 1}, num_stages=s,
                       num_warps=w, pre_hook=pre_hook)
-        for BM in [32]
-        for BN in [64]
-        for BK in [64]
+        for BM in [64]
+        for BN in [128]
+        for BK in [512]
         for s in ([1])
         for w in [1]
     ]
