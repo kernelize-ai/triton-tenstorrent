@@ -536,6 +536,7 @@ module attributes {"ttg.num-ctas" = 1 : i32, "ttg.num-warps" = 1 : i32, "ttg.thr
     // CHECK-DAG: %[[c1_i32:.*]] = arith.constant 1 : i32
     // CHECK-DAG: %[[c2_i32:.*]] = arith.constant 2 : i32
     // CHECK-DAG: %[[c32_i32:.*]] = arith.constant 32 : i32
+    // CHECK-DAG: %[[c2048_i32:.*]] = arith.constant 2048 : i32
     // CHECK-DAG: %[[TRUE:.*]] = arith.constant true
     // CHECK-DAG: %[[c0:.*]] = arith.constant 0 : index
     // CHECK-DAG: %[[c2:.*]] = arith.constant 2 : index
@@ -550,28 +551,30 @@ module attributes {"ttg.num-ctas" = 1 : i32, "ttg.num-warps" = 1 : i32, "ttg.thr
     // CHECK: %[[DATAFORMAT:.*]] = ttkernel.get_dataformat(%[[CB]]) : (!ttkernel.cb<2, !ttcore.tile<32x32, f16>>) -> !ttkernel.DataFormat
     // CHECK: %[[TILESIZE:.*]] = ttkernel.get_tile_size(%[[CB]]) : (!ttkernel.cb<2, !ttcore.tile<32x32, f16>>) -> i32
     // CHECK: %[[ADDR_GEN:.*]] = ttkernel.get_interleaved_addr_gen_fast(%[[TRUE]], %[[PTR]], %[[TILESIZE]], %[[DATAFORMAT]]) : (i1, i32, i32, !ttkernel.DataFormat) -> !ttkernel.interleaved_addr_gen_fast
-    // CHECK-DAG: %[[X_TILE_ID:.*]] = arith.divsi %[[SHAPE0]], %[[c32_i32]] : i32
-    // CHECK-DAG: %[[Y_TILE_ID:.*]] = arith.divsi %[[SHAPE1]], %[[c32_i32]] : i32
-    // CHECK-DAG: %[[TILES_PER_DIM0:.*]] = arith.ceildivsi %[[DESC_SHAPE0]], %[[c32_i32]] : i32
     // CHECK: ttkernel.cb_reserve_back(%[[CB]], %[[c2_i32]]) : (!ttkernel.cb<2, !ttcore.tile<32x32, f16>>, i32) -> ()
     // CHECK: %[[CB_WRITE_PTR:.*]] = ttkernel.get_write_ptr(%[[CB]]) : (!ttkernel.cb<2, !ttcore.tile<32x32, f16>>) -> i32
 
+    // CHECK-DAG: %[[TILES_PER_DIM0:.*]] = arith.ceildivsi %[[DESC_SHAPE0]], %[[c32_i32]] : i32
+
     %a_6 = tt.descriptor_load %arg0[%offs_am, %offs_k] : !tt.tensordesc<tensor<32x64xf16>> -> tensor<32x64xf16, #triton_tenstorrent.tiled_dot_op<{opIdx = 0, parent = #tiled}>>
-    // CHECK: scf.for %[[IV:.*]] = %[[c0_i32]] to %[[c2_i32]] step %[[c1_i32]] : i32 {
 
-    // COM: Calculate DRAM Address
-    // CHECK: %[[COL_OFFSET:.*]] = arith.addi %[[Y_TILE_ID]], %[[IV]] : i32
-    // CHECK: %[[ROW_BASE:.*]] = arith.muli %[[X_TILE_ID]], %[[TILES_PER_DIM0]] : i32
-    // CHECK: %[[DRAM_ID:.*]] = arith.addi %[[ROW_BASE]], %[[COL_OFFSET]] : i32
+    // CHECK-DAG: %[[X_TILE_ID:.*]] = arith.divsi %[[SHAPE0]], %[[c32_i32]] : i32
+    // CHECK-DAG: %[[Y_TILE_ID:.*]] = arith.divsi %[[SHAPE1]], %[[c32_i32]] : i32
 
-    // COM: Calculate L1 Address
-    // CHECK: %[[L1_MASK:.*]] = arith.andi %[[IV]], %[[c1_i32]] : i32
-    // CHECK: %[[L1_OFFSET:.*]] = arith.muli %[[L1_MASK]], %[[TILESIZE]] : i32
-    // CHECK: %[[L1_ADDR:.*]] = arith.addi %[[CB_WRITE_PTR]], %[[L1_OFFSET]] : i32
+    // COM: 1. Calculate Base DRAM Address (Row * Stride + Col)
+    // CHECK: %[[ROW_OFFSET:.*]] = arith.muli %[[X_TILE_ID]], %[[TILES_PER_DIM0]] : i32
+    // CHECK: %[[BASE_DRAM_ID:.*]] = arith.addi %[[ROW_OFFSET]], %[[Y_TILE_ID]] : i32
 
-    // CHECK:   %[[NOC_ADDR:.*]] = ttkernel.interleaved_addr_gen_fast.get_noc_addr(%[[ADDR_GEN]], %[[DRAM_ID]], %[[c0_i32]], )
-    // CHECK:   ttkernel.noc_async_read(%[[NOC_ADDR]], %[[L1_ADDR]], %[[TILESIZE]])
-    // CHECK: }
+    // COM: 2. Tile 0 Issue (Offset 0, 0)
+    // CHECK: %[[NOC_ADDR_0:.*]] = ttkernel.interleaved_addr_gen_fast.get_noc_addr(%[[ADDR_GEN]], %[[BASE_DRAM_ID]], %[[c0_i32]], )
+    // CHECK: ttkernel.noc_async_read(%[[NOC_ADDR_0]], %[[CB_WRITE_PTR]], %[[TILESIZE]])
+
+    // COM: 3. Tile 1 Issue (Offset 0, 1)
+    // CHECK: %[[L1_ADDR_1:.*]] = arith.addi %[[CB_WRITE_PTR]], %[[c2048_i32]] : i32
+    // CHECK: %[[DRAM_ID_1:.*]] = arith.addi %[[BASE_DRAM_ID]], %[[c1_i32]] : i32
+    // CHECK: %[[NOC_ADDR_1:.*]] = ttkernel.interleaved_addr_gen_fast.get_noc_addr(%[[ADDR_GEN]], %[[DRAM_ID_1]], %[[c0_i32]], )
+    // CHECK: ttkernel.noc_async_read(%[[NOC_ADDR_1]], %[[L1_ADDR_1]], %[[TILESIZE]])
+
     // CHECK: ttkernel.noc_async_read_barrier() : () -> ()
     ttg.local_store %a_6, %a : tensor<32x64xf16, #triton_tenstorrent.tiled_dot_op<{opIdx = 0, parent = #tiled}>> -> !ttg.memdesc<32x64xf16, #shared1, #smem, mutable>
     // CHECK: ttkernel.cb_push_back(%[[CB]], %[[c2_i32]]) : (!ttkernel.cb<2, !ttcore.tile<32x32, f16>>, i32) -> ()
@@ -592,6 +595,7 @@ module attributes {"ttg.num-ctas" = 1 : i32, "ttg.num-warps" = 1 : i32, "ttg.thr
   // CHECK: func public @load_tiled_dot_op_B__reader
   tt.func public @load_tiled_dot_op_B__reader(%arg5: !tt.tensordesc<tensor<64x64xf16>>, %offs_bn: i32, %offs_k: i32) {
     // CHECK-DAG: %[[c0_i32:.*]] = arith.constant 0 : i32
+    // CHECK-DAG: %[[c2048_i32:.*]] = arith.constant 2048 : i32
     // CHECK-DAG: %[[c0:.*]] = arith.constant 0 : index
     // CHECK-DAG: %[[c2:.*]] = arith.constant 2 : index
     // CHECK-DAG: %[[c6:.*]] = arith.constant 6 : index
@@ -604,39 +608,42 @@ module attributes {"ttg.num-ctas" = 1 : i32, "ttg.num-warps" = 1 : i32, "ttg.thr
 
     %b = ttg.local_alloc {alloc_idx = 1 : i32} : () -> !ttg.memdesc<64x64xf16, #shared, #smem, mutable>
     // CHECK: %[[ADDR_GEN:.*]] = ttkernel.get_interleaved_addr_gen_fast({{.*}})
-    // CHECK-DAG: %[[X_TILE_ID:.*]] = arith.divsi %[[SHAPE0]], %[[c32_i32]] : i32
-    // CHECK-DAG: %[[Y_TILE_ID:.*]] = arith.divsi %[[SHAPE1]], %[[c32_i32]] : i32
-    // CHECK-DAG: %[[TILES_PER_DIM0:.*]] = arith.ceildivsi %[[DESC_SHAPE0]], %[[c32_i32]] : i32
     // CHECK: ttkernel.cb_reserve_back
-    %b_7 = tt.descriptor_load %arg5[%offs_k, %offs_bn] : !tt.tensordesc<tensor<64x64xf16>> -> tensor<64x64xf16, #triton_tenstorrent.tiled_dot_op<{opIdx = 1, parent = #tiled1}>>
-    // COM: We have already tested the pre-amble above, so we restrict this test to ensuring the load order matches the layout
-
     // CHECK: %[[CB_ADDR:.*]] = ttkernel.get_write_ptr(%[[CB]])
 
-    // COM: Outer Loop (Rows)
-    // CHECK: scf.for %[[ROW_IV:.*]] = %[[c0_i32]] to %[[c2_i32]] step %[[c1_i32]] : i32 {
-    // COM: Inner Loop (Cols)
-    // CHECK:   scf.for %[[COL_IV:.*]] = %[[c0_i32]] to %[[c2_i32]] step %[[c1_i32]] : i32 {
+    // CHECK-DAG: %[[TILES_PER_DIM0:.*]] = arith.ceildivsi %[[DESC_SHAPE0]], %[[c32_i32]] : i32
 
-    // COM: 1. DRAM Address Calculation (Row-Major: Row*Stride + Col)
-    // CHECK:     %[[CUR_ROW:.*]] = arith.addi %[[Y_TILE_ID]], %[[ROW_IV]] : i32
-    // CHECK:     %[[CUR_COL:.*]] = arith.addi %[[X_TILE_ID]], %[[COL_IV]] : i32
-    // CHECK:     %[[ROW_OFF:.*]] = arith.muli %[[CUR_ROW]], %[[TILES_PER_DIM0]] : i32
-    // CHECK:     %[[DRAM_IDX:.*]] = arith.addi %[[ROW_OFF]], %[[CUR_COL]] : i32
+    // CHECK-DAG: %[[X_TILE_ID:.*]] = arith.divsi %[[SHAPE0]], %[[c32_i32]] : i32
+    // CHECK-DAG: %[[Y_TILE_ID:.*]] = arith.divsi %[[SHAPE1]], %[[c32_i32]] : i32
+    %b_7 = tt.descriptor_load %arg5[%offs_k, %offs_bn] : !tt.tensordesc<tensor<64x64xf16>> -> tensor<64x64xf16, #triton_tenstorrent.tiled_dot_op<{opIdx = 1, parent = #tiled1}>>
 
-    // COM: 2. L1 Address Calculation (Column-Major: Row + Col*2)
-    // CHECK:     %[[R_MASK:.*]] = arith.andi %[[ROW_IV]], %[[c1_i32]] : i32
-    // CHECK:     %[[C_MASK:.*]] = arith.andi %[[COL_IV]], %[[c1_i32]] : i32
-    // CHECK:     %[[C_SHIFT:.*]] = arith.muli %[[C_MASK]], %[[c2_i32]] : i32
-    // CHECK:     %[[L1_IDX:.*]] = arith.addi %[[R_MASK]], %[[C_SHIFT]] : i32
-    // CHECK:     %[[L1_OFF:.*]] = arith.muli %[[L1_IDX]], %[[TILESIZE]] : i32
-    // CHECK:     %[[L1_ADDR:.*]] = arith.addi %[[CB_ADDR]], %[[L1_OFF]] : i32
+    // COM: Calculate Base DRAM Address (Row * Stride + Col)
+    // CHECK: %[[ROW_OFFSET:.*]] = arith.muli %[[Y_TILE_ID]], %[[TILES_PER_DIM0]] : i32
+    // CHECK: %[[BASE_DRAM_ID:.*]] = arith.addi %[[ROW_OFFSET]], %[[X_TILE_ID]] : i32
 
-    // COM: 3. Issue Read
-    // CHECK:     %[[NOC_ADDR:.*]] = ttkernel.interleaved_addr_gen_fast.get_noc_addr(%[[ADDR_GEN]], %[[DRAM_IDX]], %[[c0_i32]], )
-    // CHECK:     ttkernel.noc_async_read(%[[NOC_ADDR]], %[[L1_ADDR]], %[[TILESIZE]]) : (!ttkernel.noc_addr, i32, i32) -> ()
-    // CHECK:   }
-    // CHECK: }
+    // COM: Tile 0 (Row 0, Col 0) -> L1 Offset 0
+    // CHECK: %[[NOC_ADDR_0:.*]] = ttkernel.interleaved_addr_gen_fast.get_noc_addr(%[[ADDR_GEN]], %[[BASE_DRAM_ID]], %[[c0_i32]], )
+    // CHECK: ttkernel.noc_async_read(%[[NOC_ADDR_0]], %[[CB_ADDR]], %[[TILESIZE]])
+
+    // COM: Tile 1 (Row 0, Col 1) -> L1 Offset 2 (4096 bytes)
+    // CHECK: %[[L1_ADDR_1:.*]] = arith.addi %[[CB_ADDR]], %[[c4096_i32:.*]] : i32
+    // CHECK: %[[DRAM_ID_1:.*]] = arith.addi %[[BASE_DRAM_ID]], %[[c1_i32]] : i32
+    // CHECK: %[[NOC_ADDR_1:.*]] = ttkernel.interleaved_addr_gen_fast.get_noc_addr(%[[ADDR_GEN]], %[[DRAM_ID_1]], %[[c0_i32]], )
+    // CHECK: ttkernel.noc_async_read(%[[NOC_ADDR_1]], %[[L1_ADDR_1]], %[[TILESIZE]])
+
+    // COM: Tile 2 (Row 1, Col 0) -> L1 Offset 1 (2048 bytes)
+    // CHECK: %[[L1_ADDR_2:.*]] = arith.addi %[[CB_ADDR]], %[[c2048_i32:.*]] : i32
+    // CHECK: %[[DRAM_ID_2:.*]] = arith.addi %[[BASE_DRAM_ID]], %[[TILES_PER_DIM0]] : i32
+    // CHECK: %[[NOC_ADDR_2:.*]] = ttkernel.interleaved_addr_gen_fast.get_noc_addr(%[[ADDR_GEN]], %[[DRAM_ID_2]], %[[c0_i32]], )
+    // CHECK: ttkernel.noc_async_read(%[[NOC_ADDR_2]], %[[L1_ADDR_2]], %[[TILESIZE]])
+
+    // COM: Tile 3 (Row 1, Col 1) -> L1 Offset 3 (6144 bytes)
+    // CHECK: %[[L1_ADDR_3:.*]] = arith.addi %[[CB_ADDR]], %[[c6144_i32:.*]] : i32
+    // COM: Note: DRAM calc here is (Base + 1) + Stride
+    // CHECK: %[[DRAM_ID_3_PART:.*]] = arith.addi %[[BASE_DRAM_ID]], %[[c1_i32]] : i32
+    // CHECK: %[[DRAM_ID_3:.*]] = arith.addi %[[DRAM_ID_3_PART]], %[[TILES_PER_DIM0]] : i32
+    // CHECK: %[[NOC_ADDR_3:.*]] = ttkernel.interleaved_addr_gen_fast.get_noc_addr(%[[ADDR_GEN]], %[[DRAM_ID_3]], %[[c0_i32]], )
+    // CHECK: ttkernel.noc_async_read(%[[NOC_ADDR_3]], %[[L1_ADDR_3]], %[[TILESIZE]])
 
     // CHECK: ttkernel.noc_async_read_barrier() : () -> ()
     ttg.local_store %b_7, %b : tensor<64x64xf16, #triton_tenstorrent.tiled_dot_op<{opIdx = 1, parent = #tiled1}>> -> !ttg.memdesc<64x64xf16, #shared, #smem, mutable>
@@ -661,6 +668,7 @@ module attributes {"ttg.num-ctas" = 1 : i32, "ttg.num-warps" = 1 : i32, "ttg.thr
     // CHECK-DAG: %[[c1_i32:.*]] = arith.constant 1 : i32
     // CHECK-DAG: %[[c2_i32:.*]] = arith.constant 2 : i32
     // CHECK-DAG: %[[c32_i32:.*]] = arith.constant 32 : i32
+    // CHECK-DAG: %[[c2048_i32:.*]] = arith.constant 2048 : i32
     // CHECK-DAG: %[[TRUE:.*]] = arith.constant true
     // CHECK-DAG: %[[c0:.*]] = arith.constant 0 : index
     // CHECK-DAG: %[[c2:.*]] = arith.constant 2 : index
@@ -676,27 +684,27 @@ module attributes {"ttg.num-ctas" = 1 : i32, "ttg.num-warps" = 1 : i32, "ttg.thr
     // CHECK: %[[TILESIZE:.*]] = ttkernel.get_tile_size(%[[CB]]) : (!ttkernel.cb<2, !ttcore.tile<32x32, f16>>) -> i32
     // CHECK: %[[ADDR_GEN:.*]] = ttkernel.get_interleaved_addr_gen_fast(%[[TRUE]], %[[PTR]], %[[TILESIZE]], %[[DATAFORMAT]]) : (i1, i32, i32, !ttkernel.DataFormat) -> !ttkernel.interleaved_addr_gen_fast
     // CHECK: ttkernel.cb_wait_front(%[[CB]], %[[c2_i32]]) : (!ttkernel.cb<2, !ttcore.tile<32x32, f16>>, i32) -> ()
+
+
+    // CHECK: %[[CB_READ_PTR:.*]] = ttkernel.get_read_ptr(%[[CB]]) : (!ttkernel.cb<2, !ttcore.tile<32x32, f16>>) -> i32
+
+    // CHECK-DAG: %[[TILES_PER_DIM0:.*]] = arith.ceildivsi %[[DESC_SHAPE0]], %[[c32_i32]] : i32
     // CHECK-DAG: %[[ROW_TILE_ID:.*]] = arith.divsi %[[SHAPE0]], %[[c32_i32]] : i32
     // CHECK-DAG: %[[COL_TILE_ID:.*]] = arith.divsi %[[SHAPE1]], %[[c32_i32]] : i32
-    // CHECK-DAG: %[[TILES_PER_DIM0:.*]] = arith.ceildivsi %[[DESC_SHAPE0]], %[[c32_i32]] : i32
-    // CHECK: %[[CB_READ_PTR:.*]] = ttkernel.get_read_ptr(%[[CB]]) : (!ttkernel.cb<2, !ttcore.tile<32x32, f16>>) -> i32
     %4 = ttg.local_load %0 : !ttg.memdesc<32x64xf16, #shared1, #smem, mutable> -> tensor<32x64xf16, #tiled>
-    // CHECK: scf.for %[[IV:.*]] = %[[c0_i32]] to %[[c2_i32]] step %[[c1_i32]] : i32 {
+    // COM: Calculate Base DRAM Address (Row * Stride + Col)
+    // CHECK: %[[ROW_OFFSET:.*]] = arith.muli %[[ROW_TILE_ID]], %[[TILES_PER_DIM0]] : i32
+    // CHECK: %[[BASE_DRAM_ID:.*]] = arith.addi %[[ROW_OFFSET]], %[[COL_TILE_ID]] : i32
 
-    // COM: 1. DRAM Address Calculation (Row*Stride + (Col + IV))
-    // CHECK:   %[[CUR_COL:.*]] = arith.addi %[[COL_TILE_ID]], %[[IV]] : i32
-    // CHECK:   %[[ROW_OFFSET:.*]] = arith.muli %[[ROW_TILE_ID]], %[[TILES_PER_DIM0]] : i32
-    // CHECK:   %[[DRAM_IDX:.*]] = arith.addi %[[ROW_OFFSET]], %[[CUR_COL]] : i32
+    // COM: Tile 0 (Offset 0)
+    // CHECK: %[[NOC_ADDR_0:.*]] = ttkernel.interleaved_addr_gen_fast.get_noc_addr(%[[ADDR_GEN]], %[[BASE_DRAM_ID]], %[[c0_i32]], )
+    // CHECK: ttkernel.noc_async_write(%[[CB_READ_PTR]], %[[NOC_ADDR_0]], %[[TILESIZE]])
 
-    // COM: 2. L1 Address Calculation (ReadPtr + (IV & 1) * TileSize)
-    // CHECK:   %[[MASK:.*]] = arith.andi %[[IV]], %[[c1_i32]] : i32
-    // CHECK:   %[[L1_OFF:.*]] = arith.muli %[[MASK]], %[[TILESIZE]] : i32
-    // CHECK:   %[[L1_ADDR:.*]] = arith.addi %[[CB_READ_PTR]], %[[L1_OFF]] : i32
-
-    // COM: 3. Issue Write
-    // CHECK:   %[[NOC_ADDR:.*]] = ttkernel.interleaved_addr_gen_fast.get_noc_addr(%[[ADDR_GEN]], %[[DRAM_IDX]], %[[c0_i32]], )
-    // CHECK:   ttkernel.noc_async_write(%[[L1_ADDR]], %[[NOC_ADDR]], %[[TILESIZE]]) : (i32, !ttkernel.noc_addr, i32) -> ()
-    // CHECK: }
+    // COM: Tile 1 (Offset 1)
+    // CHECK: %[[L1_ADDR_1:.*]] = arith.addi %[[CB_READ_PTR]], %[[c2048_i32:.*]] : i32
+    // CHECK: %[[DRAM_ID_1:.*]] = arith.addi %[[BASE_DRAM_ID]], %[[c1_i32]] : i32
+    // CHECK: %[[NOC_ADDR_1:.*]] = ttkernel.interleaved_addr_gen_fast.get_noc_addr(%[[ADDR_GEN]], %[[DRAM_ID_1]], %[[c0_i32]], )
+    // CHECK: ttkernel.noc_async_write(%[[L1_ADDR_1]], %[[NOC_ADDR_1]], %[[TILESIZE]])
 
     // CHECK: ttkernel.noc_async_write_barrier() : () -> ()
     tt.descriptor_store %arg10[%offs_am, %offs_bn], %4 : !tt.tensordesc<tensor<32x64xf16>>, tensor<32x64xf16, #tiled>

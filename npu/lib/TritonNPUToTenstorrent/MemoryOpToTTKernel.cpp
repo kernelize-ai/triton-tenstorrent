@@ -42,12 +42,11 @@ static int64_t findAllocIdx(Operation *op) {
   return -1;
 }
 
+// TODO: move to utilites, we want to keep this function
 static Value applyLinearLayout(ConversionPatternRewriter &rewriter,
                                Location loc, Value indexI32,
                                const std::vector<int32_t> &bases) {
   Value offset = arith::createConstantI32(loc, rewriter, 0);
-  // Value indexI32 =
-  // arith::IndexCastOp::create(rewriter, loc, rewriter.getI32Type(), index);
 
   for (size_t bit = 0; bit < bases.size(); ++bit) {
     if (bases[bit] == 0)
@@ -186,7 +185,6 @@ struct ConvertTensorDescLoadOp
 
     Value cb =
         rewriter.getRemappedValue(cast<gpu::LocalStoreOp>(user).getDst());
-    LDBG("Converting descriptor load op w/ cb type: " << cb << "\n");
 
     auto descTy = op.getDesc().getType();
     const auto blockShape = descTy.getBlockType().getShape();
@@ -235,34 +233,13 @@ struct ConvertTensorDescLoadOp
 
     auto offsets = op.getIndices();
 
-    auto i32Ty = rewriter.getI32Type();
-    SmallVector<Value, 4> tileSizeValues;
-    for (unsigned i = 0; i < tileShape.size(); ++i) {
-      tileSizeValues.push_back(arith::ConstantOp::create(
-          rewriter, loc, i32Ty,
-          IntegerAttr::get(i32Ty, static_cast<int32_t>(tileShape[i]))));
-    }
-
-    // tileCoord[i] = Global Offset in Tiles (e.g., offset 32 -> tile 1)
-    SmallVector<Value, 4> tileCoord;
-    for (unsigned i = 0; i < tileShape.size(); ++i) {
-      tileCoord.push_back(
-          arith::DivSIOp::create(rewriter, loc, offsets[i], tileSizeValues[i]));
-    }
-
-    // tilesPerDim[i] = Total Tensor Size in Tiles
-    auto shape = desc.getShape();
-    SmallVector<Value, 4> tilesPerDim;
-    for (unsigned i = 0; i < tileShape.size(); ++i) {
-      tilesPerDim.push_back(arith::CeilDivSIOp::create(rewriter, loc, shape[i],
-                                                       tileSizeValues[i]));
-    }
-
     // determine how many tiles we need to load by converting the shape to tiles
     const int32_t numCbTiles =
         cast<ttkernel::CBType>(cb.getType()).getNumTiles();
     assert(numTiles == numCbTiles &&
            "number of tiles in layout must match number of tiles in CB");
+    LDBG("Descriptor load cb type: " << cb.getType());
+    const unsigned cbPageSize = 2048; // TODO: read from cb type
     LDBG("Loading from CB of size " << numCbTiles << " tiles");
     Value numPages = arith::createConstantI32(loc, rewriter, numCbTiles);
     ttkernel::CBReserveBackOp::create(rewriter, loc, cb, numPages);
@@ -271,91 +248,80 @@ struct ConvertTensorDescLoadOp
 
     StringAttr tileDimName = S("tile");
 
-    // bit shifts for element to tile conversion
-    int32_t rowShift = llvm::Log2_32(tileShape[0]);
-    int32_t colShift = llvm::Log2_32(tileShape[1]);
-
-    // extract basis vectors from inverted layout
-    auto invertedInDimsNames = llvm::to_vector(invertedLayout.getInDimNames());
+    LDBG("Tile load loop - block shape: (" << blockShape[0] << ", "
+                                           << blockShape[1] << ")\n");
+    LDBG("Tile load loop - tile shape: (" << tileShape[0] << ", "
+                                          << tileShape[1] << ")\n");
 
     int32_t blockTilesH = static_cast<int32_t>(blockShape[0] / tileShape[0]);
     int32_t blockTilesW = static_cast<int32_t>(blockShape[1] / tileShape[1]);
+    LDBG("Tile load loop - block tiles: (" << blockTilesH << ", " << blockTilesW
+                                           << ")\n");
 
-    // How many bits in the loop counters?
-    int32_t rowBits = llvm::Log2_32_Ceil(blockTilesH);
-    int32_t colBits = llvm::Log2_32_Ceil(blockTilesW);
+    auto shape = desc.getShape();
+    Value strideH = arith::CeilDivSIOp::create(
+        rewriter, loc, shape[1],
+        arith::createConstantI32(loc, rewriter, tileShape[1]));
 
-    std::vector<int32_t> rowToL1Bases;
-    std::vector<int32_t> colToL1Bases;
+    // global base coordinates
+    Value baseTileH = arith::DivSIOp::create(
+        rewriter, loc, offsets[0],
+        arith::createConstantI32(loc, rewriter, tileShape[0]));
+    Value baseTileW = arith::DivSIOp::create(
+        rewriter, loc, offsets[1],
+        arith::createConstantI32(loc, rewriter, tileShape[1]));
 
-    // Populate Row Bases (Maps RowIV -> L1 Index)
-    for (int k = 0; k < rowBits; ++k) {
-      // Look up dim0 bit (k + 5)
-      int32_t val = invertedLayout.getBasis(invertedInDimsNames[0],
-                                            k + rowShift, tileDimName);
-      rowToL1Bases.push_back(val);
-    }
+    // Base Remote Index = (StartRow * Stride) + StartCol
+    Value baseRemoteIdx = rewriter.create<arith::AddIOp>(
+        loc, rewriter.create<arith::MulIOp>(loc, baseTileH, strideH),
+        baseTileW);
 
-    // Populate Col Bases (Maps ColIV -> L1 Index)
-    for (int k = 0; k < colBits; ++k) {
-      // Look up dim1 bit (k + 5)
-      int32_t val = invertedLayout.getBasis(invertedInDimsNames[1],
-                                            k + colShift, tileDimName);
-      colToL1Bases.push_back(val);
-    }
+    Value const0 = arith::createConstantI32(loc, rewriter, 0);
 
-    // DRAM ordered loop
-    Value zero = arith::createConstantI32(loc, rewriter, 0);
-    Value one = arith::createConstantI32(loc, rewriter, 1);
-    Value loopLimitRow = arith::createConstantI32(loc, rewriter, blockTilesH);
-    Value loopLimitCol = arith::createConstantI32(loc, rewriter, blockTilesW);
-
-    auto rowLoop = scf::ForOp::create(rewriter, loc, zero, loopLimitRow, one);
-    {
-      rewriter.setInsertionPointToStart(rowLoop.getBody());
-      Value rowIv = rowLoop.getInductionVar();
-
-      auto colLoop = scf::ForOp::create(rewriter, loc, zero, loopLimitCol, one);
-      {
-        rewriter.setInsertionPointToStart(colLoop.getBody());
-        Value colIv = colLoop.getInductionVar();
-
-        Value globalRow =
-            arith::AddIOp::create(rewriter, loc, tileCoord[0], rowIv);
-        Value globalCol =
-            arith::AddIOp::create(rewriter, loc, tileCoord[1], colIv);
-
-        Value globalStride = tilesPerDim[1];
-        Value remoteTileIndex = arith::AddIOp::create(
-            rewriter, loc,
-            arith::MulIOp::create(rewriter, loc, globalRow, globalStride),
-            globalCol);
-
-        // -----------------------------------------------------------
-        // B. L1 Index Calculation (Using INVERTED Bases)
-        // -----------------------------------------------------------
-        // "Scatters" the linear DRAM reads into the correct L1 slot
-
-        Value l1PartRow = applyLinearLayout(rewriter, loc, rowIv, rowToL1Bases);
-        Value l1PartCol = applyLinearLayout(rewriter, loc, colIv, colToL1Bases);
-        Value l1TileIndex =
-            arith::AddIOp::create(rewriter, loc, l1PartRow, l1PartCol);
-
-        // C. Issue Read
-        Value l1OffsetBytes =
-            arith::MulIOp::create(rewriter, loc, l1TileIndex, pageSize);
+    for (unsigned i = 0; i < blockTilesH; i++) {
+      for (unsigned j = 0; j < blockTilesW; j++) {
+        // compute the L1 index for this row and column
+        int32_t elementOffsetH = i * tileShape[0];
+        int32_t elementOffsetW = j * tileShape[1];
+        LDBG("Element Offset for block tile (" << i << ", " << j << "): ("
+                                               << elementOffsetH << ", "
+                                               << elementOffsetW << ")\n");
+        auto result = invertedLayout.apply({
+            {S("dim0"), elementOffsetH},
+            {S("dim1"), elementOffsetW},
+        });
+        assert(result.size() == 2 &&
+               "expected inverted layout to have two output dimensions");
+        assert(result[1].first == tileDimName && "expected tile dimension");
+        LDBG("Computed L1 index for block tile ("
+             << i << ", " << j << "): " << result[1].second << "\n");
+        // NOTE: Computing the page size from the CB type here, so it better
+        // match!
+        Value l1TileOffsetBytes = arith::createConstantI32(
+            loc, rewriter, result[1].second * cbPageSize);
         Value crtL1Address =
-            arith::AddIOp::create(rewriter, loc, l1BaseAddr, l1OffsetBytes);
+            arith::AddIOp::create(rewriter, loc, l1BaseAddr, l1TileOffsetBytes);
 
-        Value const0 = arith::createConstantI32(loc, rewriter, 0);
+        // compute the global tile index for this row and column
+        Value crtIndex = baseRemoteIdx;
+        if (j > 0)
+          crtIndex =
+              arith::AddIOp::create(rewriter, loc, crtIndex,
+                                    arith::createConstantI32(loc, rewriter, j));
+        if (i > 0) {
+          Value rowOffset = arith::MulIOp::create(
+              rewriter, loc, arith::createConstantI32(loc, rewriter, i),
+              strideH);
+          crtIndex = arith::AddIOp::create(rewriter, loc, crtIndex, rowOffset);
+        }
+
+        // issue the read
         Value nocAddr = ttkernel::InterleavedAddrGenFastGetNocAddrOp::create(
-            rewriter, loc, addrGen, remoteTileIndex, const0, Value());
-
+            rewriter, loc, addrGen, crtIndex, const0, Value());
         ttkernel::NocAsyncReadOp::create(rewriter, loc, nocAddr, crtL1Address,
                                          pageSize);
       }
     }
-    rewriter.setInsertionPointAfter(rowLoop);
 
     ttkernel::NocAsyncReadBarrierOp::create(rewriter, loc);
 
@@ -620,108 +586,94 @@ struct ConvertTensorDescStoreOp
     auto tileShape = tiledEncoding.getTileShape();
     auto offsets = op.getIndices();
 
-    // Note: unlike the tensor descriptor base case we normalize the shape into
-    // 32x32 tiles here
-    SmallVector<Value, 4> tileSizeValues;
-    for (unsigned i = 0; i < tileShape.size(); ++i) {
-      tileSizeValues.push_back(arith::createConstantI32(
-          loc, rewriter, static_cast<int32_t>(tileShape[i])));
-    }
-
-    // tileCoord[i] = tileBaseOffset[i] / blockShape[i]
-    SmallVector<Value, 4> tileCoord;
-    tileCoord.reserve(blockShape.size());
-    for (unsigned i = 0; i < blockShape.size(); ++i) {
-      tileCoord.push_back(
-          arith::DivSIOp::create(rewriter, loc, offsets[i], tileSizeValues[i]));
-    }
-
-    auto shape = desc.getShape();
-    // tilesPerDim[i] = ceil(shape[i] / blockShape[i])
-    SmallVector<Value, 4> tilesPerDim;
-    for (unsigned i = 0; i < blockShape.size(); ++i) {
-      tilesPerDim.push_back(arith::CeilDivSIOp::create(rewriter, loc, shape[i],
-                                                       tileSizeValues[i]));
-    }
-
-    int32_t blockTilesH = static_cast<int32_t>(blockShape[0] / tileShape[0]);
-    int32_t blockTilesW = static_cast<int32_t>(blockShape[1] / tileShape[1]);
-
-    int32_t rowBits = llvm::Log2_32_Ceil(blockTilesH);
-    int32_t colBits = llvm::Log2_32_Ceil(blockTilesW);
-    int32_t rowShift = llvm::Log2_32(tileShape[0]);
-    int32_t colShift = llvm::Log2_32(tileShape[1]);
-
-    auto invertedInDimsNames = llvm::to_vector(invertedLayout.getInDimNames());
-    StringAttr outTileDim = S("tile");
-
-    std::vector<int32_t> rowToL1Bases;
-    std::vector<int32_t> colToL1Bases;
-
-    for (int k = 0; k < rowBits; ++k)
-      rowToL1Bases.push_back(invertedLayout.getBasis(invertedInDimsNames[0],
-                                                     k + rowShift, outTileDim));
-
-    for (int k = 0; k < colBits; ++k)
-      colToL1Bases.push_back(invertedLayout.getBasis(invertedInDimsNames[1],
-                                                     k + colShift, outTileDim));
     // determine how many tiles we need to store by converting the shape to
     // tiles
     const int32_t numCbTiles =
         cast<ttkernel::CBType>(cb.getType()).getNumTiles();
     assert(numTiles == numCbTiles &&
            "number of tiles in layout must match number of tiles in CB");
+    const unsigned cbPageSize = 2048; // TODO: read from cb type
+
     Value numPages = arith::createConstantI32(loc, rewriter, numCbTiles);
 
-    Value l1Addr = ttkernel::GetReadPtrOp::create(rewriter, loc, cb);
+    Value l1BaseAddr = ttkernel::GetReadPtrOp::create(rewriter, loc, cb);
+    StringAttr tileDimName = S("tile");
 
     Value const0 = arith::createConstantI32(loc, rewriter, 0);
 
-    Value zero = arith::createConstantI32(loc, rewriter, 0);
-    Value one = arith::createConstantI32(loc, rewriter, 1);
-    Value loopLimitRow = arith::createConstantI32(loc, rewriter, blockTilesH);
-    Value loopLimitCol = arith::createConstantI32(loc, rewriter, blockTilesW);
+    LDBG("Tile load loop - block shape: (" << blockShape[0] << ", "
+                                           << blockShape[1] << ")\n");
+    LDBG("Tile load loop - tile shape: (" << tileShape[0] << ", "
+                                          << tileShape[1] << ")\n");
 
-    auto rowLoop = scf::ForOp::create(rewriter, loc, zero, loopLimitRow, one);
-    {
-      rewriter.setInsertionPointToStart(rowLoop.getBody());
-      Value rowIv = rowLoop.getInductionVar();
+    int32_t blockTilesH = static_cast<int32_t>(blockShape[0] / tileShape[0]);
+    int32_t blockTilesW = static_cast<int32_t>(blockShape[1] / tileShape[1]);
+    LDBG("Tile load loop - block tiles: (" << blockTilesH << ", " << blockTilesW
+                                           << ")\n");
 
-      auto colLoop = scf::ForOp::create(rewriter, loc, zero, loopLimitCol, one);
-      {
-        rewriter.setInsertionPointToStart(colLoop.getBody());
-        Value colIv = colLoop.getInductionVar();
+    auto shape = desc.getShape();
+    Value strideH = arith::CeilDivSIOp::create(
+        rewriter, loc, shape[1],
+        arith::createConstantI32(loc, rewriter, tileShape[1]));
 
-        Value globalRow =
-            arith::AddIOp::create(rewriter, loc, tileCoord[0], rowIv);
-        Value globalCol =
-            arith::AddIOp::create(rewriter, loc, tileCoord[1], colIv);
+    // global base coordinates
+    Value baseTileH = arith::DivSIOp::create(
+        rewriter, loc, offsets[0],
+        arith::createConstantI32(loc, rewriter, tileShape[0]));
+    Value baseTileW = arith::DivSIOp::create(
+        rewriter, loc, offsets[1],
+        arith::createConstantI32(loc, rewriter, tileShape[1]));
 
-        Value globalStride = tilesPerDim[1];
+    // Base Remote Index = (StartRow * Stride) + StartCol
+    Value baseRemoteIdx = rewriter.create<arith::AddIOp>(
+        loc, rewriter.create<arith::MulIOp>(loc, baseTileH, strideH),
+        baseTileW);
 
-        Value remoteTileIndex = arith::AddIOp::create(
-            rewriter, loc,
-            arith::MulIOp::create(rewriter, loc, globalRow, globalStride),
-            globalCol);
-
-        Value l1PartRow = applyLinearLayout(rewriter, loc, rowIv, rowToL1Bases);
-        Value l1PartCol = applyLinearLayout(rewriter, loc, colIv, colToL1Bases);
-        Value l1TileIndex =
-            arith::AddIOp::create(rewriter, loc, l1PartRow, l1PartCol);
-
-        Value l1OffsetBytes =
-            arith::MulIOp::create(rewriter, loc, l1TileIndex, pageSize);
+    for (unsigned i = 0; i < blockTilesH; i++) {
+      for (unsigned j = 0; j < blockTilesW; j++) {
+        // compute the L1 index for this row and column
+        int32_t elementOffsetH = i * tileShape[0];
+        int32_t elementOffsetW = j * tileShape[1];
+        LDBG("Element Offset for block tile (" << i << ", " << j << "): ("
+                                               << elementOffsetH << ", "
+                                               << elementOffsetW << ")\n");
+        auto result = invertedLayout.apply({
+            {S("dim0"), elementOffsetH},
+            {S("dim1"), elementOffsetW},
+        });
+        assert(result.size() == 2 &&
+               "expected inverted layout to have two output dimensions");
+        assert(result[1].first == tileDimName && "expected tile dimension");
+        LDBG("Computed L1 index for block tile ("
+             << i << ", " << j << "): " << result[1].second << "\n");
+        // NOTE: Computing the page size from the CB type here, so it better
+        // match!
+        Value l1TileOffsetBytes = arith::createConstantI32(
+            loc, rewriter, result[1].second * cbPageSize);
         Value crtL1Address =
-            arith::AddIOp::create(rewriter, loc, l1Addr, l1OffsetBytes);
+            arith::AddIOp::create(rewriter, loc, l1BaseAddr, l1TileOffsetBytes);
 
+        // compute the global tile index for this row and column
+        Value crtIndex = baseRemoteIdx;
+        if (j > 0)
+          crtIndex =
+              arith::AddIOp::create(rewriter, loc, crtIndex,
+                                    arith::createConstantI32(loc, rewriter, j));
+        if (i > 0) {
+          Value rowOffset = arith::MulIOp::create(
+              rewriter, loc, arith::createConstantI32(loc, rewriter, i),
+              strideH);
+          crtIndex = arith::AddIOp::create(rewriter, loc, crtIndex, rowOffset);
+        }
+
+        // issue the write
         Value nocAddr = ttkernel::InterleavedAddrGenFastGetNocAddrOp::create(
-            rewriter, loc, addrGen, remoteTileIndex, const0, Value());
+            rewriter, loc, addrGen, crtIndex, const0, Value());
 
         ttkernel::NocAsyncWriteOp::create(rewriter, loc, crtL1Address, nocAddr,
                                           pageSize);
       }
     }
-    rewriter.setInsertionPointAfter(rowLoop);
 
     ttkernel::NocAsyncWriteBarrierOp::create(rewriter, loc);
     ttkernel::CBPopFrontOp::create(rewriter, loc, cb, numPages);
