@@ -495,6 +495,7 @@ struct CreateTTNNGenericOp
     populateBlockStartEndArgsForSet(builder, coreRangeSet1, /*tilesPerCore=*/1,
                                     kernelRTArgs);
     assert(kernelRTArgs.size() == 20 && "expected dispatch mismatch");
+    allCores = coreRangeSet1;
 #endif
 #if 0
       // 64x256xK
@@ -507,7 +508,7 @@ struct CreateTTNNGenericOp
      assert(kernelRTArgs.size() == 10 && "expected dispatch for 10 cores");
 
 #endif
-#if 0
+#if 1
     // 64x64xK
     // Distributing 40 output tiles across 40 cores: 40 cores ({[(x=0,y=0) -
     // (x=4,y=6)], [(x=5,y=0) - (x=5,y=4)]}) x 1 tiles/core + 0 cores ({}) x 0
@@ -517,9 +518,9 @@ struct CreateTTNNGenericOp
     populateBlockStartEndArgsForSet(builder, coreRangeSet1, /*tilesPerCore=*/1,
                                     kernelRTArgs);
     assert(kernelRTArgs.size() == 40 && "expected dispatch for 40 cores");
+    allCores = coreRangeSet1;
 #endif
-
-#if 1
+#if 0
     // 64x64xK
     // Distributing 40 output tiles across 20 cores ({[(x=0,y=0) -
     // ({[(x=0,y=0) - (x=1,y=6)], [(x=2,y=0) - (x=2,y=5)]}) x 2 tiles/core + 0 cores ({}) x 0 tiles/core
