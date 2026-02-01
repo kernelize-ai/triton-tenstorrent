@@ -126,38 +126,48 @@ public:
     return map;
   }
 
+  void
+  createReadToSRAM(Operation *op, bool skipOdd,
+                   DenseMap<int64_t, triton::gpu::LocalAllocOp> &allocIdMap) {
+    if (!isLoadLike(op))
+      return;
+    auto idx = getAllocIdx(op);
+    if (!idx)
+      return;
+
+    auto it = allocIdMap.find(*idx);
+    if (it == allocIdMap.end())
+      return;
+
+    auto alloc = it->second;
+
+    auto alloc_idx = getAllocIdx(alloc);
+    bool isOdd = *alloc_idx & 0x1;
+    if (skipOdd == isOdd)
+      return;
+
+    OpBuilder b(op);
+    Location loc = op->getLoc();
+
+    // replace uses with null value
+    assert(op->getNumResults() == 1 &&
+           "expected load-like op to have a single result");
+    Type ty = op->getResult(0).getType();
+    auto nullValue = arith::ConstantOp::create(b, loc, ty, b.getZeroAttr(ty));
+    op->getResult(0).replaceAllUsesWith(nullValue.getResult());
+
+    // Use local store until async copy is supported
+    b.setInsertionPointAfter(op);
+    triton::gpu::LocalStoreOp::create(b, loc, op->getResult(0), alloc);
+  }
+
   void rewriteReader(triton::FuncOp f) {
     auto allocIdMap = buildAllocMap(f);
 
     // Replace all loads with DMA to SRAM
     // TODO: handle address loads for subsequent loads
     // TODO: preload first N tiles (needs address logic..)
-    f.walk([&](Operation *op) {
-      if (!isLoadLike(op))
-        return;
-      auto idx = getAllocIdx(op);
-      if (!idx)
-        return;
-
-      auto it = allocIdMap.find(*idx);
-      if (it == allocIdMap.end())
-        return;
-
-      auto alloc = it->second;
-      OpBuilder b(op);
-      Location loc = op->getLoc();
-
-      // replace uses with null value
-      assert(op->getNumResults() == 1 &&
-             "expected load-like op to have a single result");
-      Type ty = op->getResult(0).getType();
-      auto nullValue = arith::ConstantOp::create(b, loc, ty, b.getZeroAttr(ty));
-      op->getResult(0).replaceAllUsesWith(nullValue.getResult());
-
-      // Use local store until async copy is supported
-      b.setInsertionPointAfter(op);
-      triton::gpu::LocalStoreOp::create(b, loc, op->getResult(0), alloc);
-    });
+    f.walk([&](Operation *op) { createReadToSRAM(op, true, allocIdMap); });
 
     // Erase all stores and compute ops
     f.walk([&](Operation *op) {
@@ -222,6 +232,8 @@ public:
 
   void rewriteWriter(triton::FuncOp f) {
     auto allocIdMap = buildAllocMap(f);
+
+    f.walk([&](Operation *op) { createReadToSRAM(op, false, allocIdMap); });
 
     // Replace all stores with local stores
     f.walk([&](Operation *op) {
