@@ -81,7 +81,41 @@ struct ConvertDotOp : public OpConversionPattern<triton::DotOp> {
                                     aNumInputTilesValue);
     ttkernel::CBWaitFrontOp::create(rewriter, loc, adaptor.getB(),
                                     bNumInputTilesValue);
+#if 1
+    for (int64_t k = 0; k < kTiles; ++k) {
+      // reset DEST index for each K pass
+      int64_t crtDestIndex = alloc_offset;
 
+      for (int64_t m = 0; m < mTiles; ++m) {
+        for (int64_t n = 0; n < nTiles; ++n) {
+
+          if (crtDestIndex > 7) {
+            // see
+            // https://docs.tenstorrent.com/tt-metal/latest/tt-metalium/tt_metal/advanced_topics/compute_engines_and_dataflow_within_tensix.html#id2
+            LDBG("MatmulTilesOp dest register index: " << crtDestIndex << "\n");
+            return failure();
+          }
+          Value destRegIdxVal =
+              arith::createIndexConstant(loc, rewriter, crtDestIndex);
+
+          // TODO: read from layouts
+          int64_t aTileIndex = m * kTiles + k;
+          int64_t bTileIndex = n * kTiles + k;
+
+          Value aTileIndexVal = arith::createConstantI32(
+              loc, rewriter, static_cast<int32_t>(aTileIndex));
+          Value bTileIndexVal = arith::createConstantI32(
+              loc, rewriter, static_cast<int32_t>(bTileIndex));
+
+          ttkernel::MatmulTilesOp::create(rewriter, loc, adaptor.getA(),
+                                          adaptor.getB(), aTileIndexVal,
+                                          bTileIndexVal, destRegIdxVal);
+
+          crtDestIndex++;
+        }
+      }
+    }
+#else
     Value zeroI32 = arith::createConstantI32(loc, rewriter, 0);
     Value oneI32 = arith::createConstantI32(loc, rewriter, 1);
 
@@ -140,7 +174,7 @@ struct ConvertDotOp : public OpConversionPattern<triton::DotOp> {
       scf::YieldOp::create(rewriter, loc, nLoop.getResult(0));
     }
     rewriter.setInsertionPointAfter(mLoop);
-
+#endif
     ttkernel::CBPopFrontOp::create(rewriter, loc, adaptor.getA(),
                                    aNumInputTilesValue);
     ttkernel::CBPopFrontOp::create(rewriter, loc, adaptor.getB(),
