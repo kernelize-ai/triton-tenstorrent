@@ -109,7 +109,6 @@ void init_triton_npu_passes_tenstorrent(py::module &&m) {
   });
 
   // tt-core
-<<<<<<< HEAD
   m.def(
       "add_ttcore_register_device_pass",
       [](mlir::PassManager &pm, const std::string &systemDescPath) {
@@ -120,16 +119,11 @@ void init_triton_npu_passes_tenstorrent(py::module &&m) {
         pm.addPass(mlir::tt::ttcore::createTTCoreRegisterDevicePass(
             registerDeviceOptions));
       });
-=======
-  m.def("add_ttcore_register_device_pass", [](mlir::PassManager &pm) {
-    pm.addPass(mlir::tt::ttcore::createTTCoreRegisterDevicePass());
-  });
 
   // tt-nn
   m.def("add_create_ttnn_generic_op", [](mlir::PassManager &pm) {
     pm.addPass(mlir::triton::npu::createCreateTTNNGenericOp());
   });
->>>>>>> 61971cb (Add create ttnn.generic op pass 1/?)
 }
 
 void init_triton_npu_passes_common(py::module &&m) {

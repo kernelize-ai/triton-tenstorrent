@@ -253,6 +253,7 @@ class CPUBackend(BaseBackend):
         cpu.passes.tenstorrent.add_ttcore_register_device_pass(pm, sys_desc_path)
         cpu.passes.tenstorrent.add_ttkernel_to_emitc(pm)
         passes.common.add_canonicalizer(pm)
+        cpu.passes.tenstorrent.add_ttkernel_to_emitc(pm)
 
         pm.run(mod, "make_emit_c")
         return mod
@@ -263,8 +264,8 @@ class CPUBackend(BaseBackend):
         pm = ir.pass_manager(mod.context)
         pm.enable_debug()
 
-        cpu.passes.tenstorrent.add_ttkernel_to_emitc(pm)
-        passes.common.add_canonicalizer(pm)
+        #cpu.passes.tenstorrent.add_ttkernel_to_emitc(pm)
+        #passes.common.add_canonicalizer(pm)
 
         cpu.passes.tenstorrent.add_form_expressions_pass(pm)
         pm.run(mod, "make_ttmlir_cpp_file")
@@ -333,19 +334,21 @@ class CPUBackend(BaseBackend):
         passes.common.add_sccp(pm)
         passes.common.add_cse(pm)
 
-        cpu.passes.tenstorrent.add_ttcore_register_device_pass(pm)
+        sys_desc_path = os.getenv("TT_SYSTEM_DESC_PATH", "")
+        cpu.passes.tenstorrent.add_ttcore_register_device_pass(pm, sys_desc_path)
         cpu.passes.tenstorrent.add_create_ttnn_generic_op(pm)
 
         # begin copied from emitc
         cpu.passes.tenstorrent.add_ttkernel_device_zone_scopes(pm)
         cpu.passes.tenstorrent.add_ttkernel_to_emitc(pm)
-        passes.common.add_canonicalizer(pm)
+        # TODO: canonicalizer pass is introducing nan checks that ttrt compiler can't handle. Don't canonicalize after emitc
+        #passes.common.add_canonicalizer(pm)
         # end copied from emitc
 
         pm.run(mod, "make_flatbuffer")
 
-        src = str(mod)
-        print(src)
+        #src = str(mod)
+        #print(src)
 
         return mod
 
