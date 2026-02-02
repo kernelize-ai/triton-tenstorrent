@@ -108,9 +108,16 @@ void init_triton_npu_passes_tenstorrent(py::module &&m) {
   });
 
   // tt-core
-  m.def("add_ttcore_register_device_pass", [](mlir::PassManager &pm) {
-    pm.addPass(mlir::tt::ttcore::createTTCoreRegisterDevicePass());
-  });
+  m.def(
+      "add_ttcore_register_device_pass",
+      [](mlir::PassManager &pm, const std::string &systemDescPath) {
+        mlir::tt::ttcore::TTCoreRegisterDevicePassOptions registerDeviceOptions;
+        if (!systemDescPath.empty()) {
+          registerDeviceOptions.systemDescPath = systemDescPath;
+        }
+        pm.addPass(mlir::tt::ttcore::createTTCoreRegisterDevicePass(
+            registerDeviceOptions));
+      });
 
   // tt-nn
   m.def("add_create_ttnn_generic_op", [](mlir::PassManager &pm) {
