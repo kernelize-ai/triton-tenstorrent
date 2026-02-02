@@ -508,8 +508,9 @@ struct CreateTTNNGenericOp
      assert(kernelRTArgs.size() == 10 && "expected dispatch for 10 cores");
 
 #endif
+// 20260202
 #if 1
-    // 64x64xK
+    // 64x64xK or 32x128xK
     // Distributing 40 output tiles across 40 cores: 40 cores ({[(x=0,y=0) -
     // (x=4,y=6)], [(x=5,y=0) - (x=5,y=4)]}) x 1 tiles/core + 0 cores ({}) x 0
     // tiles/core
@@ -521,15 +522,28 @@ struct CreateTTNNGenericOp
     allCores = coreRangeSet1;
 #endif
 #if 0
-    // 64x64xK
-    // Distributing 40 output tiles across 20 cores ({[(x=0,y=0) -
-    // ({[(x=0,y=0) - (x=1,y=6)], [(x=2,y=0) - (x=2,y=5)]}) x 2 tiles/core + 0 cores ({}) x 0 tiles/core
+    // 32x64xK 
+    // Distributing 80 output tiles across 56 cores: 24 cores ({[(x=0,y=0) - (x=2,y=6)], [(x=3,y=0) - (x=3,y=2)]}) x 2 tiles/core + 32 cores ({[(x=3,y=3) - (x=3,y=6)], [(x=4,y=0) - (x=7,y=6)]}) x 1 tiles/core
     ttnn::CoreRangeSetAttr coreRangeSet1 = ttnn::CoreRangeSetAttr::get(
-        context, {getCoreRange(0, 0, 1, 6), getCoreRange(2, 0, 2, 5)});
+        context, {getCoreRange(0, 0, 2, 6), getCoreRange(3, 0, 3, 2)});
     populateBlockStartEndArgsForSet(builder, coreRangeSet1, /*tilesPerCore=*/2,
                                     kernelRTArgs);
+    ttnn::CoreRangeSetAttr coreRangeSet2 = ttnn::CoreRangeSetAttr::get(
+        context, {getCoreRange(3, 3, 3, 6), getCoreRange(4, 0, 7, 6)});
+    populateBlockStartEndArgsForSet(builder, coreRangeSet2, /*tilesPerCore=*/1,
+                                    kernelRTArgs);
+    assert(kernelRTArgs.size() == 56 && "expected dispatch for 56 cores");
+
+#endif 
+#if 0
+      // 64x128xK or 32x256xK
+      // Distributing 20 output tiles across 20 cores: 20 cores ({[(x=0,y=0) - (x=1,y=6)], [(x=2,y=0) - (x=2,y=5)]}) x 1 tiles/core + 0 cores ({}) x 0 tiles/core
+      ttnn::CoreRangeSetAttr coreRangeSet1 = ttnn::CoreRangeSetAttr::get(
+        context, {getCoreRange(0, 0, 1, 6), getCoreRange(2, 0, 2, 5)});
+    populateBlockStartEndArgsForSet(builder, coreRangeSet1, /*tilesPerCore=*/1,
+                                    kernelRTArgs);
     assert(kernelRTArgs.size() == 20 && "expected dispatch for 20 cores");
-#endif
+#endif 
 
 #if 0
     // did not work - out of DEST?
