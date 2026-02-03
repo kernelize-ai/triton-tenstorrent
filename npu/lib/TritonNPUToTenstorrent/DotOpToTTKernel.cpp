@@ -81,7 +81,7 @@ struct ConvertDotOp : public OpConversionPattern<triton::DotOp> {
                                     aNumInputTilesValue);
     ttkernel::CBWaitFrontOp::create(rewriter, loc, adaptor.getB(),
                                     bNumInputTilesValue);
-#if 1
+
     for (int64_t k = 0; k < kTiles; ++k) {
       // reset DEST index for each K pass
       int64_t crtDestIndex = alloc_offset;
@@ -115,66 +115,7 @@ struct ConvertDotOp : public OpConversionPattern<triton::DotOp> {
         }
       }
     }
-#else
-    Value zeroI32 = arith::createConstantI32(loc, rewriter, 0);
-    Value oneI32 = arith::createConstantI32(loc, rewriter, 1);
 
-    Value mTilesVal =
-        arith::createConstantI32(loc, rewriter, static_cast<int32_t>(mTiles));
-    Value nTilesVal =
-        arith::createConstantI32(loc, rewriter, static_cast<int32_t>(nTiles));
-    Value kTilesVal =
-        arith::createConstantI32(loc, rewriter, static_cast<int32_t>(kTiles));
-
-    Value destRegisterInitial =
-        arith::createIndexConstant(loc, rewriter, alloc_offset);
-    auto mLoop = scf::ForOp::create(rewriter, loc, zeroI32, mTilesVal, oneI32,
-                                    ValueRange{destRegisterInitial});
-    {
-      rewriter.setInsertionPointToStart(mLoop.getBody());
-      Value mIv = mLoop.getInductionVar();
-      Value destRegisterIndexM = mLoop.getRegionIterArgs()[0];
-
-      auto nLoop = scf::ForOp::create(rewriter, loc, zeroI32, nTilesVal, oneI32,
-                                      ValueRange{destRegisterIndexM});
-      {
-        rewriter.setInsertionPointToStart(nLoop.getBody());
-
-        Value nIv = nLoop.getInductionVar();
-        Value destRegisterIndexN = nLoop.getRegionIterArgs()[0];
-
-        auto kLoop =
-            scf::ForOp::create(rewriter, loc, zeroI32, kTilesVal, oneI32);
-        {
-          rewriter.setInsertionPointToStart(kLoop.getBody());
-          Value kIv = kLoop.getInductionVar();
-
-          // aTile = m * kTiles + k
-          Value aTile = arith::AddIOp::create(
-              rewriter, loc,
-              (arith::MulIOp::create(rewriter, loc, mIv, kTilesVal)), kIv);
-
-          // TODO: support generic ordering
-          // bTile = n * kTiles + k
-          Value bTile = arith::AddIOp::create(
-              rewriter, loc,
-              (arith::MulIOp::create(rewriter, loc, nIv, kTilesVal)), kIv);
-
-          ttkernel::MatmulTilesOp::create(rewriter, loc, adaptor.getA(),
-                                          adaptor.getB(), aTile, bTile,
-                                          destRegisterIndexN);
-        }
-        rewriter.setInsertionPointAfter(kLoop);
-        Value nextDestRegisterIndex =
-            arith::AddIOp::create(rewriter, loc, destRegisterIndexN,
-                                  arith::createIndexConstant(loc, rewriter, 1));
-        scf::YieldOp::create(rewriter, loc, nextDestRegisterIndex);
-      }
-      rewriter.setInsertionPointAfter(nLoop);
-      scf::YieldOp::create(rewriter, loc, nLoop.getResult(0));
-    }
-    rewriter.setInsertionPointAfter(mLoop);
-#endif
     ttkernel::CBPopFrontOp::create(rewriter, loc, adaptor.getA(),
                                    aNumInputTilesValue);
     ttkernel::CBPopFrontOp::create(rewriter, loc, adaptor.getB(),
