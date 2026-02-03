@@ -35,6 +35,7 @@
 #include "compute_kernel_api/eltwise_unary/relu.h"
 #include "compute_kernel_api/eltwise_unary/binop_with_scalar.h"
 #include "compute_kernel_api/eltwise_unary/where.h"
+#include "compute_kernel_api/eltwise_unary/clamp.h"
 inline uint32_t float_to_bits(float f) { uint32_t r; __builtin_memcpy(&r, &f, sizeof(r)); return r; }
 #ifndef INFINITY
 #define INFINITY __builtin_inff()
@@ -52,14 +53,15 @@ void kernel_main() {
   int32_t v6 = 1;
   int32_t v7 = 2;
   int32_t v8 = 4;
-  int32_t v9 = get_common_arg_val<uint32_t>(42);
+  int32_t v9 = 3;
+  int32_t v10 = get_common_arg_val<uint32_t>(42);
   mm_init(get_compile_time_arg_val(0), get_compile_time_arg_val(1), get_compile_time_arg_val(3), v5);
-  int32_t v10 = get_arg_val<uint32_t>(v2);
-  int32_t v11 = get_arg_val<uint32_t>(v1);
-  for (int32_t i12 = v11; i12 < v10; i12 += v6) {
+  int32_t v11 = get_arg_val<uint32_t>(v2);
+  int32_t v12 = get_arg_val<uint32_t>(v1);
+  for (int32_t i13 = v12; i13 < v11; i13 += v6) {
     tile_regs_acquire();
     mm_init_short(get_compile_time_arg_val(0), get_compile_time_arg_val(1), v5);
-    for (int32_t j13 = v5; j13 < ((int32_t) ((uint32_t) v9 + (uint32_t) 63) / 64); j13 += v6) {
+    for (int32_t j14 = v5; j14 < ((int32_t) ((uint32_t) v10 + (uint32_t) 63) / 64); j14 += v6) {
       {
       DeviceZoneScopedN("cb_wait_front");
       cb_wait_front(get_compile_time_arg_val(0), v7);
@@ -68,16 +70,10 @@ void kernel_main() {
       DeviceZoneScopedN("cb_wait_front");
       cb_wait_front(get_compile_time_arg_val(1), v8);
       }
-      size_t v14;
-      v14 = v1;
-      for (int32_t k15 = v5; k15 < v7; k15 += v6) {
-        size_t v16 = v14;
-        for (int32_t l17 = v5; l17 < v7; l17 += v6) {
-          int32_t v18 = (int32_t) ((uint32_t) ((int32_t) ((uint32_t) l17 * (uint32_t) v7)) + (uint32_t) k15);
-          matmul_tiles(get_compile_time_arg_val(0), get_compile_time_arg_val(1), l17, v18, v16);
-        }
-        v14 = v16 + v2;
-      }
+      matmul_tiles(get_compile_time_arg_val(0), get_compile_time_arg_val(1), v5, v5, v1);
+      matmul_tiles(get_compile_time_arg_val(0), get_compile_time_arg_val(1), v5, v7, v2);
+      matmul_tiles(get_compile_time_arg_val(0), get_compile_time_arg_val(1), v6, v6, v1);
+      matmul_tiles(get_compile_time_arg_val(0), get_compile_time_arg_val(1), v6, v9, v2);
       cb_pop_front(get_compile_time_arg_val(0), v7);
       cb_pop_front(get_compile_time_arg_val(1), v8);
     }
