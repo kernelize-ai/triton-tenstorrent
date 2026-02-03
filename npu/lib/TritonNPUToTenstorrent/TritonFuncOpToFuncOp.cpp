@@ -80,11 +80,6 @@ struct ConvertTritonFunc : public OpConversionPattern<triton::FuncOp> {
                      rewriter.getAttr<tt::ttkernel::ThreadTypeAttr>(
                          getThreadTypeFromFunctionName(funcOp.getName())));
 
-    SmallVector<ttkernel::ArgAttr> rtArgs;
-
-    ttkernel::ArgSpecAttr::setArgSpec(
-        newFunc, rewriter.getAttr<ttkernel::ArgSpecAttr>(rtArgs, ctArgs));
-
     // copy the body
     Region &newRegion = newFunc.getBody();
 
@@ -93,6 +88,7 @@ struct ConvertTritonFunc : public OpConversionPattern<triton::FuncOp> {
     // fix in
     rewriter.inlineRegionBefore(funcOp.getBody(), newRegion, newRegion.end());
 
+    SmallVector<unsigned> ptrArgIndices;
     int32_t numArgs = -1;
     {
       OpBuilder::InsertionGuard guard(rewriter);
@@ -122,6 +118,7 @@ struct ConvertTritonFunc : public OpConversionPattern<triton::FuncOp> {
           SmallVector<Type> unpacked;
           assert(typeConverter->convertType(oldType, unpacked).succeeded() &&
                  "failed to convert tensor descriptor type");
+          ptrArgIndices.push_back(idx);
 
           SmallVector<Value> unpackedValues;
           unpackedValues.reserve(unpacked.size());
@@ -136,6 +133,8 @@ struct ConvertTritonFunc : public OpConversionPattern<triton::FuncOp> {
                              .getResult(0);
           argReplacements.push_back(packed);
         } else {
+          if (isa<PointerType>(oldType))
+            ptrArgIndices.push_back(idx);
           Type newType = typeConverter->convertType(oldType);
 
           LDBG("Replacing arg " << idx << " of type " << oldType
@@ -153,6 +152,22 @@ struct ConvertTritonFunc : public OpConversionPattern<triton::FuncOp> {
     assert(numArgs >= 0 && "numArgs not set");
     newFunc->setAttr(kTTNumCommonArgsAttr, rewriter.getI32IntegerAttr(numArgs));
     newFunc->setAttr(kTTNumPerCoreArgsAttr, rewriter.getI32IntegerAttr(0));
+
+    // handle populating arg spec post tensor descriptor argument expansion
+    // TODO: can we get input arguments from the newFunc here? I don't think so,
+    // since the rewriter is still holding all our changes to the module.
+    SmallVector<ttkernel::ArgAttr> rtArgs;
+    // TODO: Currently we have to rewrite all scalar common args to constants
+    // in ttnn.generic and rewrite the ptr common args indices to be 0 indexed
+    // within the set of ptr args. Eventually we will want to support scalars as
+    // uniform runtime args but this requires tt-mlir changes.
+    for (unsigned i = 0; i < ptrArgIndices.size(); i++) {
+      rtArgs.push_back(rewriter.getAttr<ttkernel::ArgAttr>(
+          ttkernel::ArgType::BufferAddress, i));
+    }
+
+    ttkernel::ArgSpecAttr::setArgSpec(
+        newFunc, rewriter.getAttr<ttkernel::ArgSpecAttr>(rtArgs, ctArgs));
 
     rewriter.eraseOp(funcOp);
     return success();
