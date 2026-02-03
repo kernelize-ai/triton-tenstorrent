@@ -202,11 +202,6 @@ struct ConvertTensorDescLoadOp
     auto dataFormat = ttkernel::GetDataFormatOp::create(rewriter, loc, cb);
     auto pageSize = ttkernel::GetTileSizeOp::create(rewriter, loc, cb);
 
-    Value trueVal = arith::createConstantI1(loc, rewriter, 1);
-    Value baseAddr = desc.getPtr();
-    Value addrGen = ttkernel::GetInterleavedAddrGenFastOp::create(
-        rewriter, loc, /*dram=*/trueVal, baseAddr, pageSize, dataFormat);
-
     rewriter.restoreInsertionPoint(opInsertionPt);
 
     auto loadResultType = cast<RankedTensorType>(op.getResult().getType());
@@ -231,8 +226,6 @@ struct ConvertTensorDescLoadOp
             : cast<npu::tt::TiledEncodingAttr>(loadResultType.getEncoding());
     auto tileShape = tiledParent.getTileShape();
 
-    auto offsets = op.getIndices();
-
     // determine how many tiles we need to load by converting the shape to tiles
     const int32_t numCbTiles =
         cast<ttkernel::CBType>(cb.getType()).getNumTiles();
@@ -242,7 +235,100 @@ struct ConvertTensorDescLoadOp
     const unsigned cbPageSize = 2048; // TODO: read from cb type
     LDBG("Loading from CB of size " << numCbTiles << " tiles");
     Value numPages = arith::createConstantI32(loc, rewriter, numCbTiles);
+
+    // Both sender and receiver cores need to make sure there is space in the CB
     ttkernel::CBReserveBackOp::create(rewriter, loc, cb, numPages);
+
+    // compute our noc index to see if we should multicast this load or receive
+    // the multicast for A operand loads we want the LHS row of cores to
+    // multicast each row of A for B operand loads we want the first column of
+    // cores to multicast each column of B for tiled loads we use the opIdx == 0
+    // case
+    const bool rowsMulticast =
+        !(dotOpEncoding && (dotOpEncoding.getOpIdx() == 1));
+    LDBG("Using " << (rowsMulticast ? "row" : "column")
+                  << " multicast pattern for load\n");
+
+    // convert logical (virtual) indices to translated (physical) indices
+    auto convertVirtualToPhysicalIndex = [&](Value virtIndex,
+                                             bool isX) -> Value {
+      if (isX)
+        return ttkernel::ConvertLogicalXToTranslatedOp::create(
+            rewriter, loc, rewriter.getIndexType(), virtIndex);
+      return ttkernel::ConvertLogicalYToTranslatedOp::create(
+          rewriter, loc, rewriter.getIndexType(), virtIndex);
+    };
+
+    // TODO: seems like these should be index types nad not cast to i32?
+    Value xVirtIndex = ttkernel::MyLogicalXOp::create(rewriter, loc);
+    Value yVirtIndex = ttkernel::MyLogicalYOp::create(rewriter, loc);
+
+    // for the A matrix (row-wise multicast) we use our current X coordinate as
+    // the row start and 0 for the column start.
+    Value senderIndexX = xVirtIndex;
+    Value senderIndexY = arith::createIndexConstant(loc, rewriter, 0);
+    Value mcastEndX = xVirtIndex;
+    // for the mcastEnd coordinate we need to see if we are truncating the last
+    // row
+    Value isLastRow = arith::CmpIOp::create(
+        rewriter, loc, arith::CmpIPredicate::eq, xVirtIndex,
+        arith::createIndexConstant(loc, rewriter, 5));
+    Value crtRowEndIndex = arith::SelectOp::create(
+        rewriter, loc, isLastRow, arith::createIndexConstant(loc, rewriter, 4),
+        arith::createIndexConstant(loc, rewriter, 6));
+    Value mcastEndY = crtRowEndIndex;
+    // 3 CBs for A, B, and output so semaphore index is 3
+    // two semaphores - one on the sender core as an acknowledgement counter and
+    // one on the receiver cores as a data ready flag
+    Value senderSemaphore, receiverSemaphore;
+    const bool shouldGenerateMulticast = rowsMulticast;
+    if (shouldGenerateMulticast) {
+      int32_t senderSemaphoreCompileTimeArgsIndex = 3;
+      auto senderSemaphoreIndex = ttkernel::GetCompileArgValOp::create(
+          rewriter, loc, rewriter.getIntegerType(32),
+          senderSemaphoreCompileTimeArgsIndex);
+      senderSemaphore =
+          ttkernel::GetSemaphoreOp::create(rewriter, loc, senderSemaphoreIndex);
+      int32_t receiverSemaphoreCompileTimeArgsIndex = 4;
+      auto receiverSemaphoreIndex = ttkernel::GetCompileArgValOp::create(
+          rewriter, loc, rewriter.getIntegerType(32),
+          receiverSemaphoreCompileTimeArgsIndex);
+      receiverSemaphore = ttkernel::GetSemaphoreOp::create(
+          rewriter, loc, receiverSemaphoreIndex);
+    }
+    int32_t numCoresPerRow = 7; // total number of cores in this rectangular
+                                // grid including the sender
+    Value numCoresForMulticastPerRow = arith::SelectOp::create(
+        rewriter, loc, isLastRow, arith::createIndexConstant(loc, rewriter, 5),
+        arith::createIndexConstant(loc, rewriter, numCoresPerRow));
+    // End hardcoded params
+
+    scf::IfOp multicastIf;
+    if (shouldGenerateMulticast) {
+      Value shouldMulticast;
+      if (rowsMulticast) {
+        shouldMulticast = arith::CmpIOp::create(
+            rewriter, loc, arith::CmpIPredicate::eq, yVirtIndex,
+            arith::createIndexConstant(loc, rewriter, 0));
+      } else {
+        shouldMulticast = arith::CmpIOp::create(
+            rewriter, loc, arith::CmpIPredicate::eq, xVirtIndex,
+            arith::createIndexConstant(loc, rewriter, 0));
+      }
+      multicastIf =
+          scf::IfOp::create(rewriter, loc, ValueRange{}, shouldMulticast);
+      scf::IfOp::ensureTerminator(multicastIf.getThenRegion(), rewriter, loc);
+      scf::IfOp::ensureTerminator(multicastIf.getElseRegion(), rewriter, loc);
+      rewriter.setInsertionPointToStart(multicastIf.thenBlock());
+    }
+
+    Value trueVal = arith::createConstantI1(loc, rewriter, 1);
+
+    Value baseAddr = desc.getPtr();
+    Value addrGen = ttkernel::GetInterleavedAddrGenFastOp::create(
+        rewriter, loc, /*dram=*/trueVal, baseAddr, pageSize, dataFormat);
+
+    auto offsets = op.getIndices();
 
     Value l1BaseAddr = ttkernel::GetWritePtrOp::create(rewriter, loc, cb);
 
@@ -278,6 +364,8 @@ struct ConvertTensorDescLoadOp
 
     Value const0 = arith::createConstantI32(loc, rewriter, 0);
 
+    SmallVector<Value> l1TileAddresses;
+    l1TileAddresses.reserve(blockTilesH * blockTilesW);
     for (unsigned i = 0; i < blockTilesH; i++) {
       for (unsigned j = 0; j < blockTilesW; j++) {
         // compute the L1 index for this row and column
@@ -301,6 +389,9 @@ struct ConvertTensorDescLoadOp
             loc, rewriter, result[1].second * cbPageSize);
         Value crtL1Address =
             arith::AddIOp::create(rewriter, loc, l1BaseAddr, l1TileOffsetBytes);
+        // TODO: should we order these? currently they will be in random order
+        // since the loads are in DRAM order
+        l1TileAddresses.push_back(crtL1Address);
 
         // compute the global tile index for this row and column
         Value crtIndex = baseRemoteIdx;
@@ -324,6 +415,89 @@ struct ConvertTensorDescLoadOp
     }
 
     ttkernel::NocAsyncReadBarrierOp::create(rewriter, loc);
+
+    // multicast send
+    if (shouldGenerateMulticast) {
+      // start with a wait and a set on the sender semaphore
+      auto l1SenderAddr =
+          ttkernel::CastToL1PtrOp::create(rewriter, loc, senderSemaphore);
+      // wait for all receiver cores to acknowledge ready
+      // should be checking for 6 (or 4 for the last row)
+      ttkernel::NocSemaphoreWaitOp::create(
+          rewriter, loc, l1SenderAddr,
+          arith::SubIOp::create(rewriter, loc, numCoresForMulticastPerRow,
+                                arith::createIndexConstant(loc, rewriter, 1)));
+      ttkernel::NocSemaphoreSetOp::create(
+          rewriter, loc, l1SenderAddr,
+          arith::createIndexConstant(loc, rewriter, 0));
+
+      // get the multicast addresses
+      auto mcastAddr = ttkernel::ExperimentalGetNocMulticastAddrOp::create(
+          rewriter, loc, convertVirtualToPhysicalIndex(senderIndexX, true),
+          convertVirtualToPhysicalIndex(senderIndexY, false),
+          convertVirtualToPhysicalIndex(mcastEndX, true),
+          convertVirtualToPhysicalIndex(mcastEndY, false), l1BaseAddr, nullptr);
+      ttkernel::NocAsyncWriteMulticastOp::create(
+          rewriter, loc, l1BaseAddr, mcastAddr,
+          arith::createConstantI32(loc, rewriter, cbPageSize * numCbTiles),
+          arith::SubIOp::create(
+              rewriter, loc,
+              arith::IndexCastOp::create(rewriter, loc, rewriter.getI32Type(),
+                                         numCoresForMulticastPerRow),
+              arith::createConstantI32(loc, rewriter, 1)),
+          nullptr, nullptr, nullptr);
+      ttkernel::NocAsyncWriteBarrierOp::create(rewriter, loc);
+
+      // signal multicast completion using the receiver data ready semaphore
+      // set the local value for the semaphore first
+      auto l1ReceiverAddr =
+          ttkernel::CastToL1PtrOp::create(rewriter, loc, receiverSemaphore);
+      ttkernel::NocSemaphoreSetOp::create(
+          rewriter, loc, l1ReceiverAddr,
+          arith::createIndexConstant(loc, rewriter, 1));
+
+      // get the noc address for multicast operation
+      auto mcastCompleteAddr =
+          ttkernel::ExperimentalGetNocMulticastAddrOp::create(
+              rewriter, loc, convertVirtualToPhysicalIndex(senderIndexX, true),
+              convertVirtualToPhysicalIndex(senderIndexY, false),
+              convertVirtualToPhysicalIndex(mcastEndX, true),
+              convertVirtualToPhysicalIndex(mcastEndY, false),
+              receiverSemaphore, nullptr);
+      ttkernel::NocSemaphoreSetMulticastOp::create(
+          rewriter, loc, receiverSemaphore, mcastCompleteAddr,
+          arith::SubIOp::create(
+              rewriter, loc,
+              arith::IndexCastOp::create(rewriter, loc, rewriter.getI32Type(),
+                                         numCoresForMulticastPerRow),
+              arith::createConstantI32(loc, rewriter, 1)),
+          nullptr, nullptr);
+    }
+
+    if (shouldGenerateMulticast) {
+      rewriter.setInsertionPointToStart(multicastIf.elseBlock());
+      // receive the multicast
+      // first, notify the sender that we are ready to receive
+      auto remoteNocAddr = ttkernel::GetNocAddrOp::create(
+          rewriter, loc, convertVirtualToPhysicalIndex(senderIndexX, true),
+          convertVirtualToPhysicalIndex(senderIndexY, false), senderSemaphore);
+      ttkernel::NocSemaphoreIncOp::create(
+          rewriter, loc, remoteNocAddr,
+          arith::createIndexConstant(loc, rewriter, 1), nullptr);
+      // cast the receiver semaphore to the L1 ptr
+      auto l1ReceiverAddr =
+          ttkernel::CastToL1PtrOp::create(rewriter, loc, receiverSemaphore);
+      // wait for the sender to finish transmitting data
+      ttkernel::NocSemaphoreWaitOp::create(
+          rewriter, loc, l1ReceiverAddr,
+          arith::createIndexConstant(loc, rewriter, 1));
+      // reset post transmit
+      ttkernel::NocSemaphoreSetOp::create(
+          rewriter, loc, l1ReceiverAddr,
+          arith::createIndexConstant(loc, rewriter, 0));
+    }
+    if (shouldGenerateMulticast)
+      rewriter.setInsertionPointAfter(multicastIf);
 
     rewriter.eraseOp(op);
     return success();
