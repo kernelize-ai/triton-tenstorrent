@@ -11,6 +11,7 @@
 
 #include "ttmlir/Dialect/TTKernel/IR/TTKernel.h"
 #include "ttmlir/Dialect/TTKernel/IR/TTKernelOps.h"
+#include "ttmlir/FunctionTypes.h"
 
 namespace mlir {
 using namespace tt;
@@ -152,6 +153,8 @@ struct ConvertTritonFunc : public OpConversionPattern<triton::FuncOp> {
     assert(numArgs >= 0 && "numArgs not set");
     newFunc->setAttr(kTTNumCommonArgsAttr, rewriter.getI32IntegerAttr(numArgs));
     newFunc->setAttr(kTTNumPerCoreArgsAttr, rewriter.getI32IntegerAttr(0));
+    ttmlir::utils::setFunctionType(newFunc,
+                                   ttmlir::utils::FunctionType::Kernel);
 
     // handle populating arg spec post tensor descriptor argument expansion
     // TODO: can we get input arguments from the newFunc here? I don't think so,
