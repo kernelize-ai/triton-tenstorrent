@@ -82,64 +82,39 @@ struct ConvertDotOp : public OpConversionPattern<triton::DotOp> {
     ttkernel::CBWaitFrontOp::create(rewriter, loc, adaptor.getB(),
                                     bNumInputTilesValue);
 
-    Value zeroI32 = arith::createConstantI32(loc, rewriter, 0);
-    Value oneI32 = arith::createConstantI32(loc, rewriter, 1);
+    for (int64_t k = 0; k < kTiles; ++k) {
+      // reset DEST index for each K pass
+      int64_t crtDestIndex = alloc_offset;
 
-    Value mTilesVal =
-        arith::createConstantI32(loc, rewriter, static_cast<int32_t>(mTiles));
-    Value nTilesVal =
-        arith::createConstantI32(loc, rewriter, static_cast<int32_t>(nTiles));
-    Value kTilesVal =
-        arith::createConstantI32(loc, rewriter, static_cast<int32_t>(kTiles));
+      for (int64_t m = 0; m < mTiles; ++m) {
+        for (int64_t n = 0; n < nTiles; ++n) {
 
-    Value destRegisterInitial =
-        arith::createIndexConstant(loc, rewriter, alloc_offset);
-    auto mLoop = scf::ForOp::create(rewriter, loc, zeroI32, mTilesVal, oneI32,
-                                    ValueRange{destRegisterInitial});
-    {
-      rewriter.setInsertionPointToStart(mLoop.getBody());
-      Value mIv = mLoop.getInductionVar();
-      Value destRegisterIndexM = mLoop.getRegionIterArgs()[0];
+          if (crtDestIndex > 7) {
+            // see
+            // https://docs.tenstorrent.com/tt-metal/latest/tt-metalium/tt_metal/advanced_topics/compute_engines_and_dataflow_within_tensix.html#id2
+            LDBG("MatmulTilesOp dest register index: " << crtDestIndex << "\n");
+            return failure();
+          }
+          Value destRegIdxVal =
+              arith::createIndexConstant(loc, rewriter, crtDestIndex);
 
-      auto nLoop = scf::ForOp::create(rewriter, loc, zeroI32, nTilesVal, oneI32,
-                                      ValueRange{destRegisterIndexM});
-      {
-        rewriter.setInsertionPointToStart(nLoop.getBody());
+          // TODO: read from layouts
+          int64_t aTileIndex = m * kTiles + k;
+          int64_t bTileIndex = n * kTiles + k;
 
-        Value nIv = nLoop.getInductionVar();
-        Value destRegisterIndexN = nLoop.getRegionIterArgs()[0];
-
-        auto kLoop =
-            scf::ForOp::create(rewriter, loc, zeroI32, kTilesVal, oneI32);
-        {
-          rewriter.setInsertionPointToStart(kLoop.getBody());
-          Value kIv = kLoop.getInductionVar();
-
-          // aTile = m * kTiles + k
-          Value aTile = arith::AddIOp::create(
-              rewriter, loc,
-              (arith::MulIOp::create(rewriter, loc, mIv, kTilesVal)), kIv);
-
-          // TODO: support generic ordering
-          // bTile = n * kTiles + k
-          Value bTile = arith::AddIOp::create(
-              rewriter, loc,
-              (arith::MulIOp::create(rewriter, loc, nIv, kTilesVal)), kIv);
+          Value aTileIndexVal = arith::createConstantI32(
+              loc, rewriter, static_cast<int32_t>(aTileIndex));
+          Value bTileIndexVal = arith::createConstantI32(
+              loc, rewriter, static_cast<int32_t>(bTileIndex));
 
           ttkernel::MatmulTilesOp::create(rewriter, loc, adaptor.getA(),
-                                          adaptor.getB(), aTile, bTile,
-                                          destRegisterIndexN);
+                                          adaptor.getB(), aTileIndexVal,
+                                          bTileIndexVal, destRegIdxVal);
+
+          crtDestIndex++;
         }
-        rewriter.setInsertionPointAfter(kLoop);
-        Value nextDestRegisterIndex =
-            arith::AddIOp::create(rewriter, loc, destRegisterIndexN,
-                                  arith::createIndexConstant(loc, rewriter, 1));
-        scf::YieldOp::create(rewriter, loc, nextDestRegisterIndex);
       }
-      rewriter.setInsertionPointAfter(nLoop);
-      scf::YieldOp::create(rewriter, loc, nLoop.getResult(0));
     }
-    rewriter.setInsertionPointAfter(mLoop);
 
     ttkernel::CBPopFrontOp::create(rewriter, loc, adaptor.getA(),
                                    aNumInputTilesValue);

@@ -21,19 +21,16 @@ tt.func public @matmul_kernel_fused__compute(%arg23: i32, %k_tiles_0: i32) {
     // CHECK: ttkernel.mm_init
     // CHECK: ttkernel.mm_init_short
 
-    // CHECK: scf.for
     // CHECK-COUNT-2: ttkernel.cb_wait_front
     // COM: now check for M,N, and K loops. Note that M will be canonicalized out since there is only one tile in that dimension
-    // CHECK: scf.for
-    // CHECK: scf.for
-    // CHECK: ttkernel.matmul_tiles
+    // CHECK-COUNT-4: ttkernel.matmul_tiles
     %accumulator = scf.for %accumulator_3 = %c0_i32 to %k_tiles_0 step %c1_i32 iter_args(%arg25 = %cst) -> (tensor<32x64xf32, #tiled>)  : i32 {
         %a_4 = ttg.local_load %a : !ttg.memdesc<32x64xf16, #shared, #smem, mutable> -> tensor<32x64xf16, #triton_tenstorrent.tiled_dot_op<{opIdx = 0, parent = #tiled}>>
         %b_5 = ttg.local_load %b : !ttg.memdesc<64x64xf16, #shared1, #smem, mutable> -> tensor<64x64xf16, #triton_tenstorrent.tiled_dot_op<{opIdx = 1, parent = #tiled1}>>
         %accumulator_6 = tt.dot %a_4, %b_5, %arg25 {triton_tenstorrent.alloc_offset = 0 : i32, triton_tenstorrent.alloc_size = 2 : i32} : tensor<32x64xf16, #triton_tenstorrent.tiled_dot_op<{opIdx = 0, parent = #tiled}>> * tensor<64x64xf16, #triton_tenstorrent.tiled_dot_op<{opIdx = 1, parent = #tiled1}>> -> tensor<32x64xf32, #tiled>
         scf.yield %accumulator_6 : tensor<32x64xf32, #tiled>
     } {triton_tenstorrent.alloc_offset = 0 : i32, triton_tenstorrent.alloc_size = 2 : i32}
-    // CHECK: scf.yield
+    // CHECK: ttkernel.cb_wait_front
     // CHECK: ttkernel.copy_tile_init
     // CHECK-COUNT-2: ttkernel.copy_tile
     %c = arith.truncf %accumulator {triton_tenstorrent.alloc_offset = 0 : i32, triton_tenstorrent.alloc_size = 2 : i32} : tensor<32x64xf32, #tiled> to tensor<32x64xf16, #tiled>
