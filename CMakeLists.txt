@@ -16,6 +16,11 @@ set(TTMLIR_LIB_NAMES
     TTMLIRTTKernelToEmitC
     MLIRTTMetalDialect
     MLIRTTCoreDialect
+    MLIRTTIRDialect
+    TTMLIRTTIRUtils
+    MLIRTTNNDialect
+    MLIRTTNNInterfaces
+    TTMLIRTTNNUtils
 )
 
 # Create imported libraries for each TT-MLIR dep
@@ -33,6 +38,17 @@ foreach(lib ${TTMLIR_LIB_NAMES})
     ${lib}
   )
 endforeach()
+
+# TODO: make this a function
+# TTNNOpModelLib
+set(OP_MODEL_LIB_PATH "${TTMLIR_LIB_DIR}/OpModel/TTNN/${CMAKE_STATIC_LIBRARY_PREFIX}TTNNOpModelLib${CMAKE_STATIC_LIBRARY_SUFFIX}")
+list(APPEND TTMLIR_LIB_PATHS ${OP_MODEL_LIB_PATH})
+add_library(TTNNOpModelLib STATIC IMPORTED)
+set_target_properties(TTNNOpModelLib PROPERTIES
+  IMPORTED_LOCATION "${OP_MODEL_LIB_PATH}"
+)
+add_dependencies(TTNNOpModelLib build_tt_mlir)
+list(APPEND TTMLIR_LIBS TTNNOpModelLib)
 
 add_subdirectory(third_party)
 
@@ -61,6 +77,8 @@ if(TRITON_BUILD_PYTHON_MODULE)
     MLIRMemRefToEmitC
     MLIRSCFToEmitC
     MLIRTargetCpp
+    MLIRMLProgramDialect
+    MLIRLinalgDialect
     ${TTMLIR_LIBS}
 
     DEPENDS
