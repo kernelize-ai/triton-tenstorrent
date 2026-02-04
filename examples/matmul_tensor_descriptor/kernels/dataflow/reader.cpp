@@ -3,6 +3,72 @@
 #include "tools/profiler/kernel_profiler.hpp"
 #include "internal/firmware_common.h"
 #include "api/dataflow/dataflow_api.h"
+
+// SPDX-FileCopyrightText: (c) 2025 Tenstorrent AI ULC
+//
+// SPDX-License-Identifier: Apache-2.0
+
+#ifndef TTMLIR_TARGET_TTKERNEL_LLKS_EXPERIMENTAL_DATAFLOW_API_H
+#define TTMLIR_TARGET_TTKERNEL_LLKS_EXPERIMENTAL_DATAFLOW_API_H
+
+namespace experimental {
+
+FORCE_INLINE
+std::uint64_t
+get_noc_multicast_addr(std::uint32_t noc_x_start, std::uint32_t noc_y_start,
+                       std::uint32_t noc_x_end, std::uint32_t noc_y_end,
+                       std::uint32_t addr, uint8_t noc = noc_index) {
+  /*
+      Get an encoding which contains tensix core and address you want to
+      read from/write to via the noc
+  */
+  if (noc) {
+    // noc 1
+    return NOC_MULTICAST_ADDR(
+        DYNAMIC_NOC_X(noc, noc_x_end), DYNAMIC_NOC_Y(noc, noc_y_end),
+        DYNAMIC_NOC_X(noc, noc_x_start), DYNAMIC_NOC_Y(noc, noc_y_start), addr);
+  } else {
+    // noc 0
+    return NOC_MULTICAST_ADDR(
+        DYNAMIC_NOC_X(noc, noc_x_start), DYNAMIC_NOC_Y(noc, noc_y_start),
+        DYNAMIC_NOC_X(noc, noc_x_end), DYNAMIC_NOC_Y(noc, noc_y_end), addr);
+  }
+}
+
+} // namespace experimental
+
+#endif
+
+
+// SPDX-FileCopyrightText: (c) 2025 Tenstorrent AI ULC
+//
+// SPDX-License-Identifier: Apache-2.0
+
+#ifndef TTMLIR_TARGET_TTKERNEL_LLKS_EXPERIMENTAL_COORD_TRANSLATION_H
+#define TTMLIR_TARGET_TTKERNEL_LLKS_EXPERIMENTAL_COORD_TRANSLATION_H
+
+namespace experimental {
+
+FORCE_INLINE
+std::uint32_t convert_logical_x_to_translated(std::uint32_t logical_x) {
+  /*
+      convert x coord from LOGICAL to TRANSLATED coordinate system
+  */
+  return worker_logical_col_to_virtual_col[logical_x];
+}
+
+FORCE_INLINE
+std::uint32_t convert_logical_y_to_translated(std::uint32_t logical_y) {
+  /*
+      convert x coord from LOGICAL to TRANSLATED coordinate system
+  */
+  return worker_logical_row_to_virtual_row[logical_y];
+}
+
+} // namespace experimental
+
+#endif
+
 void kernel_main() {
   int32_t v1 = 0;
   int32_t v2 = 512;
