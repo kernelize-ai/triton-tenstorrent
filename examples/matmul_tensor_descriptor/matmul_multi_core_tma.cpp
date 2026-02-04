@@ -94,8 +94,8 @@ void matmul_multi_core(
         TILE_HW);
 
     uint32_t BM = 64;  // block M in elements
-    uint32_t BN = 128;  // block N in elements
-    uint32_t BK = 512;  // block K in elements
+    uint32_t BN = 64;  // block N in elements
+    uint32_t BK = 64;  // block K in elements
 
     TT_ASSERT(BM % TILE_HEIGHT == 0 && BN % TILE_WIDTH == 0 && BK % TILE_WIDTH == 0,
           "Block sizes must be tile-multiple (32).");
