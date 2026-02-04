@@ -222,9 +222,11 @@ void matmul_multi_core(
     // All kernels run across all cores to enable parallel execution
     MathFidelity math_fidelity = MathFidelity::HiFi4;  // High fidelity math for accurate results
     
+    auto in0_mcast_sender_semaphore_id = tt_metal::CreateSemaphore(program, all_cores, 0);
+    auto in0_mcast_receiver_semaphore_id = tt_metal::CreateSemaphore(program, all_cores, 0);
     std::vector<uint32_t> compile_args = {static_cast<uint32_t>(CBIndex::c_0),
                                         static_cast<uint32_t>(CBIndex::c_1),
-                                        static_cast<uint32_t>(CBIndex::c_16)};
+                                        static_cast<uint32_t>(CBIndex::c_16), in0_mcast_sender_semaphore_id, in0_mcast_receiver_semaphore_id};
     
     auto reader_id = tt_metal::CreateKernel(
         program,
