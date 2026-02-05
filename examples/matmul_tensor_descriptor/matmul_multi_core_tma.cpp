@@ -273,9 +273,11 @@ void matmul_multi_core(
     
     auto in0_mcast_sender_semaphore_id = tt_metal::CreateSemaphore(program, all_cores, 0);
     auto in0_mcast_receiver_semaphore_id = tt_metal::CreateSemaphore(program, all_cores, 0);
+    auto in1_mcast_sender_semaphore_id = tt_metal::CreateSemaphore(program, all_cores, 0);
+    auto in1_mcast_receiver_semaphore_id = tt_metal::CreateSemaphore(program, all_cores, 0);
     std::vector<uint32_t> compile_args = {static_cast<uint32_t>(CBIndex::c_0),
                                         static_cast<uint32_t>(CBIndex::c_1),
-                                        static_cast<uint32_t>(CBIndex::c_16), in0_mcast_sender_semaphore_id, in0_mcast_receiver_semaphore_id};
+                                        static_cast<uint32_t>(CBIndex::c_16), in0_mcast_sender_semaphore_id, in0_mcast_receiver_semaphore_id, in1_mcast_sender_semaphore_id, in1_mcast_receiver_semaphore_id};
     
     auto reader_id = tt_metal::CreateKernel(
         program,
