@@ -82,6 +82,21 @@ struct ConvertDotOp : public OpConversionPattern<triton::DotOp> {
     ttkernel::CBWaitFrontOp::create(rewriter, loc, adaptor.getB(),
                                     bNumInputTilesValue);
 
+#if 1
+    // TODO: there is a comment in llk that dest reg index is ignored... may
+    // have to use matmul tiles if alloc_offset > 0
+    Value destRegIdxVal =
+        arith::createIndexConstant(loc, rewriter, alloc_offset);
+    ttkernel::ExperimentalMatmulBlockOp::create(
+        rewriter, loc, adaptor.getA(), adaptor.getB(),
+        arith::createConstantI32(loc, rewriter, 0),
+        arith::createConstantI32(loc, rewriter, 0), destRegIdxVal,
+        /*transpose=*/arith::createConstantI32(loc, rewriter, 0),
+        arith::createConstantI32(loc, rewriter, nTiles),
+        arith::createConstantI32(loc, rewriter, mTiles),
+        arith::createConstantI32(loc, rewriter, kTiles),
+        arith::createConstantI32(loc, rewriter, nTiles));
+#else
     for (int64_t k = 0; k < kTiles; ++k) {
       // reset DEST index for each K pass
       int64_t crtDestIndex = alloc_offset;
@@ -115,6 +130,7 @@ struct ConvertDotOp : public OpConversionPattern<triton::DotOp> {
         }
       }
     }
+#endif
 
     ttkernel::CBPopFrontOp::create(rewriter, loc, adaptor.getA(),
                                    aNumInputTilesValue);

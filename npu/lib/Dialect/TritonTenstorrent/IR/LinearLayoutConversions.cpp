@@ -115,7 +115,7 @@ tt::TiledDotOperandEncodingAttr::toLinearLayout(ArrayRef<int64_t> shape) const {
   LinearLayout registerLayout =
       identityStandardND(S("register"), tiled.getTileShape(), order);
   LinearLayout tileLayout =
-      identityStandardND(S("tile"), tiled.getTilesPerCore(), dotOrder);
+      identityStandardND(S("tile"), tiled.getTilesPerCore(), order);
 
   // currently not splitting blocks
   LinearLayout ret =
