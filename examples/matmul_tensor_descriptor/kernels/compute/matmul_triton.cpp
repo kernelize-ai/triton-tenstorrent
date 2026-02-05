@@ -45,53 +45,43 @@ inline uint32_t float_to_bits(float f) { uint32_t r; __builtin_memcpy(&r, &f, si
 #include "api/compute/reduce.h"
 void kernel_main() {
   size_t v1 = 0;
-  size_t v2 = 1;
-  size_t v3 = 2;
-  size_t v4 = 3;
-  int32_t v5 = 0;
-  int32_t v6 = 1;
-  int32_t v7 = 4;
-  int32_t v8 = 2;
-  int32_t v9 = 3;
-  int32_t v10 = get_common_arg_val<uint32_t>(32);
-  mm_init(get_compile_time_arg_val(0), get_compile_time_arg_val(1), get_compile_time_arg_val(2), v5);
-  int32_t v11 = get_arg_val<uint32_t>(v2);
-  int32_t v12 = get_arg_val<uint32_t>(v1);
-  for (int32_t i13 = v12; i13 < v11; i13 += v6) {
+  int32_t v2 = 0;
+  int32_t v3 = 1;
+  int32_t v4 = 2;
+  int32_t v5 = 4;
+  int32_t v6 = 3;
+  int32_t v7 = get_common_arg_val<uint32_t>(32);
+  mm_block_init(get_compile_time_arg_val(0), get_compile_time_arg_val(1), get_compile_time_arg_val(2), v2, v4, v4, v4);
+  int32_t v8 = get_arg_val<uint32_t>(1);
+  int32_t v9 = get_arg_val<uint32_t>(v1);
+  for (int32_t i10 = v9; i10 < v8; i10 += v3) {
     tile_regs_acquire();
-    mm_init_short(get_compile_time_arg_val(0), get_compile_time_arg_val(1), v5);
-    for (int32_t j14 = v5; j14 < ((int32_t) ((uint32_t) v10 + (uint32_t) 63) / 64); j14 += v6) {
+    mm_block_init_short(get_compile_time_arg_val(0), get_compile_time_arg_val(1), v2, v4, v4, v4);
+    for (int32_t j11 = v2; j11 < ((int32_t) ((uint32_t) v7 + (uint32_t) 63) / 64); j11 += v3) {
       {
       DeviceZoneScopedN("cb_wait_front");
-      cb_wait_front(get_compile_time_arg_val(0), v7);
+      cb_wait_front(get_compile_time_arg_val(0), v5);
       }
       {
       DeviceZoneScopedN("cb_wait_front");
-      cb_wait_front(get_compile_time_arg_val(1), v7);
+      cb_wait_front(get_compile_time_arg_val(1), v5);
       }
-      matmul_tiles(get_compile_time_arg_val(0), get_compile_time_arg_val(1), v5, v5, v1);
-      matmul_tiles(get_compile_time_arg_val(0), get_compile_time_arg_val(1), v5, v6, v2);
-      matmul_tiles(get_compile_time_arg_val(0), get_compile_time_arg_val(1), v8, v5, v3);
-      matmul_tiles(get_compile_time_arg_val(0), get_compile_time_arg_val(1), v8, v6, v4);
-      matmul_tiles(get_compile_time_arg_val(0), get_compile_time_arg_val(1), v6, v8, v1);
-      matmul_tiles(get_compile_time_arg_val(0), get_compile_time_arg_val(1), v6, v9, v2);
-      matmul_tiles(get_compile_time_arg_val(0), get_compile_time_arg_val(1), v9, v8, v3);
-      matmul_tiles(get_compile_time_arg_val(0), get_compile_time_arg_val(1), v9, v9, v4);
-      cb_pop_front(get_compile_time_arg_val(0), v7);
-      cb_pop_front(get_compile_time_arg_val(1), v7);
+      experimental::matmul_block(get_compile_time_arg_val(0), get_compile_time_arg_val(1), v2, v2, v1, v2, v4, v4, v4, v4);
+      cb_pop_front(get_compile_time_arg_val(0), v5);
+      cb_pop_front(get_compile_time_arg_val(1), v5);
     }
-    cb_reserve_back(get_compile_time_arg_val(2), v7);
+    cb_reserve_back(get_compile_time_arg_val(2), v5);
     tile_regs_commit();
     {
     DeviceZoneScopedN("tile_regs_wait");
     tile_regs_wait();
     }
-    pack_tile<false>(v5, get_compile_time_arg_val(2), v5);
+    pack_tile<false>(v2, get_compile_time_arg_val(2), v2);
+    pack_tile<false>(v3, get_compile_time_arg_val(2), v3);
+    pack_tile<false>(v4, get_compile_time_arg_val(2), v4);
     pack_tile<false>(v6, get_compile_time_arg_val(2), v6);
-    pack_tile<false>(v8, get_compile_time_arg_val(2), v8);
-    pack_tile<false>(v9, get_compile_time_arg_val(2), v9);
     tile_regs_release();
-    cb_push_back(get_compile_time_arg_val(2), v7);
+    cb_push_back(get_compile_time_arg_val(2), v5);
   }
   return;
 }
