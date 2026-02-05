@@ -100,7 +100,7 @@ struct ConvertDotOp : public OpConversionPattern<triton::DotOp> {
 
           // TODO: read from layouts
           int64_t aTileIndex = m * kTiles + k;
-          int64_t bTileIndex = n * kTiles + k;
+          int64_t bTileIndex = k * nTiles + n;
 
           Value aTileIndexVal = arith::createConstantI32(
               loc, rewriter, static_cast<int32_t>(aTileIndex));
