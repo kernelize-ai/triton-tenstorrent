@@ -108,6 +108,7 @@ void matmul_multi_core(
 
     // Get the compute grid size to determine how many cores are available
     auto core_grid = mesh_device->compute_with_storage_grid_size();
+    fmt::print("Compute with storage grid size: {}\n", core_grid);
     auto ceil_div = [](uint32_t a, uint32_t b) { return (a + b - 1) / b; };
 
     // Extracting Matrix dimensions from input/output vectors and converting to tile coordinates.
@@ -133,8 +134,32 @@ void matmul_multi_core(
     // - Secondary group: handles fewer tiles per core
     // The secondary group is empty if the work can be evenly distributed across all cores. This
     // approach minimizes workload imbalance between cores for optimal performance.
+#if 1
+
+    uint32_t num_cores = 40;
+    CoreCoord start_core = {0, 0};
+    // CoreCoord core_range = {8, 5};
+    uint32_t start_core_x = start_core.x;
+    uint32_t start_core_y = start_core.y;
+    uint32_t num_cores_x = 8;
+    uint32_t num_cores_y = 5;
+    // this defines the first rectangle. build up the core range by adding rectangles    
+    std::vector<CoreRange> ranges;
+    for (uint32_t i = 0; i < num_cores_x; i++) {
+        ranges.emplace_back(
+            CoreCoord((std::size_t)start_core_x + i, (std::size_t)start_core_y),
+            CoreCoord((std::size_t)start_core_x + i, (std::size_t)start_core_y + num_cores_y - 1));
+    }
+    CoreRangeSet all_cores;  
+    all_cores = all_cores.merge(ranges);
+    auto core_group_1 = all_cores;
+    CoreRangeSet core_group_2; // empty
+    uint32_t work_per_core1 = num_output_blocks_total / num_cores;
+    uint32_t work_per_core2 = 0;
+#else
     auto [num_cores, all_cores, core_group_1, core_group_2, work_per_core1, work_per_core2] =
         split_work_to_cores(core_grid, num_output_blocks_total);
+#endif 
     fmt::print(
         "Distributing {} output tiles across {} cores: {} cores ({}) x {} tiles/core + {} cores ({}) x {} tiles/core\n",
         num_output_blocks_total,
@@ -158,7 +183,31 @@ void matmul_multi_core(
         M,
         N,
         Mt * Nt);
-        return;
+
+     auto matmul_params = bmm_op_utils::get_large_matmul_params(Mt, Nt, core_grid.y, core_grid.x, 2);
+    uint32_t per_core_M = std::get<0>(matmul_params);
+    uint32_t per_core_N = std::get<1>(matmul_params);
+    uint32_t out_subblock_h = std::get<2>(matmul_params);
+    uint32_t out_subblock_w = std::get<3>(matmul_params);
+
+    fmt::print(" -- Metalium Core Sizing --\n");
+    fmt::print(
+        " -- per_core_M= {} -- per_core_N= {} -- out_subblock_h= {} -- out_subblock_w= {} --\n",
+        per_core_M,
+        per_core_N,
+        out_subblock_h,
+        out_subblock_w);
+    uint32_t num_blocks_y = Mt / per_core_M;
+    uint32_t num_blocks_x = Nt / per_core_N;
+    uint32_t num_blocks_total = num_blocks_y * num_blocks_x;
+    CoreCoord core_range = bmm_op_utils::get_core_range(num_blocks_y, num_blocks_x, core_grid.y, core_grid.x);
+
+    fmt::print("Matmul params using get core range:"
+                " num_blocks_y= {} -- num_blocks_x= {} -- core_range_end= {}\n",
+                num_blocks_y,
+                num_blocks_x,
+                core_range);
+
     // Create DRAM buffers for input and output matrices (replicated per device across the mesh).
     // We allocate DRAM buffers for the input matrices and output matrix.
     // Setting page_size to single_tile_size is the most common configuration for memory buffers in Metalium
@@ -307,7 +356,16 @@ void matmul_multi_core(
     for (const auto& [ranges, work_per_core] : work_groups) {
         for (const auto& range : ranges.ranges()) {
             for (const auto& core : range) {
-                // fmt::print("Core {} assigned {} output tiles starting at offset {}\n", core.str(), work_per_core, work_offset);
+                uint32_t pid;
+                if (core.x < 4) {
+                    uint32_t n = 4*core.y + core.x;      // 0..19
+                    pid = 2*n;                           // even
+                } else {
+                    uint32_t n = 4*core.y + (core.x-4);  // 0..19
+                    pid = 2*n + 1;                       // odd
+                }
+                work_offset = pid;
+                fmt::print("Core {} assigned {} output tiles starting at offset {}\n", core.str(), work_per_core, work_offset);
                 // Set arguments for the reader kernel (data input)
                 tt_metal::SetRuntimeArgs(
                     program,
