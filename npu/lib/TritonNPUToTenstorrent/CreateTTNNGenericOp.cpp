@@ -45,6 +45,10 @@ struct Kernels {
     assert(compute && "expected one compute kernel per module");
     assert(writer && "expected one writer kernel per module");
   }
+
+  SmallVector<func::FuncOp> to_vector() const {
+    return {reader, compute, writer};
+  }
 };
 
 static SmallVector<ttnn::KernelCBAttr>
@@ -108,10 +112,10 @@ populateBlockStartEndArgs(Builder &b,
     for (unsigned r = start.getX(); r <= end.getX(); ++r) {
       for (unsigned c = start.getY(); c <= end.getY(); ++c) {
         auto coord = ttnn::CoreCoordAttr::get(ctx, r, c);
-        llvm::errs() << "Create CoreRuntimeArgsAttr for core (" << r << ", "
-                     << c << ")\n";
 
         uint32_t id = crtId; // r * cols + c;
+        llvm::errs() << "CoreRuntimeArgsAttr for core (" << r << ", " << c
+                     << ") = " << id << "\n";
         // TODO: fix the printer so quotes are not required
         Attribute blockStartAttr = ttnn::KernelNamedArgAttr::get(
             ctx, std::string("\"block_start\""), id);
@@ -249,6 +253,47 @@ createKernelDescriptors(Builder &builder, Kernels &kernels,
   }
 
   return kernelConfigs;
+}
+
+// copied (mostly) from D2MToTTNN.cpp
+static SmallVector<ttnn::KernelSemaphoreAttr>
+createSemaphoreDescriptors(Builder &builder, Kernels &kernels,
+                           const ttnn::CoreRangeSetAttr &coreRangeSet,
+                           const SymbolTable &symbolTable) {
+  llvm::DenseSet<size_t> seenSemaphoreIndices;
+
+  for (auto kernelFunc : kernels.to_vector()) {
+    auto kernelSpec = kernelFunc->getAttrOfType<ttkernel::ArgSpecAttr>(
+        ttkernel::ArgSpecAttr::name);
+    if (!kernelSpec) {
+      continue;
+    }
+
+    for (auto ctArg : kernelSpec.getCtArgs()) {
+      if (ctArg.getArgType() == ttkernel::ArgType::Semaphore) {
+        seenSemaphoreIndices.insert(ctArg.getOperandIndex());
+      }
+    }
+  }
+  size_t numSemaphores = seenSemaphoreIndices.size();
+#if 1
+  if (numSemaphores > 0) {
+    // Semaphore indices are assigned sequentially in D2MToTTKernel, so they
+    // should be dense.
+    size_t minIndex = *llvm::min_element(seenSemaphoreIndices);
+    size_t maxIndex = *llvm::max_element(seenSemaphoreIndices);
+    assert((minIndex == 0u && maxIndex == numSemaphores - 1) &&
+           "Semaphore indices must be dense (0, 1, 2, ..., n-1)");
+  }
+#endif
+  SmallVector<ttnn::KernelSemaphoreAttr> semaphoreDescriptors(numSemaphores);
+  for (size_t i = 0; i < numSemaphores; ++i) {
+    semaphoreDescriptors[i] = builder.getAttr<ttnn::KernelSemaphoreAttr>(
+        /*id=*/i, ttnn::KernelCoreType::Worker, coreRangeSet,
+        /*initial_value=*/0);
+  }
+
+  return semaphoreDescriptors;
 }
 
 static constexpr int32_t M = 64;
@@ -475,7 +520,7 @@ struct CreateTTNNGenericOp
   populateBlockStartEndArgsForSet(builder, coreRangeSet2, /*tilesPerCore=*/2,
                                   kernelRTArgs);
   assert(kernelRTArgs.size() == 56 && "expected dispatch for 56 cores");
-#endif 
+#endif
 
 #if 0
   // 64x64xK
@@ -489,7 +534,7 @@ struct CreateTTNNGenericOp
   populateBlockStartEndArgsForSet(builder, coreRangeSet2, /*tilesPerCore=*/4,
                                   kernelRTArgs);
   assert(kernelRTArgs.size() == 56 && "expected dispatch for 56 cores");
-#endif 
+#endif
 
 // Qwen
 #if 1
@@ -505,7 +550,7 @@ struct CreateTTNNGenericOp
     allCores = coreRangeSet1;
 #endif
 #if 0
-    // 32x64xK 
+    // 32x64xK
     // Distributing 80 output tiles across 56 cores: 24 cores ({[(x=0,y=0) - (x=2,y=6)], [(x=3,y=0) - (x=3,y=2)]}) x 2 tiles/core + 32 cores ({[(x=3,y=3) - (x=3,y=6)], [(x=4,y=0) - (x=7,y=6)]}) x 1 tiles/core
     ttnn::CoreRangeSetAttr coreRangeSet1 = ttnn::CoreRangeSetAttr::get(
         context, {getCoreRange(0, 0, 2, 6), getCoreRange(3, 0, 3, 2)});
@@ -517,7 +562,7 @@ struct CreateTTNNGenericOp
                                     kernelRTArgs);
     assert(kernelRTArgs.size() == 56 && "expected dispatch for 56 cores");
 
-#endif 
+#endif
 #if 0
       // 64x128xK or 32x256xK
       // Distributing 20 output tiles across 20 cores: 20 cores ({[(x=0,y=0) - (x=1,y=6)], [(x=2,y=0) - (x=2,y=5)]}) x 1 tiles/core + 0 cores ({}) x 0 tiles/core
@@ -526,7 +571,7 @@ struct CreateTTNNGenericOp
     populateBlockStartEndArgsForSet(builder, coreRangeSet1, /*tilesPerCore=*/1,
                                     kernelRTArgs);
     assert(kernelRTArgs.size() == 20 && "expected dispatch for 20 cores");
-#endif 
+#endif
 
 #if 0
     // did not work - out of DEST?
@@ -595,7 +640,8 @@ struct CreateTTNNGenericOp
         builder, kernels, allCores, kernelRTArgs, symbolTable, mathFidelity);
 
     // semaphores not yet used
-    SmallVector<ttnn::KernelSemaphoreAttr> semaphoreDescriptors;
+    SmallVector<ttnn::KernelSemaphoreAttr> semaphoreDescriptors =
+        createSemaphoreDescriptors(builder, kernels, allCores, symbolTable);
 
     ttnn::ProgramAttr program = ttnn::ProgramAttr::get(
         context, kernelDescriptors, cbDescriptors, semaphoreDescriptors);
