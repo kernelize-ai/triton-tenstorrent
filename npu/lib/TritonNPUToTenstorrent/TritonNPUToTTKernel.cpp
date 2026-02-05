@@ -71,7 +71,7 @@ inline bool requiresSFPUInit(func::FuncOp funcOp) {
 
 inline bool requiresMMInit(func::FuncOp funcOp) {
   bool requiresInit = false;
-  funcOp.walk([&](ttkernel::MatmulTilesOp dotOp) {
+  funcOp.walk([&](ttkernel::ExperimentalMatmulBlockOp dotOp) {
     requiresInit = true;
     return;
   });
@@ -91,7 +91,8 @@ public:
         copyTileInitOps.push_back(copyTileInitOp);
       } else if (auto packTileOp = dyn_cast<ttkernel::PackTileOp>(op)) {
         packTileOps.insert(packTileOp);
-      } else if (auto matmulTilesOp = dyn_cast<ttkernel::MatmulTilesOp>(op)) {
+      } else if (auto matmulTilesOp =
+                     dyn_cast<ttkernel::ExperimentalMatmulBlockOp>(op)) {
         matmulTilesOps.insert(matmulTilesOp);
       }
     });
@@ -153,10 +154,19 @@ public:
       Value latest = getLatestValue({aCb, bCb, outCb});
       builder.setInsertionPointAfterValue(latest);
 
-      // TODO: support transpose. we cannot grab the transpose from the matmul
-      // op as transpose could be defined inside the matmul loop
-      Value transpose = arith::createConstantI32(loc, builder, 0);
-      ttkernel::MatmulInitOp::create(builder, loc, aCb, bCb, outCb, transpose);
+      auto getAndCloneConstantInput = [&](Value operand) -> Value {
+        auto constantOp = operand.getDefiningOp<arith::ConstantOp>();
+        assert(constantOp && "expected constant op defining operand");
+        return builder.clone(*constantOp)->getResult(0);
+      };
+
+      Value transpose = getAndCloneConstantInput(matmulTilesOp.getTranspose());
+      Value nTiles = getAndCloneConstantInput(matmulTilesOp.getCtDim());
+      Value mTiles = getAndCloneConstantInput(matmulTilesOp.getRtDim());
+      Value kTiles = getAndCloneConstantInput(matmulTilesOp.getKtDim());
+
+      ttkernel::MatmulBlockInitOp::create(builder, loc, aCb, bCb, outCb,
+                                          transpose, nTiles, mTiles, kTiles);
 
       SmallVector<ttkernel::TileRegsAcquireOp, 4> tileRegsAcquireOps;
       funcOp.walk([&](ttkernel::TileRegsAcquireOp op) {
@@ -166,7 +176,8 @@ public:
       Operation *acquireOp = tileRegsAcquireOps.front();
 
       builder.setInsertionPointAfter(acquireOp);
-      ttkernel::MatmulInitShortOp::create(builder, loc, aCb, bCb, transpose);
+      ttkernel::MatmulBlockInitShortOp::create(
+          builder, loc, aCb, bCb, transpose, nTiles, mTiles, kTiles);
 
     } else if (addSFPUInit) {
       SmallVector<ttkernel::TileRegsAcquireOp, 4> tileRegsAcquireOps;
@@ -205,7 +216,7 @@ private:
   SmallVector<ttkernel::CopyTileInitOp, 4> copyTileInitOps;
   llvm::MapVector<ttkernel::CopyTileOp, unsigned> copyTileOps;
   SetVector<ttkernel::PackTileOp> packTileOps;
-  SetVector<ttkernel::MatmulTilesOp> matmulTilesOps;
+  SetVector<ttkernel::ExperimentalMatmulBlockOp> matmulTilesOps;
 
   func::FuncOp funcOp;
   const bool addSFPUInit;
