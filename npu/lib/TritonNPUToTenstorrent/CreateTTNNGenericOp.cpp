@@ -112,15 +112,21 @@ populateBlockStartEndArgs(Builder &b,
     for (unsigned r = start.getX(); r <= end.getX(); ++r) {
       for (unsigned c = start.getY(); c <= end.getY(); ++c) {
         auto coord = ttnn::CoreCoordAttr::get(ctx, r, c);
-
-        uint32_t id = crtId; // r * cols + c;
+        uint32_t pid;
+        if (r < 4) {
+          uint32_t n = 4 * c + r; // 0..19
+          pid = 2 * n;            // even
+        } else {
+          uint32_t n = 4 * c + (r - 4); // 0..19
+          pid = 2 * n + 1;              // odd
+        }
         llvm::errs() << "CoreRuntimeArgsAttr for core (" << r << ", " << c
-                     << ") = " << id << "\n";
+                     << ") = " << pid << "\n";
         // TODO: fix the printer so quotes are not required
         Attribute blockStartAttr = ttnn::KernelNamedArgAttr::get(
-            ctx, std::string("\"block_start\""), id);
+            ctx, std::string("\"block_start\""), pid);
         Attribute blockEndAttr = ttnn::KernelNamedArgAttr::get(
-            ctx, std::string("\"block_end\""), id + tilesPerCore);
+            ctx, std::string("\"block_end\""), pid + tilesPerCore);
         crtId += tilesPerCore;
 
         auto rt = ttnn::CoreRuntimeArgsAttr::get(
@@ -276,7 +282,6 @@ createSemaphoreDescriptors(Builder &builder, Kernels &kernels,
     }
   }
   size_t numSemaphores = seenSemaphoreIndices.size();
-#if 1
   if (numSemaphores > 0) {
     // Semaphore indices are assigned sequentially in D2MToTTKernel, so they
     // should be dense.
@@ -285,7 +290,6 @@ createSemaphoreDescriptors(Builder &builder, Kernels &kernels,
     assert((minIndex == 0u && maxIndex == numSemaphores - 1) &&
            "Semaphore indices must be dense (0, 1, 2, ..., n-1)");
   }
-#endif
   SmallVector<ttnn::KernelSemaphoreAttr> semaphoreDescriptors(numSemaphores);
   for (size_t i = 0; i < numSemaphores; ++i) {
     semaphoreDescriptors[i] = builder.getAttr<ttnn::KernelSemaphoreAttr>(
@@ -538,6 +542,15 @@ struct CreateTTNNGenericOp
 
 // Qwen
 #if 1
+    // 32x128xK with multicast
+    ttnn::CoreRangeSetAttr coreRangeSet1 =
+        ttnn::CoreRangeSetAttr::get(context, {getCoreRange(0, 0, 7, 4)});
+    populateBlockStartEndArgsForSet(builder, coreRangeSet1, /*tilesPerCore=*/1,
+                                    kernelRTArgs);
+    assert(kernelRTArgs.size() == 40 && "expected dispatch for 40 cores");
+    allCores = coreRangeSet1;
+#endif
+#if 0
     // 64x64xK or 32x128xK
     // Distributing 40 output tiles across 40 cores: 40 cores ({[(x=0,y=0) -
     // (x=4,y=6)], [(x=5,y=0) - (x=5,y=4)]}) x 1 tiles/core + 0 cores ({}) x 0
