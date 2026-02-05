@@ -112,16 +112,7 @@ populateBlockStartEndArgs(Builder &b,
     for (unsigned r = start.getX(); r <= end.getX(); ++r) {
       for (unsigned c = start.getY(); c <= end.getY(); ++c) {
         auto coord = ttnn::CoreCoordAttr::get(ctx, r, c);
-        uint32_t pid;
-        if (r < 4) {
-          uint32_t n = 4 * c + r; // 0..19
-          pid = 2 * n;            // even
-        } else {
-          uint32_t n = 4 * c + (r - 4); // 0..19
-          pid = 2 * n + 1;              // odd
-        }
-        llvm::errs() << "CoreRuntimeArgsAttr for core (" << r << ", " << c
-                     << ") = " << pid << "\n";
+        uint32_t pid = crtId;
         // TODO: fix the printer so quotes are not required
         Attribute blockStartAttr = ttnn::KernelNamedArgAttr::get(
             ctx, std::string("\"block_start\""), pid);
@@ -542,7 +533,7 @@ struct CreateTTNNGenericOp
 
 // Qwen
 #if 1
-    // 32x128xK with multicast
+    // 32x128xK with multicast (or 64x64xK with multicast)
     ttnn::CoreRangeSetAttr coreRangeSet1 =
         ttnn::CoreRangeSetAttr::get(context, {getCoreRange(0, 0, 7, 4)});
     populateBlockStartEndArgsForSet(builder, coreRangeSet1, /*tilesPerCore=*/1,
