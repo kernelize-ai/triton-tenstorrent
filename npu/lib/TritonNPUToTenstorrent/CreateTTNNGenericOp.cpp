@@ -113,14 +113,12 @@ populateBlockStartEndArgs(Builder &b,
       for (unsigned c = start.getY(); c <= end.getY(); ++c) {
         auto coord = ttnn::CoreCoordAttr::get(ctx, r, c);
 
-        uint32_t id = crtId; // r * cols + c;
-        llvm::errs() << "CoreRuntimeArgsAttr for core (" << r << ", " << c
-                     << ") = " << id << "\n";
+        uint32_t pid = crtId;
         // TODO: fix the printer so quotes are not required
         Attribute blockStartAttr = ttnn::KernelNamedArgAttr::get(
-            ctx, std::string("\"block_start\""), id);
+            ctx, std::string("\"block_start\""), pid);
         Attribute blockEndAttr = ttnn::KernelNamedArgAttr::get(
-            ctx, std::string("\"block_end\""), id + tilesPerCore);
+            ctx, std::string("\"block_end\""), pid + tilesPerCore);
         crtId += tilesPerCore;
 
         auto rt = ttnn::CoreRuntimeArgsAttr::get(
@@ -538,17 +536,15 @@ struct CreateTTNNGenericOp
 
 // Qwen
 #if 1
-    // 64x64xK or 32x128xK
-    // Distributing 40 output tiles across 40 cores: 40 cores ({[(x=0,y=0) -
-    // (x=4,y=6)], [(x=5,y=0) - (x=5,y=4)]}) x 1 tiles/core + 0 cores ({}) x 0
-    // tiles/core
-    ttnn::CoreRangeSetAttr coreRangeSet1 = ttnn::CoreRangeSetAttr::get(
-        context, {getCoreRange(0, 0, 4, 6), getCoreRange(5, 0, 5, 4)});
+    // 32x128xK with multicast (or 64x64xK with multicast)
+    ttnn::CoreRangeSetAttr coreRangeSet1 =
+        ttnn::CoreRangeSetAttr::get(context, {getCoreRange(0, 0, 7, 4)});
     populateBlockStartEndArgsForSet(builder, coreRangeSet1, /*tilesPerCore=*/1,
                                     kernelRTArgs);
     assert(kernelRTArgs.size() == 40 && "expected dispatch for 40 cores");
     allCores = coreRangeSet1;
 #endif
+
 #if 0
     // 32x64xK
     // Distributing 80 output tiles across 56 cores: 24 cores ({[(x=0,y=0) - (x=2,y=6)], [(x=3,y=0) - (x=3,y=2)]}) x 2 tiles/core + 32 cores ({[(x=3,y=3) - (x=3,y=6)], [(x=4,y=0) - (x=7,y=6)]}) x 1 tiles/core

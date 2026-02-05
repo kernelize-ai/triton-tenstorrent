@@ -80,7 +80,7 @@ def matmul_get_configs(pre_hook=None):
                       num_warps=w, pre_hook=pre_hook)
         for BM in [64]
         for BN in [64]
-        for BK in [64]
+        for BK in [256]
         for s in ([1])
         for w in [1]
     ]
