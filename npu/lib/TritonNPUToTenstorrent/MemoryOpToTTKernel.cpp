@@ -295,6 +295,18 @@ struct ConvertTensorDescLoadOp
           receiverSemaphoreCompileTimeArgsIndex);
       receiverSemaphore = ttkernel::GetSemaphoreOp::create(
           rewriter, loc, receiverSemaphoreIndex);
+
+      auto parentFuncOp = op->getParentOfType<func::FuncOp>();
+      assert(parentFuncOp && "expected parent func op");
+      // TODO: should this be in place?
+      rewriter.modifyOpInPlace(parentFuncOp, [&]() {
+        ttkernel::ArgSpecAttr::appendCompileTimeArg(
+            parentFuncOp, rewriter.getAttr<ttkernel::ArgAttr>(
+                              ttkernel::ArgType::Semaphore, 0));
+        ttkernel::ArgSpecAttr::appendCompileTimeArg(
+            parentFuncOp, rewriter.getAttr<ttkernel::ArgAttr>(
+                              ttkernel::ArgType::Semaphore, 1));
+      });
     }
     int32_t numCoresPerRow = 7; // total number of cores in this rectangular
                                 // grid including the sender
