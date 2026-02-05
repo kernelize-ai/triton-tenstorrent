@@ -4,11 +4,11 @@
 #include "internal/firmware_common.h"
 #include "api/dataflow/dataflow_api.h"
 void kernel_main() {
-  int32_t v1 = 1;
-  bool v2 = true;
-  int32_t v3 = 4;
-  int32_t v4 = 0;
-  int32_t v5 = 32;
+  int32_t v1 = 2;
+  int32_t v2 = 1;
+  bool v3 = true;
+  int32_t v4 = 4;
+  int32_t v5 = 0;
   int32_t v6 = get_common_arg_val<uint32_t>(20);
   int32_t v7 = get_common_arg_val<uint32_t>(22);
   int32_t v8 = get_common_arg_val<uint32_t>(30);
@@ -22,31 +22,29 @@ void kernel_main() {
   InterleavedAddrGenFast<true> v13 = v12;
   int32_t v14 = get_arg_val<uint32_t>(1);
   int32_t v15 = get_arg_val<uint32_t>(0);
-  int32_t v16 = v7 != (int32_t) ((uint32_t) (v7 / v5) * (uint32_t) v5) & v7 < v4 == false ? (int32_t) ((uint32_t) (v7 / v5) + (uint32_t) v1) : v7 / v5;
-  for (int32_t i17 = v15; i17 < v14; i17 += v1) {
+  for (int32_t i16 = v15; i16 < v14; i16 += v2) {
     {
     DeviceZoneScopedN("cb_wait_front");
-    cb_wait_front(get_compile_time_arg_val(2), v3);
+    cb_wait_front(get_compile_time_arg_val(2), v4);
     }
-    int32_t v18 = get_read_ptr(get_compile_time_arg_val(2));
-    int32_t v19 = (int32_t) ((uint32_t) ((int32_t) ((uint32_t) ((int32_t) ((uint32_t) ((int32_t) ((uint32_t) (i17 / ((int32_t) ((uint32_t) v9 + (uint32_t) 63) / 64)) + (uint32_t) (i17 % ((int32_t) ((uint32_t) ((int32_t) ((uint32_t) v8 + (uint32_t) 63) / 64) - (uint32_t) (i17 / ((int32_t) ((uint32_t) v9 + (uint32_t) 63) / 64))) < v1 ? (int32_t) ((uint32_t) ((int32_t) ((uint32_t) v8 + (uint32_t) 63) / 64) - (uint32_t) (i17 / ((int32_t) ((uint32_t) v9 + (uint32_t) 63) / 64))) : v1)))) * (uint32_t) 64) / v5) * (uint32_t) v16)) + (uint32_t) ((int32_t) ((uint32_t) ((i17 % ((int32_t) ((uint32_t) v9 + (uint32_t) 63) / 64)) / ((int32_t) ((uint32_t) ((int32_t) ((uint32_t) v8 + (uint32_t) 63) / 64) - (uint32_t) (i17 / ((int32_t) ((uint32_t) v9 + (uint32_t) 63) / 64))) < v1 ? (int32_t) ((uint32_t) ((int32_t) ((uint32_t) v8 + (uint32_t) 63) / 64) - (uint32_t) (i17 / ((int32_t) ((uint32_t) v9 + (uint32_t) 63) / 64))) : v1)) * (uint32_t) 64) / v5));
-    uint64_t temp_147 = v13.get_noc_addr(v19, v4);
-    noc_async_write(v18, temp_147, v11);
-    int32_t v20 = (int32_t) ((uint32_t) v18 + (uint32_t) 2048);
-    int32_t v21 = (int32_t) ((uint32_t) v19 + (uint32_t) v1);
-    uint64_t temp_159 = v13.get_noc_addr(v21, v4);
-    noc_async_write(v20, temp_159, v11);
-    int32_t v22 = (int32_t) ((uint32_t) v18 + (uint32_t) 4096);
-    uint64_t temp_171 = v13.get_noc_addr((int32_t) ((uint32_t) v19 + (uint32_t) v16), v4);
-    noc_async_write(v22, temp_171, v11);
-    int32_t v23 = (int32_t) ((uint32_t) v18 + (uint32_t) 6144);
-    uint64_t temp_183 = v13.get_noc_addr((int32_t) ((uint32_t) v21 + (uint32_t) v16), v4);
-    noc_async_write(v23, temp_183, v11);
+    int32_t v17 = get_read_ptr(get_compile_time_arg_val(2));
+    int32_t v18 = (int32_t) ((uint32_t) ((int32_t) ((uint32_t) ((int32_t) ((uint32_t) ((int32_t) ((uint32_t) ((int32_t) ((uint32_t) (i16 / (int32_t) ((uint32_t) ((int32_t) ((uint32_t) v9 + (uint32_t) 127) / 128) * (uint32_t) v1)) * (uint32_t) v1)) + (uint32_t) (i16 % ((int32_t) ((uint32_t) ((int32_t) ((uint32_t) v8 + (uint32_t) 31) / 32) - (uint32_t) ((int32_t) ((uint32_t) (i16 / (int32_t) ((uint32_t) ((int32_t) ((uint32_t) v9 + (uint32_t) 127) / 128) * (uint32_t) v1)) * (uint32_t) v1))) < v1 ? (int32_t) ((uint32_t) ((int32_t) ((uint32_t) v8 + (uint32_t) 31) / 32) - (uint32_t) ((int32_t) ((uint32_t) (i16 / (int32_t) ((uint32_t) ((int32_t) ((uint32_t) v9 + (uint32_t) 127) / 128) * (uint32_t) v1)) * (uint32_t) v1))) : v1)))) * (uint32_t) 32) / 32) * (uint32_t) (v7 != (int32_t) ((uint32_t) (v7 / 32) * (uint32_t) 32) & v7 < v5 == false ? (int32_t) ((uint32_t) (v7 / 32) + (uint32_t) v2) : v7 / 32))) + (uint32_t) ((int32_t) ((uint32_t) ((i16 % (int32_t) ((uint32_t) ((int32_t) ((uint32_t) v9 + (uint32_t) 127) / 128) * (uint32_t) v1)) / ((int32_t) ((uint32_t) ((int32_t) ((uint32_t) v8 + (uint32_t) 31) / 32) - (uint32_t) ((int32_t) ((uint32_t) (i16 / (int32_t) ((uint32_t) ((int32_t) ((uint32_t) v9 + (uint32_t) 127) / 128) * (uint32_t) v1)) * (uint32_t) v1))) < v1 ? (int32_t) ((uint32_t) ((int32_t) ((uint32_t) v8 + (uint32_t) 31) / 32) - (uint32_t) ((int32_t) ((uint32_t) (i16 / (int32_t) ((uint32_t) ((int32_t) ((uint32_t) v9 + (uint32_t) 127) / 128) * (uint32_t) v1)) * (uint32_t) v1))) : v1)) * (uint32_t) 128) / 32));
+    uint64_t temp_163 = v13.get_noc_addr(v18, v5);
+    noc_async_write(v17, temp_163, v11);
+    int32_t v19 = (int32_t) ((uint32_t) v17 + (uint32_t) 2048);
+    uint64_t temp_175 = v13.get_noc_addr((int32_t) ((uint32_t) v18 + (uint32_t) v2), v5);
+    noc_async_write(v19, temp_175, v11);
+    int32_t v20 = (int32_t) ((uint32_t) v17 + (uint32_t) 4096);
+    uint64_t temp_187 = v13.get_noc_addr((int32_t) ((uint32_t) v18 + (uint32_t) v1), v5);
+    noc_async_write(v20, temp_187, v11);
+    int32_t v21 = (int32_t) ((uint32_t) v17 + (uint32_t) 6144);
+    uint64_t temp_199 = v13.get_noc_addr((int32_t) ((uint32_t) v18 + (uint32_t) 3), v5);
+    noc_async_write(v21, temp_199, v11);
     {
     DeviceZoneScopedN("noc_async_write_barrier");
     noc_async_write_barrier();
     }
-    cb_pop_front(get_compile_time_arg_val(2), v3);
+    cb_pop_front(get_compile_time_arg_val(2), v4);
   }
   return;
 }
