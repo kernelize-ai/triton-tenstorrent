@@ -93,8 +93,8 @@ void matmul_multi_core(
         N,
         TILE_HW);
 
-    uint32_t BM = 32;  // block M in elements
-    uint32_t BN = 128;  // block N in elements
+    uint32_t BM = 64;  // block M in elements
+    uint32_t BN = 64;  // block N in elements
     uint32_t BK = 64;  // block K in elements
 
     TT_ASSERT(BM % TILE_HEIGHT == 0 && BN % TILE_WIDTH == 0 && BK % TILE_WIDTH == 0,
@@ -358,6 +358,7 @@ void matmul_multi_core(
     for (const auto& [ranges, work_per_core] : work_groups) {
         for (const auto& range : ranges.ranges()) {
             for (const auto& core : range) {
+#if 0
                 uint32_t pid;
                 if (core.x < 4) {
                     uint32_t n = 4*core.y + core.x;      // 0..19
@@ -367,6 +368,7 @@ void matmul_multi_core(
                     pid = 2*n + 1;                       // odd
                 }
                 work_offset = pid;
+#endif 
                 fmt::print("Core {} assigned {} output tiles starting at offset {}\n", core.str(), work_per_core, work_offset);
                 // Set arguments for the reader kernel (data input)
                 tt_metal::SetRuntimeArgs(
