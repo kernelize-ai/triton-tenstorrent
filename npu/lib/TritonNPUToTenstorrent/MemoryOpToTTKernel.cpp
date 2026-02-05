@@ -263,20 +263,26 @@ struct ConvertTensorDescLoadOp
     Value xVirtIndex = ttkernel::MyLogicalXOp::create(rewriter, loc);
     Value yVirtIndex = ttkernel::MyLogicalYOp::create(rewriter, loc);
 
-    // for the A matrix (row-wise multicast) we use our current X coordinate as
-    // the row start and 0 for the column start.
-    Value senderIndexX = xVirtIndex;
+    // in our new 8x5 grid y=4 is the end
+    Value cYEnd = arith::createIndexConstant(loc, rewriter, 4);
+    Value inGroup0 = arith::CmpIOp::create(
+        rewriter, loc, arith::CmpIPredicate::ult, xVirtIndex,
+        arith::createIndexConstant(loc, rewriter, 4));
+
+    Value c0 = arith::createIndexConstant(loc, rewriter, 0);
+    Value senderIndexX =
+        arith::SelectOp::create(rewriter, loc, inGroup0, c0,
+                                arith::createIndexConstant(loc, rewriter, 4));
     Value senderIndexY = arith::createIndexConstant(loc, rewriter, 0);
-    Value mcastEndX = xVirtIndex;
-    // for the mcastEnd coordinate we need to see if we are truncating the last
-    // row
-    Value isLastRow = arith::CmpIOp::create(
-        rewriter, loc, arith::CmpIPredicate::eq, xVirtIndex,
-        arith::createIndexConstant(loc, rewriter, 5));
-    Value crtRowEndIndex = arith::SelectOp::create(
-        rewriter, loc, isLastRow, arith::createIndexConstant(loc, rewriter, 4),
-        arith::createIndexConstant(loc, rewriter, 6));
-    Value mcastEndY = crtRowEndIndex;
+
+    Value mcastStartX = senderIndexX;
+    Value mcastEndX = arith::SelectOp::create(
+        rewriter, loc, inGroup0, arith::createIndexConstant(loc, rewriter, 3),
+        arith::createIndexConstant(loc, rewriter, 7));
+
+    Value mcastStartY = c0;
+    Value mcastEndY = cYEnd;
+
     // 3 CBs for A, B, and output so semaphore index is 3
     // two semaphores - one on the sender core as an acknowledgement counter and
     // one on the receiver cores as a data ready flag
@@ -308,30 +314,37 @@ struct ConvertTensorDescLoadOp
                               ttkernel::ArgType::Semaphore, 1));
       });
     }
-    int32_t numCoresPerRow = 7; // total number of cores in this rectangular
-                                // grid including the sender
-    Value numCoresForMulticastPerRow = arith::SelectOp::create(
-        rewriter, loc, isLastRow, arith::createIndexConstant(loc, rewriter, 5),
-        arith::createIndexConstant(loc, rewriter, numCoresPerRow));
     // End hardcoded params
 
-    scf::IfOp multicastIf;
+    scf::IfOp isSender;
     if (shouldGenerateMulticast) {
-      Value shouldMulticast;
-      if (rowsMulticast) {
-        shouldMulticast = arith::CmpIOp::create(
-            rewriter, loc, arith::CmpIPredicate::eq, yVirtIndex,
-            arith::createIndexConstant(loc, rewriter, 0));
-      } else {
-        shouldMulticast = arith::CmpIOp::create(
-            rewriter, loc, arith::CmpIPredicate::eq, xVirtIndex,
-            arith::createIndexConstant(loc, rewriter, 0));
-      }
-      multicastIf =
-          scf::IfOp::create(rewriter, loc, ValueRange{}, shouldMulticast);
-      scf::IfOp::ensureTerminator(multicastIf.getThenRegion(), rewriter, loc);
-      scf::IfOp::ensureTerminator(multicastIf.getElseRegion(), rewriter, loc);
-      rewriter.setInsertionPointToStart(multicastIf.thenBlock());
+      // sender is (x==0,y==0) for group0 OR (x==4,y==0) for group1
+      Value isTopRow = arith::CmpIOp::create(
+          rewriter, loc, arith::CmpIPredicate::eq, yVirtIndex,
+          arith::createIndexConstant(loc, rewriter, 0));
+      Value isX0 = arith::CmpIOp::create(
+          rewriter, loc, arith::CmpIPredicate::eq, xVirtIndex,
+          arith::createIndexConstant(loc, rewriter, 0));
+      Value isX4 = arith::CmpIOp::create(
+          rewriter, loc, arith::CmpIPredicate::eq, xVirtIndex,
+          arith::createIndexConstant(loc, rewriter, 4));
+
+      Value senderForGroup0 =
+          arith::AndIOp::create(rewriter, loc, inGroup0, isX0);
+      Value senderForGroup1 = arith::AndIOp::create(
+          rewriter, loc,
+          arith::XOrIOp::create(rewriter, loc, inGroup0,
+                                arith::createConstantI1(loc, rewriter, 1)),
+          isX4);
+
+      Value isSenderBool = arith::AndIOp::create(
+          rewriter, loc, isTopRow,
+          arith::OrIOp::create(rewriter, loc, senderForGroup0,
+                               senderForGroup1));
+      isSender = scf::IfOp::create(rewriter, loc, ValueRange{}, isSenderBool);
+      scf::IfOp::ensureTerminator(isSender.getThenRegion(), rewriter, loc);
+      scf::IfOp::ensureTerminator(isSender.getElseRegion(), rewriter, loc);
+      rewriter.setInsertionPointToStart(isSender.thenBlock());
     }
 
     Value trueVal = arith::createConstantI1(loc, rewriter, 1);
@@ -429,16 +442,17 @@ struct ConvertTensorDescLoadOp
     ttkernel::NocAsyncReadBarrierOp::create(rewriter, loc);
 
     // multicast send
+    Value groupSize = arith::createIndexConstant(loc, rewriter, 20);
+    Value numDests = arith::SubIOp::create(
+        rewriter, loc, groupSize, arith::createIndexConstant(loc, rewriter, 1));
     if (shouldGenerateMulticast) {
       // start with a wait and a set on the sender semaphore
       auto l1SenderAddr =
           ttkernel::CastToL1PtrOp::create(rewriter, loc, senderSemaphore);
       // wait for all receiver cores to acknowledge ready
       // should be checking for 6 (or 4 for the last row)
-      ttkernel::NocSemaphoreWaitOp::create(
-          rewriter, loc, l1SenderAddr,
-          arith::SubIOp::create(rewriter, loc, numCoresForMulticastPerRow,
-                                arith::createIndexConstant(loc, rewriter, 1)));
+      ttkernel::NocSemaphoreWaitOp::create(rewriter, loc, l1SenderAddr,
+                                           numDests);
       ttkernel::NocSemaphoreSetOp::create(
           rewriter, loc, l1SenderAddr,
           arith::createIndexConstant(loc, rewriter, 0));
@@ -452,11 +466,8 @@ struct ConvertTensorDescLoadOp
       ttkernel::NocAsyncWriteMulticastOp::create(
           rewriter, loc, l1BaseAddr, mcastAddr,
           arith::createConstantI32(loc, rewriter, cbPageSize * numCbTiles),
-          arith::SubIOp::create(
-              rewriter, loc,
-              arith::IndexCastOp::create(rewriter, loc, rewriter.getI32Type(),
-                                         numCoresForMulticastPerRow),
-              arith::createConstantI32(loc, rewriter, 1)),
+          arith::IndexCastOp::create(rewriter, loc, rewriter.getI32Type(),
+                                     numDests),
           nullptr, nullptr, nullptr);
       ttkernel::NocAsyncWriteBarrierOp::create(rewriter, loc);
 
@@ -478,16 +489,13 @@ struct ConvertTensorDescLoadOp
               receiverSemaphore, nullptr);
       ttkernel::NocSemaphoreSetMulticastOp::create(
           rewriter, loc, receiverSemaphore, mcastCompleteAddr,
-          arith::SubIOp::create(
-              rewriter, loc,
-              arith::IndexCastOp::create(rewriter, loc, rewriter.getI32Type(),
-                                         numCoresForMulticastPerRow),
-              arith::createConstantI32(loc, rewriter, 1)),
+          arith::IndexCastOp::create(rewriter, loc, rewriter.getI32Type(),
+                                     numDests),
           nullptr, nullptr);
     }
 
     if (shouldGenerateMulticast) {
-      rewriter.setInsertionPointToStart(multicastIf.elseBlock());
+      rewriter.setInsertionPointToStart(isSender.elseBlock());
       // receive the multicast
       // first, notify the sender that we are ready to receive
       auto remoteNocAddr = ttkernel::GetNocAddrOp::create(
@@ -509,7 +517,7 @@ struct ConvertTensorDescLoadOp
           arith::createIndexConstant(loc, rewriter, 0));
     }
     if (shouldGenerateMulticast)
-      rewriter.setInsertionPointAfter(multicastIf);
+      rewriter.setInsertionPointAfter(isSender);
 
     rewriter.eraseOp(op);
     return success();
