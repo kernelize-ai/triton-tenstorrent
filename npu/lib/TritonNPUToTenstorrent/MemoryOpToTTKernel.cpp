@@ -265,20 +265,13 @@ struct ConvertTensorDescLoadOp
 
     // in our new 8x5 grid y=4 is the end
     Value cYEnd = arith::createIndexConstant(loc, rewriter, 4);
-    Value inGroup0 = arith::CmpIOp::create(
-        rewriter, loc, arith::CmpIPredicate::ult, xVirtIndex,
-        arith::createIndexConstant(loc, rewriter, 4));
 
     Value c0 = arith::createIndexConstant(loc, rewriter, 0);
-    Value senderIndexX =
-        arith::SelectOp::create(rewriter, loc, inGroup0, c0,
-                                arith::createIndexConstant(loc, rewriter, 4));
+    Value senderIndexX = c0;
     Value senderIndexY = arith::createIndexConstant(loc, rewriter, 0);
 
     Value mcastStartX = senderIndexX;
-    Value mcastEndX = arith::SelectOp::create(
-        rewriter, loc, inGroup0, arith::createIndexConstant(loc, rewriter, 3),
-        arith::createIndexConstant(loc, rewriter, 7));
+    Value mcastEndX = arith::createIndexConstant(loc, rewriter, 7);
 
     Value mcastStartY = c0;
     Value mcastEndY = cYEnd;
@@ -318,29 +311,16 @@ struct ConvertTensorDescLoadOp
 
     scf::IfOp isSender;
     if (shouldGenerateMulticast) {
-      // sender is (x==0,y==0) for group0 OR (x==4,y==0) for group1
+      // sender is (x==0,y==0) always
       Value isTopRow = arith::CmpIOp::create(
           rewriter, loc, arith::CmpIPredicate::eq, yVirtIndex,
           arith::createIndexConstant(loc, rewriter, 0));
       Value isX0 = arith::CmpIOp::create(
           rewriter, loc, arith::CmpIPredicate::eq, xVirtIndex,
           arith::createIndexConstant(loc, rewriter, 0));
-      Value isX4 = arith::CmpIOp::create(
-          rewriter, loc, arith::CmpIPredicate::eq, xVirtIndex,
-          arith::createIndexConstant(loc, rewriter, 4));
 
-      Value senderForGroup0 =
-          arith::AndIOp::create(rewriter, loc, inGroup0, isX0);
-      Value senderForGroup1 = arith::AndIOp::create(
-          rewriter, loc,
-          arith::XOrIOp::create(rewriter, loc, inGroup0,
-                                arith::createConstantI1(loc, rewriter, 1)),
-          isX4);
+      Value isSenderBool = arith::AndIOp::create(rewriter, loc, isTopRow, isX0);
 
-      Value isSenderBool = arith::AndIOp::create(
-          rewriter, loc, isTopRow,
-          arith::OrIOp::create(rewriter, loc, senderForGroup0,
-                               senderForGroup1));
       isSender = scf::IfOp::create(rewriter, loc, ValueRange{}, isSenderBool);
       scf::IfOp::ensureTerminator(isSender.getThenRegion(), rewriter, loc);
       scf::IfOp::ensureTerminator(isSender.getElseRegion(), rewriter, loc);
@@ -442,7 +422,7 @@ struct ConvertTensorDescLoadOp
     ttkernel::NocAsyncReadBarrierOp::create(rewriter, loc);
 
     // multicast send
-    Value groupSize = arith::createIndexConstant(loc, rewriter, 20);
+    Value groupSize = arith::createIndexConstant(loc, rewriter, 40);
     Value numDests = arith::SubIOp::create(
         rewriter, loc, groupSize, arith::createIndexConstant(loc, rewriter, 1));
     if (shouldGenerateMulticast) {
