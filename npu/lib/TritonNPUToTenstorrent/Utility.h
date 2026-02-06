@@ -22,6 +22,7 @@ Type convertTypeToCBType(Type type);
 namespace arith {
 
 Value createConstantI1(Location loc, OpBuilder &rewriter, bool v);
+Value createConstantI8(Location loc, OpBuilder &rewriter, int8_t v);
 Value createConstantI32(Location loc, OpBuilder &rewriter, int32_t v);
 Value createConstantI64(Location loc, OpBuilder &rewriter, int64_t v);
 Value createConstantF16(Location loc, OpBuilder &rewriter, float v);
