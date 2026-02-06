@@ -19,6 +19,11 @@ Value createConstantI1(Location loc, OpBuilder &rewriter, bool v) {
   return ConstantOp::create(rewriter, loc, i1Ty, IntegerAttr::get(i1Ty, v));
 }
 
+Value createConstantI8(Location loc, OpBuilder &rewriter, int8_t v) {
+  auto i8Ty = rewriter.getIntegerType(8);
+  return ConstantOp::create(rewriter, loc, i8Ty, IntegerAttr::get(i8Ty, v));
+}
+
 Value createConstantI32(Location loc, OpBuilder &rewriter, int32_t v) {
   auto i32Ty = rewriter.getIntegerType(32);
   return ConstantOp::create(rewriter, loc, i32Ty, IntegerAttr::get(i32Ty, v));
