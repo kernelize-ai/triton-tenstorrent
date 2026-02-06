@@ -413,7 +413,10 @@ struct ConvertTensorDescLoadOp
 
         // issue the read
         Value nocAddr = ttkernel::InterleavedAddrGenFastGetNocAddrOp::create(
-            rewriter, loc, addrGen, crtIndex, const0, Value());
+            rewriter, loc, addrGen, crtIndex, const0,
+            shouldGenerateMulticast
+                ? nullptr
+                : arith::createConstantI8(loc, rewriter, 0));
         ttkernel::NocAsyncReadOp::create(rewriter, loc, nocAddr, crtL1Address,
                                          pageSize);
       }
@@ -845,7 +848,8 @@ struct ConvertTensorDescStoreOp
 
         // issue the write
         Value nocAddr = ttkernel::InterleavedAddrGenFastGetNocAddrOp::create(
-            rewriter, loc, addrGen, crtIndex, const0, Value());
+            rewriter, loc, addrGen, crtIndex, const0,
+            nullptr /*arith::createConstantI8(loc, rewriter, 1)*/);
 
         ttkernel::NocAsyncWriteOp::create(rewriter, loc, crtL1Address, nocAddr,
                                           pageSize);
