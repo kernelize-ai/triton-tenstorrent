@@ -167,7 +167,7 @@ public:
     // Replace all loads with DMA to SRAM
     // TODO: handle address loads for subsequent loads
     // TODO: preload first N tiles (needs address logic..)
-    f.walk([&](Operation *op) { createReadToSRAM(op, true, allocIdMap); });
+    f.walk([&](Operation *op) { createReadToSRAM(op, false, allocIdMap); });
 
     // Erase all stores and compute ops
     f.walk([&](Operation *op) {
@@ -233,7 +233,7 @@ public:
   void rewriteWriter(triton::FuncOp f) {
     auto allocIdMap = buildAllocMap(f);
 
-    f.walk([&](Operation *op) { createReadToSRAM(op, false, allocIdMap); });
+    f.walk([&](Operation *op) { createReadToSRAM(op, true, allocIdMap); });
 
     // Replace all stores with local stores
     f.walk([&](Operation *op) {
