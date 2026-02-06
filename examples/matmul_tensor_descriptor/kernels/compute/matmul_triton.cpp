@@ -104,10 +104,10 @@ void kernel_main() {
     DeviceZoneScopedN("tile_regs_wait");
     tile_regs_wait();
     }
-    pack_tile<false>(v2, get_compile_time_arg_val(2), v2);
-    pack_tile<false>(v3, get_compile_time_arg_val(2), v3);
-    pack_tile<false>(v4, get_compile_time_arg_val(2), v4);
-    pack_tile<false>(v6, get_compile_time_arg_val(2), v6);
+    pack_tile<true>(v2, get_compile_time_arg_val(2), v2);
+    pack_tile<true>(v3, get_compile_time_arg_val(2), v3);
+    pack_tile<true>(v4, get_compile_time_arg_val(2), v4);
+    pack_tile<true>(v6, get_compile_time_arg_val(2), v6);
     tile_regs_release();
     cb_push_back(get_compile_time_arg_val(2), v5);
   }

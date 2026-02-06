@@ -70,128 +70,90 @@ std::uint32_t convert_logical_y_to_translated(std::uint32_t logical_y) {
 #endif
 
 void kernel_main() {
-  bool v1 = false;
-  size_t v2 = 0;
-  size_t v3 = 1;
-  size_t v4 = 4;
-  size_t v5 = 7;
-  int32_t v6 = 63;
-  int32_t v7 = 0;
-  int32_t v8 = 64;
-  int32_t v9 = 1;
-  int32_t v10 = 4;
-  bool v11 = true;
-  int32_t v12 = 32;
-  int32_t v13 = 2048;
-  int32_t v14 = 4096;
-  int32_t v15 = 6144;
-  int32_t v16 = 8192;
-  size_t v17 = 39;
-  int32_t v18 = 39;
-  int32_t v19 = get_common_arg_val<uint32_t>(v2);
-  int32_t v20 = get_common_arg_val<uint32_t>(2);
-  int32_t v21 = get_common_arg_val<uint32_t>(10);
-  int32_t v22 = get_common_arg_val<uint32_t>(12);
-  int32_t v23 = get_common_arg_val<uint32_t>(30);
-  int32_t v24 = get_common_arg_val<uint32_t>(31);
-  int32_t v25 = get_common_arg_val<uint32_t>(32);
-  DataFormat v26 = get_dataformat(get_compile_time_arg_val(1));
-  int32_t v27 = get_tile_size(get_compile_time_arg_val(1));
-  DataFormat v28 = get_dataformat(get_compile_time_arg_val(0));
-  int32_t v29 = get_tile_size(get_compile_time_arg_val(0));
-  int32_t v30 = get_arg_val<uint32_t>(v3);
-  int32_t v31 = get_arg_val<uint32_t>(v2);
-  int32_t v32 = (int32_t) ((uint32_t) v24 + (uint32_t) v6) / v8;
-  int32_t v33 = v22 != (int32_t) ((uint32_t) (v22 / v12) * (uint32_t) v12) & v22 < v7 == v1 ? (int32_t) ((uint32_t) (v22 / v12) + (uint32_t) v9) : v22 / v12;
-  for (int32_t i34 = v31; i34 < v30; i34 += v9) {
-    int32_t v35 = i34 / v32;
-    int32_t v36 = (int32_t) ((uint32_t) ((int32_t) ((uint32_t) v23 + (uint32_t) v6) / v8) - (uint32_t) v35) < v9 ? (int32_t) ((uint32_t) ((int32_t) ((uint32_t) v23 + (uint32_t) v6) / v8) - (uint32_t) v35) : v9;
-    for (int32_t j37 = v7; j37 < ((int32_t) ((uint32_t) v25 + (uint32_t) v6) / v8); j37 += v9) {
-      int32_t v38 = (int32_t) ((uint32_t) j37 * (uint32_t) v8);
-      cb_reserve_back(get_compile_time_arg_val(0), v10);
-      int32_t v39 = get_semaphore(get_compile_time_arg_val(3));
-      int32_t v40 = get_semaphore(get_compile_time_arg_val(4));
-      if ((ptrdiff_t) get_absolute_logical_y() == (ptrdiff_t) v2 & (ptrdiff_t) get_absolute_logical_x() == (ptrdiff_t) v2) {
-        InterleavedAddrGenFast<true> v41;
-        v41.bank_base_address = v19;
-        v41.page_size = v29;
-        v41.data_format = v28;
-        InterleavedAddrGenFast<true> v42 = v41;
-        int32_t v43 = get_write_ptr(get_compile_time_arg_val(0));
-        int32_t v44 = v20 != (int32_t) ((uint32_t) (v20 / v12) * (uint32_t) v12) & v20 < v7 == v1 ? (int32_t) ((uint32_t) (v20 / v12) + (uint32_t) v9) : v20 / v12;
-        int32_t v45 = (int32_t) ((uint32_t) ((int32_t) ((uint32_t) ((int32_t) ((uint32_t) ((int32_t) ((uint32_t) v35 + (uint32_t) (i34 % v36))) * (uint32_t) v8) / v12) * (uint32_t) v44)) + (uint32_t) (v38 / v12));
-        uint64_t temp_341 = v42.get_noc_addr(v45, v7);
-        noc_async_read(temp_341, v43, v29);
-        int32_t v46 = (int32_t) ((uint32_t) v43 + (uint32_t) v13);
-        int32_t v47 = (int32_t) ((uint32_t) v45 + (uint32_t) v9);
-        uint64_t temp_353 = v42.get_noc_addr(v47, v7);
-        noc_async_read(temp_353, v46, v29);
-        int32_t v48 = (int32_t) ((uint32_t) v43 + (uint32_t) v14);
-        uint64_t temp_365 = v42.get_noc_addr((int32_t) ((uint32_t) v45 + (uint32_t) v44), v7);
-        noc_async_read(temp_365, v48, v29);
-        int32_t v49 = (int32_t) ((uint32_t) v43 + (uint32_t) v15);
-        uint64_t temp_377 = v42.get_noc_addr((int32_t) ((uint32_t) v47 + (uint32_t) v44), v7);
-        noc_async_read(temp_377, v49, v29);
+  size_t v1 = 0;
+  size_t v2 = 1;
+  size_t v3 = 4;
+  size_t v4 = 7;
+  int32_t v5 = 63;
+  int32_t v6 = 0;
+  int32_t v7 = 64;
+  int32_t v8 = 1;
+  int32_t v9 = 4;
+  bool v10 = true;
+  int32_t v11 = 32;
+  int32_t v12 = 8192;
+  size_t v13 = 39;
+  int32_t v14 = 39;
+  int32_t v15 = get_common_arg_val<uint32_t>(v1);
+  int32_t v16 = get_common_arg_val<uint32_t>(2);
+  int32_t v17 = get_common_arg_val<uint32_t>(30);
+  int32_t v18 = get_common_arg_val<uint32_t>(31);
+  int32_t v19 = get_common_arg_val<uint32_t>(32);
+  DataFormat v20 = get_dataformat(get_compile_time_arg_val(0));
+  int32_t v21 = get_tile_size(get_compile_time_arg_val(0));
+  int32_t v22 = get_arg_val<uint32_t>(v2);
+  int32_t v23 = get_arg_val<uint32_t>(v1);
+  for (int32_t i24 = v23; i24 < v22; i24 += v8) {
+    for (int32_t j25 = v6; j25 < ((int32_t) ((uint32_t) v19 + (uint32_t) v5) / v7); j25 += v8) {
+      cb_reserve_back(get_compile_time_arg_val(0), v9);
+      int32_t v26 = get_semaphore(get_compile_time_arg_val(3));
+      int32_t v27 = get_semaphore(get_compile_time_arg_val(4));
+      if ((ptrdiff_t) get_absolute_logical_y() == (ptrdiff_t) v1 & (ptrdiff_t) get_absolute_logical_x() == (ptrdiff_t) v1) {
+        InterleavedAddrGenFast<true> v28;
+        v28.bank_base_address = v15;
+        v28.page_size = v21;
+        v28.data_format = v20;
+        InterleavedAddrGenFast<true> v29 = v28;
+        int32_t v30 = get_write_ptr(get_compile_time_arg_val(0));
+        int32_t v31 = v16 != (int32_t) ((uint32_t) (v16 / v11) * (uint32_t) v11) & v16 < v6 == false ? (int32_t) ((uint32_t) (v16 / v11) + (uint32_t) v8) : v16 / v11;
+        int32_t v32 = (int32_t) ((uint32_t) ((int32_t) ((uint32_t) ((int32_t) ((uint32_t) ((int32_t) ((uint32_t) (i24 / ((int32_t) ((uint32_t) v18 + (uint32_t) v5) / v7)) + (uint32_t) (i24 % ((int32_t) ((uint32_t) ((int32_t) ((uint32_t) v17 + (uint32_t) v5) / v7) - (uint32_t) (i24 / ((int32_t) ((uint32_t) v18 + (uint32_t) v5) / v7))) < v8 ? (int32_t) ((uint32_t) ((int32_t) ((uint32_t) v17 + (uint32_t) v5) / v7) - (uint32_t) (i24 / ((int32_t) ((uint32_t) v18 + (uint32_t) v5) / v7))) : v8)))) * (uint32_t) v7) / v11) * (uint32_t) v31)) + (uint32_t) ((int32_t) ((uint32_t) j25 * (uint32_t) v7) / v11));
+        uint64_t temp_311 = v29.get_noc_addr(v32, v6);
+        noc_async_read(temp_311, v30, v21);
+        int32_t v33 = (int32_t) ((uint32_t) v30 + (uint32_t) 2048);
+        int32_t v34 = (int32_t) ((uint32_t) v32 + (uint32_t) v8);
+        uint64_t temp_323 = v29.get_noc_addr(v34, v6);
+        noc_async_read(temp_323, v33, v21);
+        int32_t v35 = (int32_t) ((uint32_t) v30 + (uint32_t) 4096);
+        uint64_t temp_335 = v29.get_noc_addr((int32_t) ((uint32_t) v32 + (uint32_t) v31), v6);
+        noc_async_read(temp_335, v35, v21);
+        int32_t v36 = (int32_t) ((uint32_t) v30 + (uint32_t) 6144);
+        uint64_t temp_347 = v29.get_noc_addr((int32_t) ((uint32_t) v34 + (uint32_t) v31), v6);
+        noc_async_read(temp_347, v36, v21);
         {
         DeviceZoneScopedN("noc_async_read_barrier");
         noc_async_read_barrier();
         }
-        volatile tt_l1_ptr uint32_t* v50 = reinterpret_cast<volatile tt_l1_ptr uint32_t*>(v39);
-        noc_semaphore_wait(v50, v17);
-        noc_semaphore_set(v50, v2);
-        size_t v51 = experimental::convert_logical_y_to_translated(v4);
-        size_t v52 = experimental::convert_logical_x_to_translated(v5);
-        size_t v53 = experimental::convert_logical_y_to_translated(v2);
-        size_t v54 = experimental::convert_logical_x_to_translated(v2);
-        int64_t v55 = experimental::get_noc_multicast_addr(v54, v53, v52, v51, v43);
-        noc_async_write_multicast(v43, v55, v16, v18);
+        volatile tt_l1_ptr uint32_t* v37 = reinterpret_cast<volatile tt_l1_ptr uint32_t*>(v26);
+        noc_semaphore_wait(v37, v13);
+        noc_semaphore_set(v37, v1);
+        size_t v38 = experimental::convert_logical_y_to_translated(v3);
+        size_t v39 = experimental::convert_logical_x_to_translated(v4);
+        size_t v40 = experimental::convert_logical_y_to_translated(v1);
+        size_t v41 = experimental::convert_logical_x_to_translated(v1);
+        int64_t v42 = experimental::get_noc_multicast_addr(v41, v40, v39, v38, v30);
+        noc_async_write_multicast(v30, v42, v12, v14);
         {
         DeviceZoneScopedN("noc_async_write_barrier");
         noc_async_write_barrier();
         }
-        volatile tt_l1_ptr uint32_t* v56 = reinterpret_cast<volatile tt_l1_ptr uint32_t*>(v40);
-        noc_semaphore_set(v56, v3);
-        size_t v57 = experimental::convert_logical_y_to_translated(v4);
-        size_t v58 = experimental::convert_logical_x_to_translated(v5);
-        size_t v59 = experimental::convert_logical_y_to_translated(v2);
-        size_t v60 = experimental::convert_logical_x_to_translated(v2);
-        int64_t v61 = experimental::get_noc_multicast_addr(v60, v59, v58, v57, v40);
-        noc_semaphore_set_multicast(v40, v61, v18);
+        volatile tt_l1_ptr uint32_t* v43 = reinterpret_cast<volatile tt_l1_ptr uint32_t*>(v27);
+        noc_semaphore_set(v43, v2);
+        size_t v44 = experimental::convert_logical_y_to_translated(v3);
+        size_t v45 = experimental::convert_logical_x_to_translated(v4);
+        size_t v46 = experimental::convert_logical_y_to_translated(v1);
+        size_t v47 = experimental::convert_logical_x_to_translated(v1);
+        int64_t v48 = experimental::get_noc_multicast_addr(v47, v46, v45, v44, v27);
+        noc_semaphore_set_multicast(v27, v48, v14);
       } else {
-        size_t v62 = experimental::convert_logical_y_to_translated(v2);
-        size_t v63 = experimental::convert_logical_x_to_translated(v2);
-        int64_t v64 = get_noc_addr(v63, v62, v39);
-        noc_semaphore_inc(v64, v3);
-        volatile tt_l1_ptr uint32_t* v65 = reinterpret_cast<volatile tt_l1_ptr uint32_t*>(v40);
-        noc_semaphore_wait(v65, v3);
-        noc_semaphore_set(v65, v2);
+        size_t v49 = experimental::convert_logical_y_to_translated(v1);
+        size_t v50 = experimental::convert_logical_x_to_translated(v1);
+        int64_t v51 = get_noc_addr(v50, v49, v26);
+        noc_semaphore_inc(v51, v2);
+        volatile tt_l1_ptr uint32_t* v52 = reinterpret_cast<volatile tt_l1_ptr uint32_t*>(v27);
+        noc_semaphore_wait(v52, v2);
+        noc_semaphore_set(v52, v1);
       }
-      cb_push_back(get_compile_time_arg_val(0), v10);
-      cb_reserve_back(get_compile_time_arg_val(1), v10);
-      InterleavedAddrGenFast<true> v66;
-      v66.bank_base_address = v21;
-      v66.page_size = v27;
-      v66.data_format = v26;
-      InterleavedAddrGenFast<true> v67 = v66;
-      int32_t v68 = get_write_ptr(get_compile_time_arg_val(1));
-      int32_t v69 = (int32_t) ((uint32_t) ((int32_t) ((uint32_t) (v38 / v12) * (uint32_t) v33)) + (uint32_t) ((int32_t) ((uint32_t) ((i34 % v32) / v36) * (uint32_t) v8) / v12));
-      uint64_t temp_291 = v67.get_noc_addr(v69, v7);
-      noc_async_read(temp_291, v68, v27);
-      int32_t v70 = (int32_t) ((uint32_t) v68 + (uint32_t) v13);
-      int32_t v71 = (int32_t) ((uint32_t) v69 + (uint32_t) v9);
-      uint64_t temp_303 = v67.get_noc_addr(v71, v7);
-      noc_async_read(temp_303, v70, v27);
-      int32_t v72 = (int32_t) ((uint32_t) v68 + (uint32_t) v14);
-      uint64_t temp_315 = v67.get_noc_addr((int32_t) ((uint32_t) v69 + (uint32_t) v33), v7);
-      noc_async_read(temp_315, v72, v27);
-      int32_t v73 = (int32_t) ((uint32_t) v68 + (uint32_t) v15);
-      uint64_t temp_327 = v67.get_noc_addr((int32_t) ((uint32_t) v71 + (uint32_t) v33), v7);
-      noc_async_read(temp_327, v73, v27);
-      {
-      DeviceZoneScopedN("noc_async_read_barrier");
-      noc_async_read_barrier();
-      }
-      cb_push_back(get_compile_time_arg_val(1), v10);
+      cb_push_back(get_compile_time_arg_val(0), v9);
     }
   }
   return;
