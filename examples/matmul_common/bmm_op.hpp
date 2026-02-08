@@ -15,8 +15,6 @@
 
 #include <tt-metalium/work_split.hpp>
 
-using CoreCoord = tt_xy_pair;
-
 inline std::vector<uint32_t> get_prime_factors(uint32_t n) {
     uint32_t i = 2;
 
@@ -221,9 +219,9 @@ inline std::tuple<uint32_t, uint32_t, uint32_t, uint32_t> get_large_matmul_param
     return {0, 0, 0, 0};
 }
 
-inline CoreCoord get_core_range(
+inline tt::tt_metal::CoreCoord get_core_range(
     uint32_t num_blocks_rows, uint32_t num_blocks_cols, uint32_t max_num_rows, uint32_t max_num_cols) {
-    CoreCoord core_range(0, 0);
+    tt::tt_metal::CoreCoord core_range(0, 0);
     if (!(num_blocks_rows == 1 && num_blocks_cols == 1) && num_blocks_rows <= max_num_rows &&
         num_blocks_cols <= max_num_cols) {
         core_range.x = num_blocks_cols;

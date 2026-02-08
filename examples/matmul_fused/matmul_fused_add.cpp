@@ -276,7 +276,7 @@ void matmul_multi_core(
     fmt::print("Matrix strides: AM={}, BK={}, CM={}\n", stride_AM, stride_BK, stride_CM);
 
     // Set common runtime args per kernel
-    auto common_args = std::vector<uint32_t>{src0_dram_buffer->address(),  // Address of matrix A in DRAM
+    auto common_args = std::vector<uint32_t>{(uint32_t)src0_dram_buffer->address(),  // Address of matrix A in DRAM
                         M, // shape[0]
                         K, // shape[1]
                         stride_AM, // strides[0]
@@ -286,7 +286,7 @@ void matmul_multi_core(
                         K, // shape[1]
                         stride_AM, // strides[0]
                         1, // strides[1]
-                        src1_dram_buffer->address(),  // Address of matrix B in DRAM
+                        (uint32_t)src1_dram_buffer->address(),  // Address of matrix B in DRAM
                         K, // shape[0]
                         N, // shape[1]
                         stride_BK, // strides[0]
@@ -296,7 +296,7 @@ void matmul_multi_core(
                         N, // shape[1]
                         stride_BK, // strides[0]
                         1, // strides[1]
-                        dst_dram_buffer->address(),
+                        (uint32_t)dst_dram_buffer->address(),
                         M, // shape[0]
                         N, // shape[1]
                         stride_CM, // strides[0]
@@ -306,7 +306,7 @@ void matmul_multi_core(
                         N, // shape[1]
                         stride_CM, // strides[0]
                         1, // strides[1]
-                        bias_dram_buffer->address(),
+                        (uint32_t)bias_dram_buffer->address(),
                         M, // shape[0]
                         N, // shape[1]
                         stride_CM, // strides[0]
