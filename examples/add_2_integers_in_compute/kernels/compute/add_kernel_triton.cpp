@@ -35,6 +35,7 @@
 #include "compute_kernel_api/eltwise_unary/relu.h"
 #include "compute_kernel_api/eltwise_unary/binop_with_scalar.h"
 #include "compute_kernel_api/eltwise_unary/where.h"
+#include "compute_kernel_api/eltwise_unary/clamp.h"
 inline uint32_t float_to_bits(float f) { uint32_t r; __builtin_memcpy(&r, &f, sizeof(r)); return r; }
 #ifndef INFINITY
 #define INFINITY __builtin_inff()
@@ -75,7 +76,7 @@ void kernel_main() {
     DeviceZoneScopedN("tile_regs_wait");
     tile_regs_wait();
     }
-    pack_tile<false>(v4, get_compile_time_arg_val(2), v4);
+    pack_tile<true>(v4, get_compile_time_arg_val(2), v4);
     tile_regs_release();
     cb_push_back(get_compile_time_arg_val(2), v3);
   }
