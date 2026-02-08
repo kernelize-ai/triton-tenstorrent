@@ -12,9 +12,9 @@
 #include "llvm/IR/Module.h"
 #include "llvm/TargetParser/Host.h"
 
-// TODO: conditionally include based on if we're building with tenstorrent
-// support
 #include "ttmlir/Conversion/TTKernelToEmitC/TTKernelToEmitC.h"
+#include "ttmlir/Dialect/TTCore/IR/TTCoreOpsTypes.h"
+#include "ttmlir/Dialect/TTCore/Transforms/Passes.h"
 #include "ttmlir/Dialect/TTKernel/IR/TTKernel.h"
 #include "ttmlir/Dialect/TTKernel/Transforms/Passes.h"
 #include "ttmlir/Target/TTKernel/TTKernelToCpp.h"
@@ -103,6 +103,18 @@ void init_triton_npu_passes_tenstorrent(py::module &&m) {
   m.def("add_form_expressions_pass", [](mlir::PassManager &pm) {
     pm.addPass(mlir::emitc::createFormExpressionsPass());
   });
+
+  // tt-core
+  m.def(
+      "add_ttcore_register_device_pass",
+      [](mlir::PassManager &pm, const std::string &systemDescPath) {
+        mlir::tt::ttcore::TTCoreRegisterDevicePassOptions registerDeviceOptions;
+        if (!systemDescPath.empty()) {
+          registerDeviceOptions.systemDescPath = systemDescPath;
+        }
+        pm.addPass(mlir::tt::ttcore::createTTCoreRegisterDevicePass(
+            registerDeviceOptions));
+      });
 }
 
 void init_triton_npu_passes_common(py::module &&m) {

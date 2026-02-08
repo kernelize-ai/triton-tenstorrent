@@ -244,6 +244,8 @@ class CPUBackend(BaseBackend):
 
         cpu.passes.common.add_arith_int_range_opts(pm)
         cpu.passes.common.add_arith_expand(pm)
+        sys_desc_path = os.getenv("TT_SYSTEM_DESC_PATH", "")
+        cpu.passes.tenstorrent.add_ttcore_register_device_pass(pm, sys_desc_path)
         cpu.passes.tenstorrent.add_ttkernel_to_emitc(pm)
         passes.common.add_canonicalizer(pm)
 
