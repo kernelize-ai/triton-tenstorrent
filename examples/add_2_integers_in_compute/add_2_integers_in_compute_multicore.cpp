@@ -46,9 +46,9 @@ int main() {
     // simultaneously.
     Program program = CreateProgram();
 
-    constexpr CoreCoord start_core = {0, 0};
-    constexpr CoreCoord end_core = {6, 6};
-    CoreRange cores(start_core, end_core);
+    constexpr tt::tt_metal::CoreCoord start_core = {0, 0};
+    constexpr tt::tt_metal::CoreCoord end_core = {6, 6};
+    tt::tt_metal::CoreRange cores(start_core, end_core);
     uint32_t num_cores = cores.size();
     uint32_t blocks_per_core = 32;
     fmt::print("Using {} cores for computation.\n", num_cores);

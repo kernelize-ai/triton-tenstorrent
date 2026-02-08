@@ -247,9 +247,9 @@ void matmul_multi_core(
 
     // Set common runtime args per kernel
     auto common_args = std::vector<uint32_t>{
-        src0_dram_buffer->address(),  // Address of matrix A in DRAM
-        src1_dram_buffer->address(),  // Address of matrix B in DRAM
-        dst_dram_buffer->address(),
+        (uint32_t)src0_dram_buffer->address(),  // Address of matrix A in DRAM
+        (uint32_t)src1_dram_buffer->address(),  // Address of matrix B in DRAM
+        (uint32_t)dst_dram_buffer->address(),
         M,                           
         N,                           
         K,                           
