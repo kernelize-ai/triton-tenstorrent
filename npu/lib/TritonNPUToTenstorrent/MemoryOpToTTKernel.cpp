@@ -447,9 +447,12 @@ struct ConvertLocalStoreOp : public OpConversionPattern<gpu::LocalStoreOp> {
       for (unsigned i = destIndexOffset;
            i < destIndexOffset + dstCBType.getNumTiles(); ++i) {
         // assume the output CB is always 0-indexed
-        ttkernel::PackTileOp::create(
-            rewriter, loc, arith::createConstantI32(loc, rewriter, i), dst,
-            arith::createConstantI32(loc, rewriter, i - destIndexOffset), true);
+        Value destRegisterIndex = arith::createConstantI32(loc, rewriter, i);
+        Value cbOutputBufferIndex =
+            arith::createConstantI32(loc, rewriter, i - destIndexOffset);
+        ttkernel::PackTileOp::create(rewriter, loc, destRegisterIndex, dst,
+                                     cbOutputBufferIndex,
+                                     /*out_of_order=*/true);
       }
 
       ttkernel::CBPushBackOp::create(rewriter, loc, dst, numPages);
