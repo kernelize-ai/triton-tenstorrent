@@ -70,7 +70,6 @@ ALWI void matmul_block(uint32_t in0_cb_id, uint32_t in1_cb_id,
 
 #endif
 
-namespace NAMESPACE {
 void kernel_main() {
   size_t v1 = 0;
   int32_t v2 = 0;
@@ -112,6 +111,4 @@ void kernel_main() {
     cb_push_back(get_compile_time_arg_val(2), v5);
   }
   return;
-}
-void MAIN { kernel_main(); }
 }
