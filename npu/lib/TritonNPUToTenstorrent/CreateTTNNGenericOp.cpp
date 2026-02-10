@@ -5,6 +5,7 @@
 #include "ttmlir/Dialect/TTCore/IR/Utils.h"
 #pragma GCC diagnostic pop
 #include "ttmlir/Dialect/TTIR/IR/TTIROps.h"
+#include "ttmlir/Dialect/TTKernel/IR/TTKernel.h"
 #include "ttmlir/Dialect/TTKernel/IR/TTKernelOps.h"
 #include "ttmlir/Dialect/TTMetal/IR/TTMetalOps.h"
 #include "ttmlir/Dialect/TTNN/IR/TTNN.h"
@@ -113,11 +114,10 @@ populateBlockStartEndArgs(Builder &b,
       for (unsigned c = start.getY(); c <= end.getY(); ++c) {
         auto coord = ttnn::CoreCoordAttr::get(ctx, r, c);
         uint32_t pid = crtId;
-        // TODO: fix the printer so quotes are not required
-        Attribute blockStartAttr = ttnn::KernelNamedArgAttr::get(
-            ctx, std::string("\"block_start\""), pid);
-        Attribute blockEndAttr = ttnn::KernelNamedArgAttr::get(
-            ctx, std::string("\"block_end\""), pid + tilesPerCore);
+        Attribute blockStartAttr = ttnn::KernelArgNamedArgAttr::get(
+            ctx, StringAttr::get(ctx, "block_start"), pid);
+        Attribute blockEndAttr = ttnn::KernelArgNamedArgAttr::get(
+            ctx, StringAttr::get(ctx, "block_end"), pid + tilesPerCore);
         crtId += tilesPerCore;
 
         auto rt = ttnn::CoreRuntimeArgsAttr::get(
@@ -329,15 +329,38 @@ static constexpr int32_t stride_CM = N;
 // 27: N (C.shape[1])
 // 28: stride_CM (C.strides[0])
 // 29: 1 (C.strides[1])
-// 30: M
-// 31: N
-// 32: K
+// #ifdef BIAS
+// 30: bias ptr
+// 31: M (bias.shape[0])
+// 32: N (bias.shape[1])
+// 33: stride_CM (bias.strides[0])
+// 34: 1 (bias.strides[1])
+// 35: 0 (bias.has_padding)
+// 36: M (bias.shape[0])
+// 37: N (bias.shape[1])
+// 38: stride_CM (bias.strides[0])
+// 39: 1
+// #endif
+// 40: M
+// 41: N
+// 42: K
+#define BIAS
+#ifdef BIAS
+static constexpr int32_t commonRuntimeArgs[] = {
+    0, M, K, stride_AM, 1, 0, M, K, stride_AM, 1, 0, K, N, stride_BK, 1,
+    0, K, N, stride_BK, 1, 0, M, N, stride_CM, 1, 0, M, N, stride_CM, 1,
+    0, M, N, stride_CM, 1, 0, M, N, stride_CM, 1, // for bias term
+    M, N, K};
+static const std::set<int32_t> commonRuntimeArgsPtrIndices{
+    0, 10, 20, 30}; // TODO: read from argspec
+#else
 static constexpr int32_t commonRuntimeArgs[] = {
     0, M, K, stride_AM, 1, 0, M, K, stride_AM, 1, 0, K, N, stride_BK, 1,
     0, K, N, stride_BK, 1, 0, M, N, stride_CM, 1, 0, M, N, stride_CM, 1,
     M, N, K};
 static const std::set<int32_t> commonRuntimeArgsPtrIndices{
     0, 10, 20}; // TODO: read from argspec
+#endif
 
 void replaceNonPtrCommonRuntimeArgs(func::FuncOp f) {
   unsigned commonRuntimeArgsIndex = 0;
@@ -410,7 +433,12 @@ void createMainFunc(MLIRContext *context, OpBuilder &builder,
       RankedTensorType::get({M, N}, aElementType.getElementType(), cLayout);
   llvm::errs() << "cType = " << cType << "\n";
 
-  auto funcType = builder.getFunctionType({aType, bType}, {cType});
+  SmallVector<Type> kernelArgTypes{aType, bType};
+#ifdef BIAS
+  // bias matches type of dot output
+  kernelArgTypes.push_back(cType);
+#endif
+  auto funcType = builder.getFunctionType(kernelArgTypes, {cType});
   auto mainFunc =
       builder.create<func::FuncOp>(builder.getUnknownLoc(), "main", funcType);
   mainFunc.setPublic(); // does this do anything?
@@ -439,12 +467,20 @@ void createMainFunc(MLIRContext *context, OpBuilder &builder,
   ios.push_back(entryBlock->getArgument(0));
   ios.push_back(entryBlock->getArgument(1));
   ios.push_back(cTensor);
+#ifdef BIAS
+  ios.push_back(entryBlock->getArgument(2)); // bias tensor argument
+#endif
 
   ttnn::GenericOp::create(builder, builder.getUnknownLoc(), ios, program,
                           ttnn::MemoryConfigAttr());
 
-  ttnn::DeallocateOp::create(builder, builder.getUnknownLoc(), ios[0]);
-  ttnn::DeallocateOp::create(builder, builder.getUnknownLoc(), ios[1]);
+  for (auto [idx, val] : llvm::enumerate(ios)) {
+    if (idx == 2) {
+      // cTensor is returned so we don't deallocate it here
+      continue;
+    }
+    ttnn::DeallocateOp::create(builder, builder.getUnknownLoc(), val);
+  }
 
   func::ReturnOp::create(builder, builder.getUnknownLoc(), ValueRange{cTensor});
 }
@@ -643,7 +679,6 @@ struct CreateTTNNGenericOp
     SmallVector<mlir::Attribute> kernelDescriptors = createKernelDescriptors(
         builder, kernels, allCores, kernelRTArgs, symbolTable, mathFidelity);
 
-    // semaphores not yet used
     SmallVector<ttnn::KernelSemaphoreAttr> semaphoreDescriptors =
         createSemaphoreDescriptors(builder, kernels, allCores, symbolTable);
 
