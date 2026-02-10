@@ -1,5 +1,6 @@
 #include "npu/include/Dialect/TritonTenstorrent/Transforms/Passes.h"
 
+#include "npu/include/Dialect/TritonTenstorrent/IR/Attributes.h"
 #include "npu/include/Dialect/TritonTenstorrent/Transforms/Utility.h"
 
 #include "mlir/IR/BuiltinAttributes.h"
@@ -127,7 +128,7 @@ public:
   }
 
   void
-  createReadToSRAM(Operation *op, bool skipOdd,
+  createReadToSRAM(Operation *op, bool isWriter,
                    DenseMap<int64_t, triton::gpu::LocalAllocOp> &allocIdMap) {
     if (!isLoadLike(op))
       return;
@@ -141,9 +142,14 @@ public:
 
     auto alloc = it->second;
 
-    auto alloc_idx = getAllocIdx(alloc);
-    bool isOdd = *alloc_idx & 0x1;
-    if (skipOdd == isOdd)
+    auto tensorTy = cast<RankedTensorType>(getLoadLikeResultType(op));
+    auto tiledDotOperandEncodingAttr =
+        dyn_cast<npu::tt::TiledDotOperandEncodingAttr>(tensorTy.getEncoding());
+    const bool isMulticast = tiledDotOperandEncodingAttr &&
+                             tiledDotOperandEncodingAttr.getOpIdx() == 0;
+    // if we have a multicast load, put the load on the writer core. otherwise
+    // use the reader core
+    if (isMulticast != isWriter)
       return;
 
     OpBuilder b(op);
