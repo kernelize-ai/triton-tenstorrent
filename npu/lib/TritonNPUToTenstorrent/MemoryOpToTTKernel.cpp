@@ -276,27 +276,34 @@ struct ConvertTensorDescLoadOp
     Value mcastStartY = c0;
     Value mcastEndY = cYEnd;
 
-    // 3 CBs for A, B, and output so semaphore index is 3
     // two semaphores - one on the sender core as an acknowledgement counter and
     // one on the receiver cores as a data ready flag
+    auto parentFuncOp = op->getParentOfType<func::FuncOp>();
+    assert(parentFuncOp && "expected parent func op");
+    // auto [rtArgs, ctArgs] =
+    // ttkernel::ArgSpecAttr::getOrCreateArgSpec(parentFuncOp);
+    auto argSpec = parentFuncOp->getAttrOfType<ttkernel::ArgSpecAttr>(
+        ttkernel::ArgSpecAttr::name);
+    SmallVector<ttkernel::ArgAttr> ctArgs;
+    if (argSpec)
+      ctArgs = llvm::to_vector(argSpec.getCtArgs());
+
     Value senderSemaphore, receiverSemaphore;
     const bool shouldGenerateMulticast = rowsMulticast;
     if (shouldGenerateMulticast) {
-      int32_t senderSemaphoreCompileTimeArgsIndex = 3;
+      int32_t senderSemaphoreCompileTimeArgsIndex = ctArgs.size();
       auto senderSemaphoreIndex = ttkernel::GetCompileArgValOp::create(
           rewriter, loc, rewriter.getIntegerType(32),
           senderSemaphoreCompileTimeArgsIndex);
       senderSemaphore =
           ttkernel::GetSemaphoreOp::create(rewriter, loc, senderSemaphoreIndex);
-      int32_t receiverSemaphoreCompileTimeArgsIndex = 4;
+      int32_t receiverSemaphoreCompileTimeArgsIndex = ctArgs.size() + 1;
       auto receiverSemaphoreIndex = ttkernel::GetCompileArgValOp::create(
           rewriter, loc, rewriter.getIntegerType(32),
           receiverSemaphoreCompileTimeArgsIndex);
       receiverSemaphore = ttkernel::GetSemaphoreOp::create(
           rewriter, loc, receiverSemaphoreIndex);
 
-      auto parentFuncOp = op->getParentOfType<func::FuncOp>();
-      assert(parentFuncOp && "expected parent func op");
       // TODO: should this be in place?
       rewriter.modifyOpInPlace(parentFuncOp, [&]() {
         ttkernel::ArgSpecAttr::appendCompileTimeArg(
