@@ -96,7 +96,7 @@ void matmul_multi_core(
         N,
         TILE_HW);
 
-    uint32_t BM = 32;  // block M in elements
+    uint32_t BM = 64;  // block M in elements
     uint32_t BN = 64;  // block N in elements
     uint32_t BK = 64;  // block K in elements
 
@@ -136,8 +136,31 @@ void matmul_multi_core(
     // - Secondary group: handles fewer tiles per core
     // The secondary group is empty if the work can be evenly distributed across all cores. This
     // approach minimizes workload imbalance between cores for optimal performance.
+#if 1
+    uint32_t num_cores = 40;
+    CoreCoord start_core = {0, 0};
+    // CoreCoord core_range = {8, 5};
+    uint32_t start_core_x = start_core.x;
+    uint32_t start_core_y = start_core.y;
+    uint32_t num_cores_x = 8;
+    uint32_t num_cores_y = 5;
+    // this defines the first rectangle. build up the core range by adding rectangles    
+    std::vector<CoreRange> ranges;
+    for (uint32_t i = 0; i < num_cores_x; i++) {
+        ranges.emplace_back(
+            CoreCoord((std::size_t)start_core_x + i, (std::size_t)start_core_y),
+            CoreCoord((std::size_t)start_core_x + i, (std::size_t)start_core_y + num_cores_y - 1));
+    }
+    CoreRangeSet all_cores;  
+    all_cores = all_cores.merge(ranges);
+    auto core_group_1 = all_cores;
+    CoreRangeSet core_group_2; // empty
+    uint32_t work_per_core1 = num_output_blocks_total / num_cores;
+    uint32_t work_per_core2 = 0;
+#else
     auto [num_cores, all_cores, core_group_1, core_group_2, work_per_core1, work_per_core2] =
         split_work_to_cores(core_grid, num_output_blocks_total);
+#endif
     fmt::print(
         "Distributing {} output tiles across {} cores: {} cores ({}) x {} tiles/core + {} cores ({}) x {} tiles/core\n",
         num_output_blocks_total,
@@ -232,10 +255,14 @@ void matmul_multi_core(
     // All kernels run across all cores to enable parallel execution
     MathFidelity math_fidelity = MathFidelity::HiFi4;  // High fidelity math for accurate results
     
+    auto in0_mcast_sender_semaphore_id = tt_metal::CreateSemaphore(program, all_cores, 0);
+    auto in0_mcast_receiver_semaphore_id = tt_metal::CreateSemaphore(program, all_cores, 0);
     std::vector<uint32_t> compile_args = {static_cast<uint32_t>(CBIndex::c_0),
                                         static_cast<uint32_t>(CBIndex::c_1),
                                         static_cast<uint32_t>(CBIndex::c_2),
-                                        static_cast<uint32_t>(CBIndex::c_4)};
+                                        static_cast<uint32_t>(CBIndex::c_4), 
+                                        in0_mcast_sender_semaphore_id,
+                                        in0_mcast_receiver_semaphore_id};
     
     auto reader_id = tt_metal::CreateKernel(
         program,
@@ -275,6 +302,7 @@ void matmul_multi_core(
     uint32_t stride_CM = N;
     fmt::print("Matrix strides: AM={}, BK={}, CM={}\n", stride_AM, stride_BK, stride_CM);
 
+    // TODO: Update me! add semaphores 
     // Set common runtime args per kernel
     auto common_args = std::vector<uint32_t>{(uint32_t)src0_dram_buffer->address(),  // Address of matrix A in DRAM
                         M, // shape[0]
