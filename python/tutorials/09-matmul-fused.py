@@ -77,7 +77,7 @@ def matmul_get_configs(pre_hook=None):
                       num_warps=w, pre_hook=pre_hook)
         for BM in [64]
         for BN in [64]
-        for BK in [64]
+        for BK in [256]
         for s in ([1])
         for w in [1]
     ]
@@ -89,7 +89,7 @@ def matmul_tma_set_block_size_hook(nargs):
     BLOCK_N = nargs["BLOCK_SIZE_N"]
     BLOCK_K = nargs["BLOCK_SIZE_K"]
     nargs["a_desc"].block_shape = [BLOCK_M, BLOCK_K]
-    nargs["b_desc"].block_shape = [BLOCK_N, BLOCK_K]
+    nargs["b_desc"].block_shape = [BLOCK_K, BLOCK_N]
     if EPILOGUE_SUBTILE:
         nargs["c_desc"].block_shape = [BLOCK_M, BLOCK_N // 2]
     else:
