@@ -272,7 +272,7 @@ module attributes {"ttg.num-ctas" = 1 : i32, "ttg.num-warps" = 1 : i32, ttg.targ
         // CHECK: ttkernel.cb_reserve_back(%[[C_CB]], %[[c1_i32]])
         // CHECK: ttkernel.tile_regs_commit()
         // CHECK: ttkernel.tile_regs_wait()
-        // CHECK: ttkernel.pack_tile(%[[c0_i32]], %[[C_CB]], %[[c0_i32]], false)
+        // CHECK: ttkernel.pack_tile(%[[c0_i32]], %[[C_CB]], %[[c0_i32]], true)
         // CHECK: ttkernel.tile_regs_release()
         // CHECK: ttkernel.cb_push_back(%[[C_CB]], %[[c1_i32]])
         // CHECK: return
