@@ -289,7 +289,7 @@ struct ConvertTensorDescLoadOp
       ctArgs = llvm::to_vector(argSpec.getCtArgs());
 
     Value senderSemaphore, receiverSemaphore;
-    const bool shouldGenerateMulticast = rowsMulticast;
+    const bool shouldGenerateMulticast = dotOpEncoding && rowsMulticast;
     if (shouldGenerateMulticast) {
       int32_t senderSemaphoreCompileTimeArgsIndex = ctArgs.size();
       auto senderSemaphoreIndex = ttkernel::GetCompileArgValOp::create(
