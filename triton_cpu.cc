@@ -54,6 +54,10 @@ void init_triton_npu_passes_tenstorrent(py::module &&m) {
   m.def("add_core_specialize", [](mlir::PassManager &pm) {
     pm.addPass(mlir::triton::npu::createCoreSpecialize());
   });
+  m.def("add_materialize_multicasts", [](mlir::PassManager &pm) {
+    pm.addPass(
+        mlir::triton::npu::createTritonTenstorrentMaterializeMulticasts());
+  });
   m.def("add_register_allocation", [](mlir::PassManager &pm) {
     pm.addPass(mlir::triton::npu::createTritonTenstorrentRegAlloc());
   });
