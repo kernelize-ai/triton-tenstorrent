@@ -6,6 +6,7 @@ include "triton/Dialect/Triton/IR/TritonTypes.td"
 include "triton/Dialect/Triton/IR/TritonAttrDefs.td"
 include "triton/Dialect/Triton/IR/TritonInterfaces.td"
 
+include "mlir/Interfaces/ControlFlowInterfaces.td" // ReturnLike
 include "mlir/Interfaces/SideEffectInterfaces.td"  // Pure
 
 class TTTS_Op<string mnemonic, list<Trait> traits = []> :
@@ -33,6 +34,32 @@ def TTTS_BinaryComputeOp : TTTS_Op<"binary_compute", [Pure, SameOperandsAndResul
   let assemblyFormat = [{
     `[` $opcode `]` $lhs `,` $rhs attr-dict `:` functional-type(operands, results)
   }];
+}
+
+def TTTS_MulticastOp : TTTS_Op<"multicast", [SingleBlock]> {
+  let summary = "Evaluate region on root and multicast the result to scope";
+
+  let description = [{
+    TODO
+  }];
+
+  // arguments?
+
+  let results = (outs AnyType:$result);
+
+  let regions = (region SizedRegion<1>:$body);
+
+  let assemblyFormat = [{
+    $body attr-dict `:` functional-type(operands, results)
+  }];
+
+  // TODO: verifier
+}
+
+def TTTS_YieldOp : TTTS_Op<"yield", [HasParent<"MulticastOp">, Pure, Terminator, ReturnLike]> {
+  let summary = "yield from the default region of `ttts.multicast`";
+  let arguments = (ins Variadic<AnyType>:$values);
+  let assemblyFormat = "($values^)? attr-dict (`:` type($values)^)?";
 }
 
 #endif
