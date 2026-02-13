@@ -38,6 +38,15 @@ def TritonTenstorrentRemoveDotLoadLayoutConversions : Pass<"tritontenstorrent-re
                             ];
 }
 
+def TritonTenstorrentMaterializeMulticasts : Pass<"tritontenstorrent-materialize-multicasts", "mlir::ModuleOp"> {
+    let summary = "Materialize multicasts in Tenstorrent kernels";
+    let description = [{
+        TODO
+    }];
+
+    let dependentDialects = ["mlir::triton::npu::tt::TritonTenstorrentDialect", "mlir::triton::TritonDialect"];
+}
+
 def CoreSpecialize : Pass<"core-specialize", "mlir::ModuleOp"> {
   let summary = "Convert TritonNPU to LLVM";
   let description = [{
