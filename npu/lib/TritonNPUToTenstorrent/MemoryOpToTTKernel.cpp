@@ -894,6 +894,114 @@ struct ConvertLocalAllocOp : public OpConversionPattern<gpu::LocalAllocOp> {
   }
 };
 
+struct ConvertMulticastOp : public OpConversionPattern<npu::tt::MulticastOp> {
+  using OpConversionPattern<npu::tt::MulticastOp>::OpConversionPattern;
+
+  LogicalResult
+  matchAndRewrite(npu::tt::MulticastOp multicastOp, OpAdaptor adaptor,
+                  ConversionPatternRewriter &rewriter) const override {
+    MLIRContext *context = getContext();
+    Location loc = multicastOp.getLoc();
+
+    // replace the multicast op with an if/then/else to multicast the current op
+    // region on the sender and receive on the receivers.
+    auto multicastType = cast<RankedTensorType>(multicastOp.getType());
+    auto dotOpEncoding =
+        cast<npu::tt::TiledDotOperandEncodingAttr>(multicastType.getEncoding());
+
+    const bool rowsMulticast =
+        !(dotOpEncoding && (dotOpEncoding.getOpIdx() == 1));
+    assert(rowsMulticast && "only rows multicast is supported");
+
+    // convert logical (virtual) indices to translated (physical) indices
+    auto convertVirtualToPhysicalIndex = [&](Value virtIndex,
+                                             bool isX) -> Value {
+      if (isX)
+        return ttkernel::ConvertLogicalXToTranslatedOp::create(
+            rewriter, loc, rewriter.getIndexType(), virtIndex);
+      return ttkernel::ConvertLogicalYToTranslatedOp::create(
+          rewriter, loc, rewriter.getIndexType(), virtIndex);
+    };
+
+    Value xVirtIndex = ttkernel::MyLogicalXOp::create(rewriter, loc);
+    Value yVirtIndex = ttkernel::MyLogicalYOp::create(rewriter, loc);
+
+    // in our new 8x5 grid y=4 is the end
+    Value cYEnd = arith::createIndexConstant(loc, rewriter, 4);
+
+    Value c0 = arith::createIndexConstant(loc, rewriter, 0);
+    Value senderIndexX = c0;
+    Value senderIndexY = arith::createIndexConstant(loc, rewriter, 0);
+
+    Value mcastStartX = senderIndexX;
+    Value mcastEndX = arith::createIndexConstant(loc, rewriter, 7);
+
+    Value mcastStartY = c0;
+    Value mcastEndY = cYEnd;
+
+    // two semaphores - one on the sender core as an acknowledgement counter and
+    // one on the receiver cores as a data ready flag
+    auto parentFuncOp = multicastOp->getParentOfType<func::FuncOp>();
+    assert(parentFuncOp && "expected parent func op");
+
+    auto argSpec = parentFuncOp->getAttrOfType<ttkernel::ArgSpecAttr>(
+        ttkernel::ArgSpecAttr::name);
+    SmallVector<ttkernel::ArgAttr> ctArgs;
+    if (argSpec)
+      ctArgs = llvm::to_vector(argSpec.getCtArgs());
+
+    int32_t senderSemaphoreCompileTimeArgsIndex = ctArgs.size();
+    auto senderSemaphoreIndex = ttkernel::GetCompileArgValOp::create(
+        rewriter, loc, rewriter.getIntegerType(32),
+        senderSemaphoreCompileTimeArgsIndex);
+    Value senderSemaphore =
+        ttkernel::GetSemaphoreOp::create(rewriter, loc, senderSemaphoreIndex);
+    int32_t receiverSemaphoreCompileTimeArgsIndex = ctArgs.size() + 1;
+    auto receiverSemaphoreIndex = ttkernel::GetCompileArgValOp::create(
+        rewriter, loc, rewriter.getIntegerType(32),
+        receiverSemaphoreCompileTimeArgsIndex);
+    Value receiverSemaphore =
+        ttkernel::GetSemaphoreOp::create(rewriter, loc, receiverSemaphoreIndex);
+
+    // TODO: should this be in place?
+    rewriter.modifyOpInPlace(parentFuncOp, [&]() {
+      ttkernel::ArgSpecAttr::appendCompileTimeArg(
+          parentFuncOp,
+          rewriter.getAttr<ttkernel::ArgAttr>(ttkernel::ArgType::Semaphore, 0));
+      ttkernel::ArgSpecAttr::appendCompileTimeArg(
+          parentFuncOp,
+          rewriter.getAttr<ttkernel::ArgAttr>(ttkernel::ArgType::Semaphore, 1));
+    });
+    Value isTopRow = arith::CmpIOp::create(
+        rewriter, loc, arith::CmpIPredicate::eq, yVirtIndex,
+        arith::createIndexConstant(loc, rewriter, 0));
+    Value isX0 = arith::CmpIOp::create(
+        rewriter, loc, arith::CmpIPredicate::eq, xVirtIndex,
+        arith::createIndexConstant(loc, rewriter, 0));
+
+    Value isSenderBool = arith::AndIOp::create(rewriter, loc, isTopRow, isX0);
+
+    scf::IfOp isSender =
+        scf::IfOp::create(rewriter, loc, ValueRange{}, isSenderBool);
+    scf::IfOp::ensureTerminator(isSender.getThenRegion(), rewriter, loc);
+    scf::IfOp::ensureTerminator(isSender.getElseRegion(), rewriter, loc);
+    rewriter.setInsertionPointToStart(isSender.thenBlock());
+
+    Block *multicastOpBody = &multicastOp.getBody().front();
+    assert(multicastOpBody && "expected multicast op body block");
+    // copy the block from the multicast op here
+    rewriter.inlineBlockBefore(multicastOpBody, isSender.thenBlock(),
+                               isSender.thenBlock()->end());
+
+    // get the last op in the then block and make sure it is a yield
+    assert(!isSender.thenBlock()->empty() && "expected values to multicast");
+    auto senderYield = cast<npu::tt::YieldOp>(isSender.thenBlock()->back());
+
+    assert(false && "TODO");
+    return success();
+  }
+};
+
 } // namespace
 
 void populateMemoryOpConversionPattern(
@@ -908,6 +1016,8 @@ void populateMemoryOpConversionPattern(
   patterns.add<ConvertLocalStoreOp>(typeConverter, patterns.getContext());
   patterns.add<ConvertLocalLoadOp>(typeConverter, patterns.getContext());
   patterns.add<ConvertLocalAllocOp>(typeConverter, patterns.getContext());
+
+  patterns.add<ConvertMulticastOp>(typeConverter, patterns.getContext());
 }
 
 } // namespace npu
