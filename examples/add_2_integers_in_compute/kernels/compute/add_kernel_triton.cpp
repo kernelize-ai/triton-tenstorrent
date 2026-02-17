@@ -3,47 +3,46 @@
 #include "tools/profiler/kernel_profiler.hpp"
 #include "internal/firmware_common.h"
 #include "llk_defs.h"
-#include "compute_kernel_api/binary_max_min.h"
-#include "compute_kernel_api/common.h"
-#include "compute_kernel_api/matmul.h"
-#include "compute_kernel_api/bcast.h"
-#include "compute_kernel_api/tilize.h"
-#include "compute_kernel_api/untilize.h"
-#include "compute_kernel_api/transpose_wh.h"
-#include "compute_kernel_api/eltwise_binary.h"
-#include "compute_kernel_api/eltwise_binary_sfpu.h"
-#include "compute_kernel_api.h"
-#include "compute_kernel_api/tile_move_copy.h"
-#include "compute_kernel_api/eltwise_unary/activations.h"
-#include "compute_kernel_api/eltwise_unary/eltwise_unary.h"
-#include "compute_kernel_api/eltwise_unary/exp.h"
-#include "compute_kernel_api/eltwise_unary/sfpu_split_includes.h"
-#include "compute_kernel_api/eltwise_unary/recip.h"
-#include "compute_kernel_api/eltwise_unary/fill.h"
-#include "compute_kernel_api/eltwise_unary/negative.h"
-#include "compute_kernel_api/eltwise_unary/sqrt.h"
-#include "compute_kernel_api/eltwise_unary/rounding.h"
-#include "compute_kernel_api/eltwise_unary/trigonometry.h"
-#include "compute_kernel_api/eltwise_unary/gelu.h"
-#include "compute_kernel_api/eltwise_unary/erf_erfc.h"
-#include "compute_kernel_api/eltwise_unary/logical_not_noti.h"
-#include "compute_kernel_api/eltwise_unary/comp.h"
-#include "compute_kernel_api/eltwise_unary/rsqrt.h"
-#include "compute_kernel_api/eltwise_unary/typecast.h"
-#include "compute_kernel_api/binary_bitwise_sfpu.h"
-#include "compute_kernel_api/eltwise_unary/bitwise_not.h"
-#include "compute_kernel_api/eltwise_unary/relu.h"
-#include "compute_kernel_api/eltwise_unary/binop_with_scalar.h"
-#include "compute_kernel_api/eltwise_unary/where.h"
-#include "compute_kernel_api/eltwise_unary/clamp.h"
+#include "api/compute/binary_max_min.h"
+#include "api/compute/common.h"
+#include "api/compute/matmul.h"
+#include "api/compute/bcast.h"
+#include "api/compute/tilize.h"
+#include "api/compute/untilize.h"
+#include "api/compute/transpose_wh.h"
+#include "api/compute/eltwise_binary.h"
+#include "api/compute/eltwise_binary_sfpu.h"
+#include "api/compute/compute_kernel_api.h"
+#include "api/compute/tile_move_copy.h"
+#include "api/compute/eltwise_unary/activations.h"
+#include "api/compute/eltwise_unary/eltwise_unary.h"
+#include "api/compute/eltwise_unary/exp.h"
+#include "api/compute/eltwise_unary/sfpu_split_includes.h"
+#include "api/compute/eltwise_unary/recip.h"
+#include "api/compute/eltwise_unary/fill.h"
+#include "api/compute/eltwise_unary/negative.h"
+#include "api/compute/eltwise_unary/sqrt.h"
+#include "api/compute/eltwise_unary/rounding.h"
+#include "api/compute/eltwise_unary/trigonometry.h"
+#include "api/compute/eltwise_unary/gelu.h"
+#include "api/compute/eltwise_unary/erf_erfc.h"
+#include "api/compute/eltwise_unary/logical_not_noti.h"
+#include "api/compute/eltwise_unary/comp.h"
+#include "api/compute/eltwise_unary/rsqrt.h"
+#include "api/compute/eltwise_unary/typecast.h"
+#include "api/compute/binary_bitwise_sfpu.h"
+#include "api/compute/eltwise_unary/bitwise_not.h"
+#include "api/compute/eltwise_unary/relu.h"
+#include "api/compute/eltwise_unary/binop_with_scalar.h"
+#include "api/compute/eltwise_unary/where.h"
+#include "api/compute/eltwise_unary/clamp.h"
 inline uint32_t float_to_bits(float f) { uint32_t r; __builtin_memcpy(&r, &f, sizeof(r)); return r; }
 #ifndef INFINITY
 #define INFINITY __builtin_inff()
 #endif
 #define REDUCE_OP PoolType::SUM
 #define REDUCE_DIM ReduceDim::REDUCE_COL
-#include "compute_kernel_api/reduce.h"
-namespace NAMESPACE {
+#include "api/compute/reduce.h"
 void kernel_main() {
   size_t v1 = 0;
   size_t v2 = 1;
@@ -81,6 +80,4 @@ void kernel_main() {
     cb_push_back(get_compile_time_arg_val(2), v3);
   }
   return;
-}
-void MAIN { kernel_main(); }
 }
