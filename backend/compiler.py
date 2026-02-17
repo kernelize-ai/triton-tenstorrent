@@ -216,13 +216,13 @@ class CPUBackend(BaseBackend):
         cpu.passes.tenstorrent.remove_redundant_masks(pm)
         passes.common.add_canonicalizer(pm)
 
-        cpu.passes.tenstorrent.add_materialize_multicasts(pm)
         cpu.passes.tenstorrent.add_core_specialize(pm)
         passes.common.add_symbol_dce(pm)
         passes.common.add_sccp(pm)
         passes.common.add_cse(pm)
         passes.common.add_canonicalizer(pm)
 
+        cpu.passes.tenstorrent.add_materialize_multicasts(pm)
         cpu.passes.tenstorrent.add_register_allocation(pm)
         cpu.passes.tenstorrent.add_canonicalize_matmul_loops(pm)
         cpu.passes.tenstorrent.add_to_ttkernel_dialect(pm)

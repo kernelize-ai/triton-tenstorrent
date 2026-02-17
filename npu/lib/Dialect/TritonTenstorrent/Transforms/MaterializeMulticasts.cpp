@@ -38,7 +38,7 @@ public:
         dyn_cast<npu::tt::TiledDotOperandEncodingAttr>(
             opTensorTy.getEncoding());
     if (!tiledDotOperandEncodingAttr ||
-        tiledDotOperandEncodingAttr.getOpIdx() == 0)
+        tiledDotOperandEncodingAttr.getOpIdx() == 1)
       return failure();
 
     auto multicast = npu::tt::MulticastOp::create(rewriter, op->getLoc(),
