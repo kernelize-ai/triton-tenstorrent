@@ -997,6 +997,56 @@ struct ConvertMulticastOp : public OpConversionPattern<npu::tt::MulticastOp> {
     // get the last op in the then block and make sure it is a yield
     assert(!isSender.thenBlock()->empty() && "expected values to multicast");
     auto senderYield = cast<npu::tt::YieldOp>(isSender.thenBlock()->back());
+    rewriter.setInsertionPointAfter(senderYield);
+    rewriter.eraseOp(senderYield);
+
+    // get the CB address
+    Operation *user = *multicastOp->getUsers().begin();
+    if (!isa<gpu::LocalStoreOp>(user)) {
+      LDBG("Descriptor load op user is not a local store op: " << *user
+                                                               << "\n");
+      return failure();
+    }
+
+    Value cb =
+        rewriter.getRemappedValue(cast<gpu::LocalStoreOp>(user).getDst());
+    const unsigned cbPageSize = 2048; // TODO: read from cb type
+    const int32_t numCbTiles =
+        cast<ttkernel::CBType>(cb.getType()).getNumTiles();
+    Value l1BaseAddr = ttkernel::GetWritePtrOp::create(rewriter, loc, cb);
+
+    // multicast send
+    Value groupSize = arith::createIndexConstant(loc, rewriter, 40);
+    Value numDests = arith::SubIOp::create(
+        rewriter, loc, groupSize, arith::createIndexConstant(loc, rewriter, 1));
+
+    // start with a wait and a set on the sender semaphore
+    auto l1SenderAddr =
+        ttkernel::CastToL1PtrOp::create(rewriter, loc, senderSemaphore);
+    // wait for all receiver cores to acknowledge ready
+    // should be checking for 6 (or 4 for the last row)
+    ttkernel::NocSemaphoreWaitOp::create(rewriter, loc, l1SenderAddr, numDests);
+    ttkernel::NocSemaphoreSetOp::create(
+        rewriter, loc, l1SenderAddr,
+        arith::createIndexConstant(loc, rewriter, 0));
+
+    // get the multicast addresses
+    auto mcastAddr = ttkernel::ExperimentalGetNocMulticastAddrOp::create(
+        rewriter, loc, convertVirtualToPhysicalIndex(senderIndexX, true),
+        convertVirtualToPhysicalIndex(senderIndexY, false),
+        convertVirtualToPhysicalIndex(mcastEndX, true),
+        convertVirtualToPhysicalIndex(mcastEndY, false), l1BaseAddr, nullptr);
+    ttkernel::NocAsyncWriteMulticastOp::create(
+        rewriter, loc, l1BaseAddr, mcastAddr,
+        arith::createConstantI32(loc, rewriter, cbPageSize * numCbTiles),
+        arith::IndexCastOp::create(rewriter, loc, rewriter.getI32Type(),
+                                   numDests),
+        nullptr, nullptr, nullptr);
+    ttkernel::NocAsyncWriteBarrierOp::create(rewriter, loc);
+
+    // signal multicast completion using the receiver data ready semaphore
+    // set the local value for the semaphore first
+    // TODO: from here
 
     assert(false && "TODO");
     return success();
