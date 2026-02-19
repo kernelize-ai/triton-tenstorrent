@@ -74,11 +74,11 @@ void kernel_main() {
       int32_t v48 = (int32_t) ((uint32_t) ((int32_t) ((uint32_t) v44 * (uint32_t) v36)) + (uint32_t) v41);
       uint64_t temp_378 = v28.get_noc_addr(v48, v4);
       noc_async_read(temp_378, v47, v26);
-      int32_t v49 = (int32_t) ((uint32_t) v47 + (uint32_t) 4096);
+      int32_t v49 = (int32_t) ((uint32_t) v47 + (uint32_t) v10);
       int32_t v50 = (int32_t) ((uint32_t) v48 + (uint32_t) v7);
       uint64_t temp_390 = v28.get_noc_addr(v50, v4);
       noc_async_read(temp_390, v49, v26);
-      int32_t v51 = (int32_t) ((uint32_t) v47 + (uint32_t) v10);
+      int32_t v51 = (int32_t) ((uint32_t) v47 + (uint32_t) 4096);
       uint64_t temp_402 = v28.get_noc_addr((int32_t) ((uint32_t) v48 + (uint32_t) v36), v4);
       noc_async_read(temp_402, v51, v26);
       int32_t v52 = (int32_t) ((uint32_t) v47 + (uint32_t) 6144);

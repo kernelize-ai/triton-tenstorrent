@@ -70,8 +70,8 @@ void kernel_main() {
       cb_wait_front(get_compile_time_arg_val(1), v8);
       }
       matmul_tiles(get_compile_time_arg_val(0), get_compile_time_arg_val(1), v5, v5, v1);
-      matmul_tiles(get_compile_time_arg_val(0), get_compile_time_arg_val(1), v5, v7, v2);
-      matmul_tiles(get_compile_time_arg_val(0), get_compile_time_arg_val(1), v6, v6, v1);
+      matmul_tiles(get_compile_time_arg_val(0), get_compile_time_arg_val(1), v5, v6, v2);
+      matmul_tiles(get_compile_time_arg_val(0), get_compile_time_arg_val(1), v6, v7, v1);
       matmul_tiles(get_compile_time_arg_val(0), get_compile_time_arg_val(1), v6, v9, v2);
       cb_pop_front(get_compile_time_arg_val(0), v7);
       cb_pop_front(get_compile_time_arg_val(1), v8);
