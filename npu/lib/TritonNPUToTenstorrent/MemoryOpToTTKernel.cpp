@@ -252,104 +252,7 @@ struct ConvertTensorDescLoadOp
     LDBG("Loading from CB of size " << numCbTiles << " tiles");
     Value numPages = arith::createConstantI32(loc, rewriter, numCbTiles);
 
-    // Both sender and receiver cores need to make sure there is space in the CB
     ttkernel::CBReserveBackOp::create(rewriter, loc, cb, numPages);
-
-    // compute our noc index to see if we should multicast this load or receive
-    // the multicast for A operand loads we want the LHS row of cores to
-    // multicast each row of A for B operand loads we want the first column of
-    // cores to multicast each column of B for tiled loads we use the opIdx == 0
-    // case
-    const bool rowsMulticast =
-        !(dotOpEncoding && (dotOpEncoding.getOpIdx() == 1));
-    LDBG("Using " << (rowsMulticast ? "row" : "column")
-                  << " multicast pattern for load\n");
-
-    // convert logical (virtual) indices to translated (physical) indices
-    auto convertVirtualToPhysicalIndex = [&](Value virtIndex,
-                                             bool isX) -> Value {
-      if (isX)
-        return ttkernel::ConvertLogicalXToTranslatedOp::create(
-            rewriter, loc, rewriter.getIndexType(), virtIndex);
-      return ttkernel::ConvertLogicalYToTranslatedOp::create(
-          rewriter, loc, rewriter.getIndexType(), virtIndex);
-    };
-
-    // TODO: seems like these should be index types nad not cast to i32?
-    Value xVirtIndex = ttkernel::MyLogicalXOp::create(rewriter, loc);
-    Value yVirtIndex = ttkernel::MyLogicalYOp::create(rewriter, loc);
-
-    // in our new 8x5 grid y=4 is the end
-    Value cYEnd = arith::createIndexConstant(loc, rewriter, 4);
-
-    Value c0 = arith::createIndexConstant(loc, rewriter, 0);
-    Value senderIndexX = c0;
-    Value senderIndexY = arith::createIndexConstant(loc, rewriter, 0);
-
-    Value mcastStartX = senderIndexX;
-    Value mcastEndX = arith::createIndexConstant(loc, rewriter, 7);
-
-    Value mcastStartY = c0;
-    Value mcastEndY = cYEnd;
-
-    // two semaphores - one on the sender core as an acknowledgement counter and
-    // one on the receiver cores as a data ready flag
-    auto parentFuncOp = op->getParentOfType<func::FuncOp>();
-    assert(parentFuncOp && "expected parent func op");
-    // auto [rtArgs, ctArgs] =
-    // ttkernel::ArgSpecAttr::getOrCreateArgSpec(parentFuncOp);
-    auto argSpec = parentFuncOp->getAttrOfType<ttkernel::ArgSpecAttr>(
-        ttkernel::ArgSpecAttr::name);
-    SmallVector<ttkernel::ArgAttr> ctArgs;
-    if (argSpec)
-      ctArgs = llvm::to_vector(argSpec.getCtArgs());
-
-    Value senderSemaphore, receiverSemaphore;
-    const bool shouldGenerateMulticast =
-        false; // dotOpEncoding && rowsMulticast;
-    if (shouldGenerateMulticast) {
-      int32_t senderSemaphoreCompileTimeArgsIndex = ctArgs.size();
-      auto senderSemaphoreIndex = ttkernel::GetCompileArgValOp::create(
-          rewriter, loc, rewriter.getIntegerType(32),
-          senderSemaphoreCompileTimeArgsIndex);
-      senderSemaphore =
-          ttkernel::GetSemaphoreOp::create(rewriter, loc, senderSemaphoreIndex);
-      int32_t receiverSemaphoreCompileTimeArgsIndex = ctArgs.size() + 1;
-      auto receiverSemaphoreIndex = ttkernel::GetCompileArgValOp::create(
-          rewriter, loc, rewriter.getIntegerType(32),
-          receiverSemaphoreCompileTimeArgsIndex);
-      receiverSemaphore = ttkernel::GetSemaphoreOp::create(
-          rewriter, loc, receiverSemaphoreIndex);
-
-      // TODO: should this be in place?
-      rewriter.modifyOpInPlace(parentFuncOp, [&]() {
-        ttkernel::ArgSpecAttr::appendCompileTimeArg(
-            parentFuncOp, rewriter.getAttr<ttkernel::ArgAttr>(
-                              ttkernel::ArgType::Semaphore, 0));
-        ttkernel::ArgSpecAttr::appendCompileTimeArg(
-            parentFuncOp, rewriter.getAttr<ttkernel::ArgAttr>(
-                              ttkernel::ArgType::Semaphore, 1));
-      });
-    }
-    // End hardcoded params
-
-    scf::IfOp isSender;
-    if (shouldGenerateMulticast) {
-      // sender is (x==0,y==0) always
-      Value isTopRow = arith::CmpIOp::create(
-          rewriter, loc, arith::CmpIPredicate::eq, yVirtIndex,
-          arith::createIndexConstant(loc, rewriter, 0));
-      Value isX0 = arith::CmpIOp::create(
-          rewriter, loc, arith::CmpIPredicate::eq, xVirtIndex,
-          arith::createIndexConstant(loc, rewriter, 0));
-
-      Value isSenderBool = arith::AndIOp::create(rewriter, loc, isTopRow, isX0);
-
-      isSender = scf::IfOp::create(rewriter, loc, ValueRange{}, isSenderBool);
-      scf::IfOp::ensureTerminator(isSender.getThenRegion(), rewriter, loc);
-      scf::IfOp::ensureTerminator(isSender.getElseRegion(), rewriter, loc);
-      rewriter.setInsertionPointToStart(isSender.thenBlock());
-    }
 
     Value trueVal = arith::createConstantI1(loc, rewriter, 1);
 
@@ -444,85 +347,6 @@ struct ConvertTensorDescLoadOp
     }
 
     ttkernel::NocAsyncReadBarrierOp::create(rewriter, loc);
-
-    // multicast send
-    Value groupSize = arith::createIndexConstant(loc, rewriter, 40);
-    Value numDests = arith::SubIOp::create(
-        rewriter, loc, groupSize, arith::createIndexConstant(loc, rewriter, 1));
-    if (shouldGenerateMulticast) {
-      // start with a wait and a set on the sender semaphore
-      auto l1SenderAddr =
-          ttkernel::CastToL1PtrOp::create(rewriter, loc, senderSemaphore);
-      // wait for all receiver cores to acknowledge ready
-      // should be checking for 6 (or 4 for the last row)
-      ttkernel::NocSemaphoreWaitOp::create(rewriter, loc, l1SenderAddr,
-                                           numDests);
-      ttkernel::NocSemaphoreSetOp::create(
-          rewriter, loc, l1SenderAddr,
-          arith::createIndexConstant(loc, rewriter, 0));
-
-      // get the multicast addresses
-      auto mcastAddr = ttkernel::ExperimentalGetNocMulticastAddrOp::create(
-          rewriter, loc, convertVirtualToPhysicalIndex(senderIndexX, true),
-          convertVirtualToPhysicalIndex(senderIndexY, false),
-          convertVirtualToPhysicalIndex(mcastEndX, true),
-          convertVirtualToPhysicalIndex(mcastEndY, false), l1BaseAddr, nullptr);
-      ttkernel::NocAsyncWriteMulticastOp::create(
-          rewriter, loc, l1BaseAddr, mcastAddr,
-          arith::createConstantI32(loc, rewriter, cbPageSize * numCbTiles),
-          arith::IndexCastOp::create(rewriter, loc, rewriter.getI32Type(),
-                                     numDests),
-          nullptr, nullptr, nullptr);
-      ttkernel::NocAsyncWriteBarrierOp::create(rewriter, loc);
-
-      // signal multicast completion using the receiver data ready semaphore
-      // set the local value for the semaphore first
-      auto l1ReceiverAddr =
-          ttkernel::CastToL1PtrOp::create(rewriter, loc, receiverSemaphore);
-      ttkernel::NocSemaphoreSetOp::create(
-          rewriter, loc, l1ReceiverAddr,
-          arith::createIndexConstant(loc, rewriter, 1));
-
-      // get the noc address for multicast operation
-      auto mcastCompleteAddr =
-          ttkernel::ExperimentalGetNocMulticastAddrOp::create(
-              rewriter, loc, convertVirtualToPhysicalIndex(senderIndexX, true),
-              convertVirtualToPhysicalIndex(senderIndexY, false),
-              convertVirtualToPhysicalIndex(mcastEndX, true),
-              convertVirtualToPhysicalIndex(mcastEndY, false),
-              receiverSemaphore, nullptr);
-      ttkernel::NocSemaphoreSetMulticastOp::create(
-          rewriter, loc, receiverSemaphore, mcastCompleteAddr,
-          arith::IndexCastOp::create(rewriter, loc, rewriter.getI32Type(),
-                                     numDests),
-          nullptr, nullptr);
-    }
-
-    if (shouldGenerateMulticast) {
-      rewriter.setInsertionPointToStart(isSender.elseBlock());
-      // receive the multicast
-      // first, notify the sender that we are ready to receive
-      auto remoteNocAddr = ttkernel::GetNocAddrOp::create(
-          rewriter, loc, convertVirtualToPhysicalIndex(senderIndexX, true),
-          convertVirtualToPhysicalIndex(senderIndexY, false), senderSemaphore);
-      ttkernel::NocSemaphoreIncOp::create(
-          rewriter, loc, remoteNocAddr,
-          arith::createIndexConstant(loc, rewriter, 1), nullptr);
-      // cast the receiver semaphore to the L1 ptr
-      auto l1ReceiverAddr =
-          ttkernel::CastToL1PtrOp::create(rewriter, loc, receiverSemaphore);
-      // wait for the sender to finish transmitting data
-      ttkernel::NocSemaphoreWaitOp::create(
-          rewriter, loc, l1ReceiverAddr,
-          arith::createIndexConstant(loc, rewriter, 1));
-      // reset post transmit
-      ttkernel::NocSemaphoreSetOp::create(
-          rewriter, loc, l1ReceiverAddr,
-          arith::createIndexConstant(loc, rewriter, 0));
-    }
-    if (shouldGenerateMulticast)
-      rewriter.setInsertionPointAfter(isSender);
-
     rewriter.eraseOp(op);
     return success();
   }
@@ -636,7 +460,8 @@ struct ConvertLocalStoreOp : public OpConversionPattern<gpu::LocalStoreOp> {
         arith::createConstantI32(loc, rewriter, dstCBType.getNumTiles());
 
     auto srcOp = op.getSrc().getDefiningOp();
-    if (!isLoadLike(srcOp)) {
+    // TODO: is the multicast op truly load like?
+    if (!(isLoadLike(srcOp) || isa<npu::tt::MulticastOp>(srcOp))) {
       // reserve back the cb for pack tile
       ttkernel::CBReserveBackOp::create(rewriter, loc, dst, numPages);
 
