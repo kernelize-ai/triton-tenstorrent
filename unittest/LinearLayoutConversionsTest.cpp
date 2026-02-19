@@ -153,7 +153,7 @@ TEST_F(LinearLayoutConversionsTest, Tiled_Dot_Rhs) {
                               {4, 0},
                               {8, 0},
                               {16, 0}}},
-                            {S("tile"), {{32, 0}, {0, 32}, {0, 64}}},
+                            {S("tile"), {{0, 32}, {0, 64}, {32, 0}}},
                             {S("lane"), {}},
                             {S("warp"), {}},
                             {S("block"), {}},
