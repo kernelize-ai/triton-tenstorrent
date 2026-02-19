@@ -41,12 +41,31 @@ public:
         tiledDotOperandEncodingAttr.getOpIdx() == 1)
       return failure();
 
-    auto multicast = npu::tt::MulticastOp::create(rewriter, op->getLoc(),
-                                                  op->getResultTypes());
+    gpu::LocalStoreOp store;
+    for (auto user : op->getUsers()) {
+      if (auto _store = dyn_cast<gpu::LocalStoreOp>(user))
+        store = _store;
+    }
+    if (!store) {
+      LDBG("Expected a local store user for descriptor load op: " << op
+                                                                  << "\n");
+      return failure();
+    }
+
+    // we need to track the cb address that we want to multicast to. Because it
+    // can be difficult to re-associate the local store with the load during
+    // lowering we store the target CB as an operand to the multicast and carry
+    // it through the yield. This allows us to easily access the target CB
+    // during lowering when we need to emit the loads and cb push ops.
+    Value destAddr = store.getDst();
+
+    auto multicast = npu::tt::MulticastOp::create(
+        rewriter, op->getLoc(), op->getResultTypes(), destAddr);
     rewriter.createBlock(&multicast.getBody());
     rewriter.setInsertionPointToStart(&multicast.getBody().front());
     auto newLoadOp = rewriter.clone(*op);
-    npu::tt::YieldOp::create(rewriter, op->getLoc(), newLoadOp->getResults());
+    npu::tt::YieldOp::create(rewriter, op->getLoc(),
+                             {newLoadOp->getResult(0), destAddr});
     op->replaceAllUsesWith(multicast->getResults());
     rewriter.eraseOp(op);
     return success();
