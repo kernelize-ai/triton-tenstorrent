@@ -42,27 +42,22 @@ static int64_t findAllocIdx(Operation *op) {
   return -1;
 }
 
-static gpu::LocalStoreOp findLocalStoreForLoadLikeOp(Operation *op) {
+static gpu::LocalAllocOp findCbForLoadLikeOp(Operation *op) {
   if (auto multicastOp = dyn_cast<npu::tt::MulticastOp>(op)) {
     for (auto user : multicastOp->getUsers()) {
       if (auto localStoreOp = dyn_cast<gpu::LocalStoreOp>(user))
-        return localStoreOp;
+        return cast<gpu::LocalAllocOp>(localStoreOp.getDst().getDefiningOp());
     }
   }
   for (auto user : op->getUsers()) {
     if (auto multicastYieldOp = dyn_cast<npu::tt::YieldOp>(user)) {
-      Operation *multicastOp = multicastYieldOp->getParentOp();
-      if (!isa<npu::tt::MulticastOp>(multicastOp)) {
-        LDBG("Yield op parent is not a multicast op: " << *multicastOp << "\n");
-        continue;
-      }
-      for (auto multicastUser : multicastOp->getUsers()) {
-        if (auto localStoreOp = dyn_cast<gpu::LocalStoreOp>(multicastUser))
-          return localStoreOp;
-      }
+      assert(multicastYieldOp.getNumOperands() == 2 &&
+             "expected yield op with 2 operands");
+      return cast<gpu::LocalAllocOp>(
+          multicastYieldOp.getOperand(1).getDefiningOp());
     }
     if (auto localStoreOp = dyn_cast<gpu::LocalStoreOp>(user)) {
-      return localStoreOp;
+      return cast<gpu::LocalAllocOp>(localStoreOp.getDst().getDefiningOp());
     }
   }
   return nullptr;
@@ -202,10 +197,10 @@ struct ConvertTensorDescLoadOp
       LDBG("Load op has multiple uses, cannot convert\n");
       return failure();
     }
-    gpu::LocalStoreOp store = findLocalStoreForLoadLikeOp(op);
-    assert(store && "expected local store op user for descriptor load");
+    gpu::LocalAllocOp cbAlloc = findCbForLoadLikeOp(op);
+    assert(cbAlloc && "expected local alloc op for descriptor load");
 
-    Value cb = rewriter.getRemappedValue(store.getDst());
+    Value cb = rewriter.getRemappedValue(cbAlloc.getResult());
 
     auto descTy = op.getDesc().getType();
     const auto blockShape = descTy.getBlockType().getShape();
@@ -927,7 +922,8 @@ struct ConvertMulticastOp : public OpConversionPattern<npu::tt::MulticastOp> {
 
     // replace the multicast op with an if/then/else to multicast the current op
     // region on the sender and receive on the receivers.
-    auto multicastType = cast<RankedTensorType>(multicastOp.getType());
+    auto multicastType =
+        cast<RankedTensorType>(multicastOp.getResult(0).getType());
     auto dotOpEncoding =
         cast<npu::tt::TiledDotOperandEncodingAttr>(multicastType.getEncoding());
 
@@ -994,6 +990,19 @@ struct ConvertMulticastOp : public OpConversionPattern<npu::tt::MulticastOp> {
           parentFuncOp,
           rewriter.getAttr<ttkernel::ArgAttr>(ttkernel::ArgType::Semaphore, 1));
     });
+
+    // cb info
+    gpu::LocalAllocOp cbAlloc = findCbForLoadLikeOp(multicastOp);
+    assert(cbAlloc && "expected local alloc op for descriptor load");
+
+    Value cb = rewriter.getRemappedValue(cbAlloc.getResult());
+
+    const unsigned cbPageSize = 2048; // TODO: read from cb type
+    const int32_t numCbTiles =
+        cast<ttkernel::CBType>(cb.getType()).getNumTiles();
+    Value numPages = arith::createConstantI32(loc, rewriter, numCbTiles);
+
+    // start info
     Value isTopRow = arith::CmpIOp::create(
         rewriter, loc, arith::CmpIPredicate::eq, yVirtIndex,
         arith::createIndexConstant(loc, rewriter, 0));
@@ -1026,13 +1035,6 @@ struct ConvertMulticastOp : public OpConversionPattern<npu::tt::MulticastOp> {
       rewriter.setInsertionPoint(scfYield);
 
       // get the CB address
-      gpu::LocalStoreOp store = findLocalStoreForLoadLikeOp(multicastOp);
-      assert(store && "expected local store op user for descriptor load");
-
-      Value cb = rewriter.getRemappedValue(store.getDst());
-      const unsigned cbPageSize = 2048; // TODO: read from cb type
-      const int32_t numCbTiles =
-          cast<ttkernel::CBType>(cb.getType()).getNumTiles();
       Value l1BaseAddr = ttkernel::GetWritePtrOp::create(rewriter, loc, cb);
 
       // multicast send
@@ -1092,6 +1094,10 @@ struct ConvertMulticastOp : public OpConversionPattern<npu::tt::MulticastOp> {
     {
       rewriter.setInsertionPointToStart(isSender.elseBlock());
       // receive the multicast
+      // make sure there is space in the CB for the incoming data, by reserving
+      // it back before the wait
+      ttkernel::CBReserveBackOp::create(rewriter, loc, cb, numPages);
+
       // first, notify the sender that we are ready to receive
       auto remoteNocAddr = ttkernel::GetNocAddrOp::create(
           rewriter, loc, convertVirtualToPhysicalIndex(senderIndexX, true),

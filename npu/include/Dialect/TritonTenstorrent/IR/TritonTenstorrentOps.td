@@ -5,9 +5,12 @@ include "TritonTenstorrentDialect.td"
 include "triton/Dialect/Triton/IR/TritonTypes.td"
 include "triton/Dialect/Triton/IR/TritonAttrDefs.td"
 include "triton/Dialect/Triton/IR/TritonInterfaces.td"
+include "triton/Dialect/TritonGPU/IR/TritonGPUTypes.td"
 
 include "mlir/Interfaces/ControlFlowInterfaces.td" // ReturnLike
 include "mlir/Interfaces/SideEffectInterfaces.td"  // Pure
+
+def SharedMemory : Resource<"::mlir::triton::gpu::SharedMemory">;
 
 class TTTS_Op<string mnemonic, list<Trait> traits = []> :
     Op<TritonTenstorrent_Dialect, mnemonic,
@@ -43,14 +46,14 @@ def TTTS_MulticastOp : TTTS_Op<"multicast", [SingleBlock]> {
     TODO
   }];
 
-  // arguments?
+  let arguments = (ins Arg<TTG_MemDescType, "", [MemWrite<SharedMemory>]>:$dest);
 
-  let results = (outs AnyType:$result);
+  let results = (outs Variadic<AnyType>:$results);
 
   let regions = (region SizedRegion<1>:$body);
 
   let assemblyFormat = [{
-    $body attr-dict `:` functional-type(operands, results)
+    $dest $body attr-dict `:` functional-type(operands, results)
   }];
 
   // TODO: verifier

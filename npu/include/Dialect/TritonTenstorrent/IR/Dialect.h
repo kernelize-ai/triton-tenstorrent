@@ -7,6 +7,7 @@
 
 // TritonTenstorrent depends on Triton types
 #include "triton/Dialect/Triton/IR/Dialect.h"
+#include "triton/Dialect/TritonGPU/IR/Dialect.h"
 
 #define GET_OP_CLASSES
 #include "npu/include/Dialect/TritonTenstorrent/IR/Dialect.h.inc"
