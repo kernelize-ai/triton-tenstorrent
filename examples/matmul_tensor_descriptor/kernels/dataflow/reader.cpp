@@ -3,314 +3,51 @@
 #include "tools/profiler/kernel_profiler.hpp"
 #include "internal/firmware_common.h"
 #include "api/dataflow/dataflow_api.h"
-
-// SPDX-FileCopyrightText: (c) 2025 Tenstorrent AI ULC
-//
-// SPDX-License-Identifier: Apache-2.0
-
-#ifndef TTMLIR_TARGET_TTKERNEL_LLKS_EXPERIMENTAL_DATAFLOW_API_H
-#define TTMLIR_TARGET_TTKERNEL_LLKS_EXPERIMENTAL_DATAFLOW_API_H
-
-namespace experimental {
-
-FORCE_INLINE
-std::uint64_t
-get_noc_multicast_addr(std::uint32_t noc_x_start, std::uint32_t noc_y_start,
-                       std::uint32_t noc_x_end, std::uint32_t noc_y_end,
-                       std::uint32_t addr, uint8_t noc = noc_index) {
-  /*
-      Get an encoding which contains tensix core and address you want to
-      read from/write to via the noc
-  */
-  if (noc) {
-    // noc 1
-    return NOC_MULTICAST_ADDR(
-        DYNAMIC_NOC_X(noc, noc_x_end), DYNAMIC_NOC_Y(noc, noc_y_end),
-        DYNAMIC_NOC_X(noc, noc_x_start), DYNAMIC_NOC_Y(noc, noc_y_start), addr);
-  } else {
-    // noc 0
-    return NOC_MULTICAST_ADDR(
-        DYNAMIC_NOC_X(noc, noc_x_start), DYNAMIC_NOC_Y(noc, noc_y_start),
-        DYNAMIC_NOC_X(noc, noc_x_end), DYNAMIC_NOC_Y(noc, noc_y_end), addr);
-  }
-}
-
-} // namespace experimental
-
-#endif
-
-
-// SPDX-FileCopyrightText: (c) 2025 Tenstorrent AI ULC
-//
-// SPDX-License-Identifier: Apache-2.0
-
-#ifndef TTMLIR_TARGET_TTKERNEL_LLKS_EXPERIMENTAL_COORD_TRANSLATION_H
-#define TTMLIR_TARGET_TTKERNEL_LLKS_EXPERIMENTAL_COORD_TRANSLATION_H
-
-namespace experimental {
-
-FORCE_INLINE
-std::uint32_t convert_logical_x_to_translated(std::uint32_t logical_x) {
-  /*
-      convert x coord from LOGICAL to TRANSLATED coordinate system
-  */
-  return worker_logical_col_to_virtual_col[logical_x];
-}
-
-FORCE_INLINE
-std::uint32_t convert_logical_y_to_translated(std::uint32_t logical_y) {
-  /*
-      convert x coord from LOGICAL to TRANSLATED coordinate system
-  */
-  return worker_logical_row_to_virtual_row[logical_y];
-}
-
-} // namespace experimental
-
-#endif
-
 void kernel_main() {
-  int32_t v1 = 0;
-  int32_t v2 = 512;
+  int32_t v1 = 63;
+  int32_t v2 = 0;
   int32_t v3 = 64;
   int32_t v4 = 1;
-  bool v5 = true;
-  int32_t v6 = 32;
-  int32_t v7 = 2;
-  int32_t v8 = 3;
-  int32_t v9 = get_common_arg_val<uint32_t>(10);
-  int32_t v10 = get_common_arg_val<uint32_t>(12);
-  int32_t v11 = get_common_arg_val<uint32_t>(30);
-  int32_t v12 = get_common_arg_val<uint32_t>(31);
-  int32_t v13 = get_common_arg_val<uint32_t>(32);
-  DataFormat v14 = get_dataformat(get_compile_time_arg_val(1));
-  int32_t v15 = get_tile_size(get_compile_time_arg_val(1));
-  InterleavedAddrGenFast<true> v16;
-  v16.bank_base_address = v9;
-  v16.page_size = v15;
-  v16.data_format = v14;
-  InterleavedAddrGenFast<true> v17 = v16;
-  int32_t v18 = get_arg_val<uint32_t>(1);
-  int32_t v19 = get_arg_val<uint32_t>(0);
-  int32_t v20 = v10 != (int32_t) ((uint32_t) (v10 / v6) * (uint32_t) v6) & v10 < v1 == false ? (int32_t) ((uint32_t) (v10 / v6) + (uint32_t) v4) : v10 / v6;
-  int32_t v21 = (int32_t) ((uint32_t) v20 * (uint32_t) v7);
-  int32_t v22 = (int32_t) ((uint32_t) v20 * (uint32_t) v8);
-  int32_t v23 = (int32_t) ((uint32_t) v20 * (uint32_t) 4);
-  int32_t v24 = (int32_t) ((uint32_t) v20 * (uint32_t) 5);
-  int32_t v25 = (int32_t) ((uint32_t) v20 * (uint32_t) 6);
-  int32_t v26 = (int32_t) ((uint32_t) v20 * (uint32_t) 7);
-  int32_t v27 = (int32_t) ((uint32_t) v20 * (uint32_t) 8);
-  int32_t v28 = (int32_t) ((uint32_t) v20 * (uint32_t) 9);
-  int32_t v29 = (int32_t) ((uint32_t) v20 * (uint32_t) 10);
-  int32_t v30 = (int32_t) ((uint32_t) v20 * (uint32_t) 11);
-  int32_t v31 = (int32_t) ((uint32_t) v20 * (uint32_t) 12);
-  int32_t v32 = (int32_t) ((uint32_t) v20 * (uint32_t) 13);
-  int32_t v33 = (int32_t) ((uint32_t) v20 * (uint32_t) 14);
-  int32_t v34 = (int32_t) ((uint32_t) v20 * (uint32_t) 15);
-  for (int32_t i35 = v19; i35 < v18; i35 += v4) {
-    for (int32_t j36 = v1; j36 < ((int32_t) ((uint32_t) v13 + (uint32_t) 511) / v2); j36 += v4) {
-      cb_reserve_back(get_compile_time_arg_val(1), v3);
-      int32_t v37 = get_write_ptr(get_compile_time_arg_val(1));
-      int32_t v38 = (int32_t) ((uint32_t) ((int32_t) ((uint32_t) ((int32_t) ((uint32_t) j36 * (uint32_t) v2) / v6) * (uint32_t) v20)) + (uint32_t) ((int32_t) ((uint32_t) ((i35 % ((int32_t) ((uint32_t) v12 + (uint32_t) 127) / 128)) / ((int32_t) ((uint32_t) ((int32_t) ((uint32_t) v11 + (uint32_t) 63) / v3) - (uint32_t) (i35 / ((int32_t) ((uint32_t) v12 + (uint32_t) 127) / 128))) < v4 ? (int32_t) ((uint32_t) ((int32_t) ((uint32_t) v11 + (uint32_t) 63) / v3) - (uint32_t) (i35 / ((int32_t) ((uint32_t) v12 + (uint32_t) 127) / 128))) : v4)) * (uint32_t) 128) / v6));
-      uint64_t temp_703 = v17.get_noc_addr(v38, v1);
-      noc_async_read(temp_703, v37, v15);
-      int32_t v39 = (int32_t) ((uint32_t) v37 + (uint32_t) 32768);
-      int32_t v40 = (int32_t) ((uint32_t) v38 + (uint32_t) v4);
-      uint64_t temp_715 = v17.get_noc_addr(v40, v1);
-      noc_async_read(temp_715, v39, v15);
-      int32_t v41 = (int32_t) ((uint32_t) v37 + (uint32_t) 65536);
-      int32_t v42 = (int32_t) ((uint32_t) v38 + (uint32_t) v7);
-      uint64_t temp_727 = v17.get_noc_addr(v42, v1);
-      noc_async_read(temp_727, v41, v15);
-      int32_t v43 = (int32_t) ((uint32_t) v37 + (uint32_t) 98304);
-      int32_t v44 = (int32_t) ((uint32_t) v38 + (uint32_t) v8);
-      uint64_t temp_739 = v17.get_noc_addr(v44, v1);
-      noc_async_read(temp_739, v43, v15);
-      int32_t v45 = (int32_t) ((uint32_t) v37 + (uint32_t) 2048);
-      uint64_t temp_751 = v17.get_noc_addr((int32_t) ((uint32_t) v38 + (uint32_t) v20), v1);
-      noc_async_read(temp_751, v45, v15);
-      int32_t v46 = (int32_t) ((uint32_t) v37 + (uint32_t) 34816);
-      uint64_t temp_763 = v17.get_noc_addr((int32_t) ((uint32_t) v40 + (uint32_t) v20), v1);
-      noc_async_read(temp_763, v46, v15);
-      int32_t v47 = (int32_t) ((uint32_t) v37 + (uint32_t) 67584);
-      uint64_t temp_775 = v17.get_noc_addr((int32_t) ((uint32_t) v42 + (uint32_t) v20), v1);
-      noc_async_read(temp_775, v47, v15);
-      int32_t v48 = (int32_t) ((uint32_t) v37 + (uint32_t) 100352);
-      uint64_t temp_787 = v17.get_noc_addr((int32_t) ((uint32_t) v44 + (uint32_t) v20), v1);
-      noc_async_read(temp_787, v48, v15);
-      int32_t v49 = (int32_t) ((uint32_t) v37 + (uint32_t) 4096);
-      uint64_t temp_799 = v17.get_noc_addr((int32_t) ((uint32_t) v38 + (uint32_t) v21), v1);
-      noc_async_read(temp_799, v49, v15);
-      int32_t v50 = (int32_t) ((uint32_t) v37 + (uint32_t) 36864);
-      uint64_t temp_811 = v17.get_noc_addr((int32_t) ((uint32_t) v40 + (uint32_t) v21), v1);
-      noc_async_read(temp_811, v50, v15);
-      int32_t v51 = (int32_t) ((uint32_t) v37 + (uint32_t) 69632);
-      uint64_t temp_823 = v17.get_noc_addr((int32_t) ((uint32_t) v42 + (uint32_t) v21), v1);
-      noc_async_read(temp_823, v51, v15);
-      int32_t v52 = (int32_t) ((uint32_t) v37 + (uint32_t) 102400);
-      uint64_t temp_835 = v17.get_noc_addr((int32_t) ((uint32_t) v44 + (uint32_t) v21), v1);
-      noc_async_read(temp_835, v52, v15);
-      int32_t v53 = (int32_t) ((uint32_t) v37 + (uint32_t) 6144);
-      uint64_t temp_847 = v17.get_noc_addr((int32_t) ((uint32_t) v38 + (uint32_t) v22), v1);
-      noc_async_read(temp_847, v53, v15);
-      int32_t v54 = (int32_t) ((uint32_t) v37 + (uint32_t) 38912);
-      uint64_t temp_859 = v17.get_noc_addr((int32_t) ((uint32_t) v40 + (uint32_t) v22), v1);
-      noc_async_read(temp_859, v54, v15);
-      int32_t v55 = (int32_t) ((uint32_t) v37 + (uint32_t) 71680);
-      uint64_t temp_871 = v17.get_noc_addr((int32_t) ((uint32_t) v42 + (uint32_t) v22), v1);
-      noc_async_read(temp_871, v55, v15);
-      int32_t v56 = (int32_t) ((uint32_t) v37 + (uint32_t) 104448);
-      uint64_t temp_883 = v17.get_noc_addr((int32_t) ((uint32_t) v44 + (uint32_t) v22), v1);
-      noc_async_read(temp_883, v56, v15);
-      int32_t v57 = (int32_t) ((uint32_t) v37 + (uint32_t) 8192);
-      uint64_t temp_895 = v17.get_noc_addr((int32_t) ((uint32_t) v38 + (uint32_t) v23), v1);
-      noc_async_read(temp_895, v57, v15);
-      int32_t v58 = (int32_t) ((uint32_t) v37 + (uint32_t) 40960);
-      uint64_t temp_907 = v17.get_noc_addr((int32_t) ((uint32_t) v40 + (uint32_t) v23), v1);
-      noc_async_read(temp_907, v58, v15);
-      int32_t v59 = (int32_t) ((uint32_t) v37 + (uint32_t) 73728);
-      uint64_t temp_919 = v17.get_noc_addr((int32_t) ((uint32_t) v42 + (uint32_t) v23), v1);
-      noc_async_read(temp_919, v59, v15);
-      int32_t v60 = (int32_t) ((uint32_t) v37 + (uint32_t) 106496);
-      uint64_t temp_931 = v17.get_noc_addr((int32_t) ((uint32_t) v44 + (uint32_t) v23), v1);
-      noc_async_read(temp_931, v60, v15);
-      int32_t v61 = (int32_t) ((uint32_t) v37 + (uint32_t) 10240);
-      uint64_t temp_943 = v17.get_noc_addr((int32_t) ((uint32_t) v38 + (uint32_t) v24), v1);
-      noc_async_read(temp_943, v61, v15);
-      int32_t v62 = (int32_t) ((uint32_t) v37 + (uint32_t) 43008);
-      uint64_t temp_955 = v17.get_noc_addr((int32_t) ((uint32_t) v40 + (uint32_t) v24), v1);
-      noc_async_read(temp_955, v62, v15);
-      int32_t v63 = (int32_t) ((uint32_t) v37 + (uint32_t) 75776);
-      uint64_t temp_967 = v17.get_noc_addr((int32_t) ((uint32_t) v42 + (uint32_t) v24), v1);
-      noc_async_read(temp_967, v63, v15);
-      int32_t v64 = (int32_t) ((uint32_t) v37 + (uint32_t) 108544);
-      uint64_t temp_979 = v17.get_noc_addr((int32_t) ((uint32_t) v44 + (uint32_t) v24), v1);
-      noc_async_read(temp_979, v64, v15);
-      int32_t v65 = (int32_t) ((uint32_t) v37 + (uint32_t) 12288);
-      uint64_t temp_991 = v17.get_noc_addr((int32_t) ((uint32_t) v38 + (uint32_t) v25), v1);
-      noc_async_read(temp_991, v65, v15);
-      int32_t v66 = (int32_t) ((uint32_t) v37 + (uint32_t) 45056);
-      uint64_t temp_1003 = v17.get_noc_addr((int32_t) ((uint32_t) v40 + (uint32_t) v25), v1);
-      noc_async_read(temp_1003, v66, v15);
-      int32_t v67 = (int32_t) ((uint32_t) v37 + (uint32_t) 77824);
-      uint64_t temp_1015 = v17.get_noc_addr((int32_t) ((uint32_t) v42 + (uint32_t) v25), v1);
-      noc_async_read(temp_1015, v67, v15);
-      int32_t v68 = (int32_t) ((uint32_t) v37 + (uint32_t) 110592);
-      uint64_t temp_1027 = v17.get_noc_addr((int32_t) ((uint32_t) v44 + (uint32_t) v25), v1);
-      noc_async_read(temp_1027, v68, v15);
-      int32_t v69 = (int32_t) ((uint32_t) v37 + (uint32_t) 14336);
-      uint64_t temp_1039 = v17.get_noc_addr((int32_t) ((uint32_t) v38 + (uint32_t) v26), v1);
-      noc_async_read(temp_1039, v69, v15);
-      int32_t v70 = (int32_t) ((uint32_t) v37 + (uint32_t) 47104);
-      uint64_t temp_1051 = v17.get_noc_addr((int32_t) ((uint32_t) v40 + (uint32_t) v26), v1);
-      noc_async_read(temp_1051, v70, v15);
-      int32_t v71 = (int32_t) ((uint32_t) v37 + (uint32_t) 79872);
-      uint64_t temp_1063 = v17.get_noc_addr((int32_t) ((uint32_t) v42 + (uint32_t) v26), v1);
-      noc_async_read(temp_1063, v71, v15);
-      int32_t v72 = (int32_t) ((uint32_t) v37 + (uint32_t) 112640);
-      uint64_t temp_1075 = v17.get_noc_addr((int32_t) ((uint32_t) v44 + (uint32_t) v26), v1);
-      noc_async_read(temp_1075, v72, v15);
-      int32_t v73 = (int32_t) ((uint32_t) v37 + (uint32_t) 16384);
-      uint64_t temp_1087 = v17.get_noc_addr((int32_t) ((uint32_t) v38 + (uint32_t) v27), v1);
-      noc_async_read(temp_1087, v73, v15);
-      int32_t v74 = (int32_t) ((uint32_t) v37 + (uint32_t) 49152);
-      uint64_t temp_1099 = v17.get_noc_addr((int32_t) ((uint32_t) v40 + (uint32_t) v27), v1);
-      noc_async_read(temp_1099, v74, v15);
-      int32_t v75 = (int32_t) ((uint32_t) v37 + (uint32_t) 81920);
-      uint64_t temp_1111 = v17.get_noc_addr((int32_t) ((uint32_t) v42 + (uint32_t) v27), v1);
-      noc_async_read(temp_1111, v75, v15);
-      int32_t v76 = (int32_t) ((uint32_t) v37 + (uint32_t) 114688);
-      uint64_t temp_1123 = v17.get_noc_addr((int32_t) ((uint32_t) v44 + (uint32_t) v27), v1);
-      noc_async_read(temp_1123, v76, v15);
-      int32_t v77 = (int32_t) ((uint32_t) v37 + (uint32_t) 18432);
-      uint64_t temp_1135 = v17.get_noc_addr((int32_t) ((uint32_t) v38 + (uint32_t) v28), v1);
-      noc_async_read(temp_1135, v77, v15);
-      int32_t v78 = (int32_t) ((uint32_t) v37 + (uint32_t) 51200);
-      uint64_t temp_1147 = v17.get_noc_addr((int32_t) ((uint32_t) v40 + (uint32_t) v28), v1);
-      noc_async_read(temp_1147, v78, v15);
-      int32_t v79 = (int32_t) ((uint32_t) v37 + (uint32_t) 83968);
-      uint64_t temp_1159 = v17.get_noc_addr((int32_t) ((uint32_t) v42 + (uint32_t) v28), v1);
-      noc_async_read(temp_1159, v79, v15);
-      int32_t v80 = (int32_t) ((uint32_t) v37 + (uint32_t) 116736);
-      uint64_t temp_1171 = v17.get_noc_addr((int32_t) ((uint32_t) v44 + (uint32_t) v28), v1);
-      noc_async_read(temp_1171, v80, v15);
-      int32_t v81 = (int32_t) ((uint32_t) v37 + (uint32_t) 20480);
-      uint64_t temp_1183 = v17.get_noc_addr((int32_t) ((uint32_t) v38 + (uint32_t) v29), v1);
-      noc_async_read(temp_1183, v81, v15);
-      int32_t v82 = (int32_t) ((uint32_t) v37 + (uint32_t) 53248);
-      uint64_t temp_1195 = v17.get_noc_addr((int32_t) ((uint32_t) v40 + (uint32_t) v29), v1);
-      noc_async_read(temp_1195, v82, v15);
-      int32_t v83 = (int32_t) ((uint32_t) v37 + (uint32_t) 86016);
-      uint64_t temp_1207 = v17.get_noc_addr((int32_t) ((uint32_t) v42 + (uint32_t) v29), v1);
-      noc_async_read(temp_1207, v83, v15);
-      int32_t v84 = (int32_t) ((uint32_t) v37 + (uint32_t) 118784);
-      uint64_t temp_1219 = v17.get_noc_addr((int32_t) ((uint32_t) v44 + (uint32_t) v29), v1);
-      noc_async_read(temp_1219, v84, v15);
-      int32_t v85 = (int32_t) ((uint32_t) v37 + (uint32_t) 22528);
-      uint64_t temp_1231 = v17.get_noc_addr((int32_t) ((uint32_t) v38 + (uint32_t) v30), v1);
-      noc_async_read(temp_1231, v85, v15);
-      int32_t v86 = (int32_t) ((uint32_t) v37 + (uint32_t) 55296);
-      uint64_t temp_1243 = v17.get_noc_addr((int32_t) ((uint32_t) v40 + (uint32_t) v30), v1);
-      noc_async_read(temp_1243, v86, v15);
-      int32_t v87 = (int32_t) ((uint32_t) v37 + (uint32_t) 88064);
-      uint64_t temp_1255 = v17.get_noc_addr((int32_t) ((uint32_t) v42 + (uint32_t) v30), v1);
-      noc_async_read(temp_1255, v87, v15);
-      int32_t v88 = (int32_t) ((uint32_t) v37 + (uint32_t) 120832);
-      uint64_t temp_1267 = v17.get_noc_addr((int32_t) ((uint32_t) v44 + (uint32_t) v30), v1);
-      noc_async_read(temp_1267, v88, v15);
-      int32_t v89 = (int32_t) ((uint32_t) v37 + (uint32_t) 24576);
-      uint64_t temp_1279 = v17.get_noc_addr((int32_t) ((uint32_t) v38 + (uint32_t) v31), v1);
-      noc_async_read(temp_1279, v89, v15);
-      int32_t v90 = (int32_t) ((uint32_t) v37 + (uint32_t) 57344);
-      uint64_t temp_1291 = v17.get_noc_addr((int32_t) ((uint32_t) v40 + (uint32_t) v31), v1);
-      noc_async_read(temp_1291, v90, v15);
-      int32_t v91 = (int32_t) ((uint32_t) v37 + (uint32_t) 90112);
-      uint64_t temp_1303 = v17.get_noc_addr((int32_t) ((uint32_t) v42 + (uint32_t) v31), v1);
-      noc_async_read(temp_1303, v91, v15);
-      int32_t v92 = (int32_t) ((uint32_t) v37 + (uint32_t) 122880);
-      uint64_t temp_1315 = v17.get_noc_addr((int32_t) ((uint32_t) v44 + (uint32_t) v31), v1);
-      noc_async_read(temp_1315, v92, v15);
-      int32_t v93 = (int32_t) ((uint32_t) v37 + (uint32_t) 26624);
-      uint64_t temp_1327 = v17.get_noc_addr((int32_t) ((uint32_t) v38 + (uint32_t) v32), v1);
-      noc_async_read(temp_1327, v93, v15);
-      int32_t v94 = (int32_t) ((uint32_t) v37 + (uint32_t) 59392);
-      uint64_t temp_1339 = v17.get_noc_addr((int32_t) ((uint32_t) v40 + (uint32_t) v32), v1);
-      noc_async_read(temp_1339, v94, v15);
-      int32_t v95 = (int32_t) ((uint32_t) v37 + (uint32_t) 92160);
-      uint64_t temp_1351 = v17.get_noc_addr((int32_t) ((uint32_t) v42 + (uint32_t) v32), v1);
-      noc_async_read(temp_1351, v95, v15);
-      int32_t v96 = (int32_t) ((uint32_t) v37 + (uint32_t) 124928);
-      uint64_t temp_1363 = v17.get_noc_addr((int32_t) ((uint32_t) v44 + (uint32_t) v32), v1);
-      noc_async_read(temp_1363, v96, v15);
-      int32_t v97 = (int32_t) ((uint32_t) v37 + (uint32_t) 28672);
-      uint64_t temp_1375 = v17.get_noc_addr((int32_t) ((uint32_t) v38 + (uint32_t) v33), v1);
-      noc_async_read(temp_1375, v97, v15);
-      int32_t v98 = (int32_t) ((uint32_t) v37 + (uint32_t) 61440);
-      uint64_t temp_1387 = v17.get_noc_addr((int32_t) ((uint32_t) v40 + (uint32_t) v33), v1);
-      noc_async_read(temp_1387, v98, v15);
-      int32_t v99 = (int32_t) ((uint32_t) v37 + (uint32_t) 94208);
-      uint64_t temp_1399 = v17.get_noc_addr((int32_t) ((uint32_t) v42 + (uint32_t) v33), v1);
-      noc_async_read(temp_1399, v99, v15);
-      int32_t v100 = (int32_t) ((uint32_t) v37 + (uint32_t) 126976);
-      uint64_t temp_1411 = v17.get_noc_addr((int32_t) ((uint32_t) v44 + (uint32_t) v33), v1);
-      noc_async_read(temp_1411, v100, v15);
-      int32_t v101 = (int32_t) ((uint32_t) v37 + (uint32_t) 30720);
-      uint64_t temp_1423 = v17.get_noc_addr((int32_t) ((uint32_t) v38 + (uint32_t) v34), v1);
-      noc_async_read(temp_1423, v101, v15);
-      int32_t v102 = (int32_t) ((uint32_t) v37 + (uint32_t) 63488);
-      uint64_t temp_1435 = v17.get_noc_addr((int32_t) ((uint32_t) v40 + (uint32_t) v34), v1);
-      noc_async_read(temp_1435, v102, v15);
-      int32_t v103 = (int32_t) ((uint32_t) v37 + (uint32_t) 96256);
-      uint64_t temp_1447 = v17.get_noc_addr((int32_t) ((uint32_t) v42 + (uint32_t) v34), v1);
-      noc_async_read(temp_1447, v103, v15);
-      int32_t v104 = (int32_t) ((uint32_t) v37 + (uint32_t) 129024);
-      uint64_t temp_1459 = v17.get_noc_addr((int32_t) ((uint32_t) v44 + (uint32_t) v34), v1);
-      noc_async_read(temp_1459, v104, v15);
+  int32_t v5 = 4;
+  bool v6 = true;
+  int32_t v7 = 32;
+  int32_t v8 = get_common_arg_val<uint32_t>(10);
+  int32_t v9 = get_common_arg_val<uint32_t>(12);
+  int32_t v10 = get_common_arg_val<uint32_t>(30);
+  int32_t v11 = get_common_arg_val<uint32_t>(31);
+  int32_t v12 = get_common_arg_val<uint32_t>(32);
+  DataFormat v13 = get_dataformat(get_compile_time_arg_val(1));
+  int32_t v14 = get_tile_size(get_compile_time_arg_val(1));
+  int32_t v15 = get_arg_val<uint32_t>(1);
+  int32_t v16 = get_arg_val<uint32_t>(0);
+  int32_t v17 = v9 != (int32_t) ((uint32_t) (v9 / v7) * (uint32_t) v7) & v9 < v2 == false ? (int32_t) ((uint32_t) (v9 / v7) + (uint32_t) v4) : v9 / v7;
+  for (int32_t i18 = v16; i18 < v15; i18 += v4) {
+    for (int32_t j19 = v2; j19 < ((int32_t) ((uint32_t) v12 + (uint32_t) v1) / v3); j19 += v4) {
+      cb_reserve_back(get_compile_time_arg_val(1), v5);
+      InterleavedAddrGenFast<true> v20;
+      v20.bank_base_address = v8;
+      v20.page_size = v14;
+      v20.data_format = v13;
+      InterleavedAddrGenFast<true> v21 = v20;
+      int32_t v22 = get_write_ptr(get_compile_time_arg_val(1));
+      int32_t v23 = (int32_t) ((uint32_t) ((int32_t) ((uint32_t) ((int32_t) ((uint32_t) j19 * (uint32_t) v3) / v7) * (uint32_t) v17)) + (uint32_t) ((int32_t) ((uint32_t) ((i18 % ((int32_t) ((uint32_t) v11 + (uint32_t) v1) / v3)) / ((int32_t) ((uint32_t) ((int32_t) ((uint32_t) v10 + (uint32_t) v1) / v3) - (uint32_t) (i18 / ((int32_t) ((uint32_t) v11 + (uint32_t) v1) / v3))) < v4 ? (int32_t) ((uint32_t) ((int32_t) ((uint32_t) v10 + (uint32_t) v1) / v3) - (uint32_t) (i18 / ((int32_t) ((uint32_t) v11 + (uint32_t) v1) / v3))) : v4)) * (uint32_t) v3) / v7));
+      uint64_t temp_306 = v21.get_noc_addr(v23, v2);
+      noc_async_read(temp_306, v22, v14);
+      int32_t v24 = (int32_t) ((uint32_t) v22 + (uint32_t) 4096);
+      int32_t v25 = (int32_t) ((uint32_t) v23 + (uint32_t) v4);
+      uint64_t temp_318 = v21.get_noc_addr(v25, v2);
+      noc_async_read(temp_318, v24, v14);
+      int32_t v26 = (int32_t) ((uint32_t) v22 + (uint32_t) 2048);
+      uint64_t temp_330 = v21.get_noc_addr((int32_t) ((uint32_t) v23 + (uint32_t) v17), v2);
+      noc_async_read(temp_330, v26, v14);
+      int32_t v27 = (int32_t) ((uint32_t) v22 + (uint32_t) 6144);
+      uint64_t temp_342 = v21.get_noc_addr((int32_t) ((uint32_t) v25 + (uint32_t) v17), v2);
+      noc_async_read(temp_342, v27, v14);
       {
       DeviceZoneScopedN("noc_async_read_barrier");
       noc_async_read_barrier();
       }
-      cb_push_back(get_compile_time_arg_val(1), v3);
+      cb_push_back(get_compile_time_arg_val(1), v5);
     }
   }
   return;
