@@ -42,6 +42,32 @@ static int64_t findAllocIdx(Operation *op) {
   return -1;
 }
 
+static gpu::LocalStoreOp findLocalStoreForLoadLikeOp(Operation *op) {
+  if (auto multicastOp = dyn_cast<npu::tt::MulticastOp>(op)) {
+    for (auto user : multicastOp->getUsers()) {
+      if (auto localStoreOp = dyn_cast<gpu::LocalStoreOp>(user))
+        return localStoreOp;
+    }
+  }
+  for (auto user : op->getUsers()) {
+    if (auto multicastYieldOp = dyn_cast<npu::tt::YieldOp>(user)) {
+      Operation *multicastOp = multicastYieldOp->getParentOp();
+      if (!isa<npu::tt::MulticastOp>(multicastOp)) {
+        LDBG("Yield op parent is not a multicast op: " << *multicastOp << "\n");
+        continue;
+      }
+      for (auto multicastUser : multicastOp->getUsers()) {
+        if (auto localStoreOp = dyn_cast<gpu::LocalStoreOp>(multicastUser))
+          return localStoreOp;
+      }
+    }
+    if (auto localStoreOp = dyn_cast<gpu::LocalStoreOp>(user)) {
+      return localStoreOp;
+    }
+  }
+  return nullptr;
+}
+
 // TODO: move to utilites, we want to keep this function
 static Value applyLinearLayout(ConversionPatternRewriter &rewriter,
                                Location loc, Value indexI32,
@@ -176,15 +202,10 @@ struct ConvertTensorDescLoadOp
       LDBG("Load op has multiple uses, cannot convert\n");
       return failure();
     }
-    Operation *user = *op->getUsers().begin();
-    if (!isa<gpu::LocalStoreOp>(user)) {
-      LDBG("Descriptor load op user is not a local store op: " << *user
-                                                               << "\n");
-      return failure();
-    }
+    gpu::LocalStoreOp store = findLocalStoreForLoadLikeOp(op);
+    assert(store && "expected local store op user for descriptor load");
 
-    Value cb =
-        rewriter.getRemappedValue(cast<gpu::LocalStoreOp>(user).getDst());
+    Value cb = rewriter.getRemappedValue(store.getDst());
 
     auto descTy = op.getDesc().getType();
     const auto blockShape = descTy.getBlockType().getShape();
@@ -289,7 +310,8 @@ struct ConvertTensorDescLoadOp
       ctArgs = llvm::to_vector(argSpec.getCtArgs());
 
     Value senderSemaphore, receiverSemaphore;
-    const bool shouldGenerateMulticast = dotOpEncoding && rowsMulticast;
+    const bool shouldGenerateMulticast =
+        false; // dotOpEncoding && rowsMulticast;
     if (shouldGenerateMulticast) {
       int32_t senderSemaphoreCompileTimeArgsIndex = ctArgs.size();
       auto senderSemaphoreIndex = ttkernel::GetCompileArgValOp::create(
@@ -986,69 +1008,114 @@ struct ConvertMulticastOp : public OpConversionPattern<npu::tt::MulticastOp> {
         scf::IfOp::create(rewriter, loc, ValueRange{}, isSenderBool);
     scf::IfOp::ensureTerminator(isSender.getThenRegion(), rewriter, loc);
     scf::IfOp::ensureTerminator(isSender.getElseRegion(), rewriter, loc);
-    rewriter.setInsertionPointToStart(isSender.thenBlock());
+    {
+      rewriter.setInsertionPointToStart(isSender.thenBlock());
 
-    Block *multicastOpBody = &multicastOp.getBody().front();
-    assert(multicastOpBody && "expected multicast op body block");
-    // copy the block from the multicast op here
-    rewriter.inlineBlockBefore(multicastOpBody, isSender.thenBlock(),
-                               isSender.thenBlock()->end());
+      Block *multicastOpBody = &multicastOp.getBody().front();
+      assert(multicastOpBody && "expected multicast op body block");
+      // delete the multicast yield
+      auto multicastYield = cast<npu::tt::YieldOp>(multicastOpBody->back());
+      rewriter.eraseOp(multicastYield);
 
-    // get the last op in the then block and make sure it is a yield
-    assert(!isSender.thenBlock()->empty() && "expected values to multicast");
-    auto senderYield = cast<npu::tt::YieldOp>(isSender.thenBlock()->back());
-    rewriter.setInsertionPointAfter(senderYield);
-    rewriter.eraseOp(senderYield);
+      // copy the block from the multicast op here
+      rewriter.inlineBlockBefore(multicastOpBody, isSender.thenBlock(),
+                                 isSender.thenBlock()->begin());
 
-    // get the CB address
-    Operation *user = *multicastOp->getUsers().begin();
-    if (!isa<gpu::LocalStoreOp>(user)) {
-      LDBG("Descriptor load op user is not a local store op: " << *user
-                                                               << "\n");
-      return failure();
+      // get the last op in the then block and make sure it is a scf yield
+      assert(!isSender.thenBlock()->empty() && "expected values to multicast");
+      auto scfYield = cast<scf::YieldOp>(isSender.thenBlock()->back());
+      rewriter.setInsertionPoint(scfYield);
+
+      // get the CB address
+      gpu::LocalStoreOp store = findLocalStoreForLoadLikeOp(multicastOp);
+      assert(store && "expected local store op user for descriptor load");
+
+      Value cb = rewriter.getRemappedValue(store.getDst());
+      const unsigned cbPageSize = 2048; // TODO: read from cb type
+      const int32_t numCbTiles =
+          cast<ttkernel::CBType>(cb.getType()).getNumTiles();
+      Value l1BaseAddr = ttkernel::GetWritePtrOp::create(rewriter, loc, cb);
+
+      // multicast send
+      Value groupSize = arith::createIndexConstant(loc, rewriter, 40);
+      Value numDests =
+          arith::SubIOp::create(rewriter, loc, groupSize,
+                                arith::createIndexConstant(loc, rewriter, 1));
+
+      // start with a wait and a set on the sender semaphore
+      auto l1SenderAddr =
+          ttkernel::CastToL1PtrOp::create(rewriter, loc, senderSemaphore);
+      // wait for all receiver cores to acknowledge ready
+      // should be checking for 6 (or 4 for the last row)
+      ttkernel::NocSemaphoreWaitOp::create(rewriter, loc, l1SenderAddr,
+                                           numDests);
+      ttkernel::NocSemaphoreSetOp::create(
+          rewriter, loc, l1SenderAddr,
+          arith::createIndexConstant(loc, rewriter, 0));
+
+      // get the multicast addresses
+      auto mcastAddr = ttkernel::ExperimentalGetNocMulticastAddrOp::create(
+          rewriter, loc, convertVirtualToPhysicalIndex(senderIndexX, true),
+          convertVirtualToPhysicalIndex(senderIndexY, false),
+          convertVirtualToPhysicalIndex(mcastEndX, true),
+          convertVirtualToPhysicalIndex(mcastEndY, false), l1BaseAddr, nullptr);
+      ttkernel::NocAsyncWriteMulticastOp::create(
+          rewriter, loc, l1BaseAddr, mcastAddr,
+          arith::createConstantI32(loc, rewriter, cbPageSize * numCbTiles),
+          arith::IndexCastOp::create(rewriter, loc, rewriter.getI32Type(),
+                                     numDests),
+          nullptr, nullptr, nullptr);
+      ttkernel::NocAsyncWriteBarrierOp::create(rewriter, loc);
+
+      // signal multicast completion using the receiver data ready semaphore
+      // set the local value for the semaphore first
+      auto l1ReceiverAddr =
+          ttkernel::CastToL1PtrOp::create(rewriter, loc, receiverSemaphore);
+      ttkernel::NocSemaphoreSetOp::create(
+          rewriter, loc, l1ReceiverAddr,
+          arith::createIndexConstant(loc, rewriter, 1));
+
+      // get the noc address for multicast operation
+      auto mcastCompleteAddr =
+          ttkernel::ExperimentalGetNocMulticastAddrOp::create(
+              rewriter, loc, convertVirtualToPhysicalIndex(senderIndexX, true),
+              convertVirtualToPhysicalIndex(senderIndexY, false),
+              convertVirtualToPhysicalIndex(mcastEndX, true),
+              convertVirtualToPhysicalIndex(mcastEndY, false),
+              receiverSemaphore, nullptr);
+      ttkernel::NocSemaphoreSetMulticastOp::create(
+          rewriter, loc, receiverSemaphore, mcastCompleteAddr,
+          arith::IndexCastOp::create(rewriter, loc, rewriter.getI32Type(),
+                                     numDests),
+          nullptr, nullptr);
     }
 
-    Value cb =
-        rewriter.getRemappedValue(cast<gpu::LocalStoreOp>(user).getDst());
-    const unsigned cbPageSize = 2048; // TODO: read from cb type
-    const int32_t numCbTiles =
-        cast<ttkernel::CBType>(cb.getType()).getNumTiles();
-    Value l1BaseAddr = ttkernel::GetWritePtrOp::create(rewriter, loc, cb);
+    {
+      rewriter.setInsertionPointToStart(isSender.elseBlock());
+      // receive the multicast
+      // first, notify the sender that we are ready to receive
+      auto remoteNocAddr = ttkernel::GetNocAddrOp::create(
+          rewriter, loc, convertVirtualToPhysicalIndex(senderIndexX, true),
+          convertVirtualToPhysicalIndex(senderIndexY, false), senderSemaphore);
+      ttkernel::NocSemaphoreIncOp::create(
+          rewriter, loc, remoteNocAddr,
+          arith::createIndexConstant(loc, rewriter, 1), nullptr);
+      // cast the receiver semaphore to the L1 ptr
+      auto l1ReceiverAddr =
+          ttkernel::CastToL1PtrOp::create(rewriter, loc, receiverSemaphore);
+      // wait for the sender to finish transmitting data
+      ttkernel::NocSemaphoreWaitOp::create(
+          rewriter, loc, l1ReceiverAddr,
+          arith::createIndexConstant(loc, rewriter, 1));
+      // reset post transmit
+      ttkernel::NocSemaphoreSetOp::create(
+          rewriter, loc, l1ReceiverAddr,
+          arith::createIndexConstant(loc, rewriter, 0));
+    }
+    rewriter.setInsertionPointAfter(isSender);
 
-    // multicast send
-    Value groupSize = arith::createIndexConstant(loc, rewriter, 40);
-    Value numDests = arith::SubIOp::create(
-        rewriter, loc, groupSize, arith::createIndexConstant(loc, rewriter, 1));
+    rewriter.eraseOp(multicastOp);
 
-    // start with a wait and a set on the sender semaphore
-    auto l1SenderAddr =
-        ttkernel::CastToL1PtrOp::create(rewriter, loc, senderSemaphore);
-    // wait for all receiver cores to acknowledge ready
-    // should be checking for 6 (or 4 for the last row)
-    ttkernel::NocSemaphoreWaitOp::create(rewriter, loc, l1SenderAddr, numDests);
-    ttkernel::NocSemaphoreSetOp::create(
-        rewriter, loc, l1SenderAddr,
-        arith::createIndexConstant(loc, rewriter, 0));
-
-    // get the multicast addresses
-    auto mcastAddr = ttkernel::ExperimentalGetNocMulticastAddrOp::create(
-        rewriter, loc, convertVirtualToPhysicalIndex(senderIndexX, true),
-        convertVirtualToPhysicalIndex(senderIndexY, false),
-        convertVirtualToPhysicalIndex(mcastEndX, true),
-        convertVirtualToPhysicalIndex(mcastEndY, false), l1BaseAddr, nullptr);
-    ttkernel::NocAsyncWriteMulticastOp::create(
-        rewriter, loc, l1BaseAddr, mcastAddr,
-        arith::createConstantI32(loc, rewriter, cbPageSize * numCbTiles),
-        arith::IndexCastOp::create(rewriter, loc, rewriter.getI32Type(),
-                                   numDests),
-        nullptr, nullptr, nullptr);
-    ttkernel::NocAsyncWriteBarrierOp::create(rewriter, loc);
-
-    // signal multicast completion using the receiver data ready semaphore
-    // set the local value for the semaphore first
-    // TODO: from here
-
-    assert(false && "TODO");
     return success();
   }
 };
@@ -1067,7 +1134,6 @@ void populateMemoryOpConversionPattern(
   patterns.add<ConvertLocalStoreOp>(typeConverter, patterns.getContext());
   patterns.add<ConvertLocalLoadOp>(typeConverter, patterns.getContext());
   patterns.add<ConvertLocalAllocOp>(typeConverter, patterns.getContext());
-
   patterns.add<ConvertMulticastOp>(typeConverter, patterns.getContext());
 }
 
