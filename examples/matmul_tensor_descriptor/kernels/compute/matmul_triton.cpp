@@ -70,12 +70,12 @@ void kernel_main() {
       cb_wait_front(get_compile_time_arg_val(1), v7);
       }
       matmul_tiles(get_compile_time_arg_val(0), get_compile_time_arg_val(1), v5, v5, v1);
-      matmul_tiles(get_compile_time_arg_val(0), get_compile_time_arg_val(1), v5, v6, v2);
+      matmul_tiles(get_compile_time_arg_val(0), get_compile_time_arg_val(1), v5, v8, v2);
       matmul_tiles(get_compile_time_arg_val(0), get_compile_time_arg_val(1), v8, v5, v3);
-      matmul_tiles(get_compile_time_arg_val(0), get_compile_time_arg_val(1), v8, v6, v4);
-      matmul_tiles(get_compile_time_arg_val(0), get_compile_time_arg_val(1), v6, v8, v1);
+      matmul_tiles(get_compile_time_arg_val(0), get_compile_time_arg_val(1), v8, v8, v4);
+      matmul_tiles(get_compile_time_arg_val(0), get_compile_time_arg_val(1), v6, v6, v1);
       matmul_tiles(get_compile_time_arg_val(0), get_compile_time_arg_val(1), v6, v9, v2);
-      matmul_tiles(get_compile_time_arg_val(0), get_compile_time_arg_val(1), v9, v8, v3);
+      matmul_tiles(get_compile_time_arg_val(0), get_compile_time_arg_val(1), v9, v6, v3);
       matmul_tiles(get_compile_time_arg_val(0), get_compile_time_arg_val(1), v9, v9, v4);
       cb_pop_front(get_compile_time_arg_val(0), v7);
       cb_pop_front(get_compile_time_arg_val(1), v7);
@@ -86,10 +86,10 @@ void kernel_main() {
     DeviceZoneScopedN("tile_regs_wait");
     tile_regs_wait();
     }
-    pack_tile<false>(v5, get_compile_time_arg_val(2), v5);
-    pack_tile<false>(v6, get_compile_time_arg_val(2), v6);
-    pack_tile<false>(v8, get_compile_time_arg_val(2), v8);
-    pack_tile<false>(v9, get_compile_time_arg_val(2), v9);
+    pack_tile<true>(v5, get_compile_time_arg_val(2), v5);
+    pack_tile<true>(v6, get_compile_time_arg_val(2), v6);
+    pack_tile<true>(v8, get_compile_time_arg_val(2), v8);
+    pack_tile<true>(v9, get_compile_time_arg_val(2), v9);
     tile_regs_release();
     cb_push_back(get_compile_time_arg_val(2), v7);
   }
