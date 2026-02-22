@@ -138,7 +138,6 @@ void matmul_multi_core(
 
     uint32_t num_cores = 40;
     CoreCoord start_core = {0, 0};
-    // CoreCoord core_range = {8, 5};
     uint32_t start_core_x = start_core.x;
     uint32_t start_core_y = start_core.y;
     uint32_t num_cores_x = 8;

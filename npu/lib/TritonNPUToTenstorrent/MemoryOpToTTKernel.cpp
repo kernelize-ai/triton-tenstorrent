@@ -769,18 +769,31 @@ struct ConvertMulticastOp : public OpConversionPattern<npu::tt::MulticastOp> {
     Value xVirtIndex = ttkernel::MyLogicalXOp::create(rewriter, loc);
     Value yVirtIndex = ttkernel::MyLogicalYOp::create(rewriter, loc);
 
-    // in our new 8x5 grid y=4 is the end
+    // each row multicasts
+    // TODO: instead of hard coding the y index end, we need to pull the y index
+    // end based on the grid dimensions (as an argument?)
     Value cYEnd = arith::createIndexConstant(loc, rewriter, 4);
-
     Value c0 = arith::createIndexConstant(loc, rewriter, 0);
-    Value senderIndexX = c0;
-    Value senderIndexY = arith::createIndexConstant(loc, rewriter, 0);
 
-    Value mcastStartX = senderIndexX;
-    Value mcastEndX = arith::createIndexConstant(loc, rewriter, 7);
+    // size per row
+    Value groupSize = arith::AddIOp::create(
+        rewriter, loc, cYEnd,
+        arith::createIndexConstant(loc, rewriter, 1)); // TODO: needed?
+    Value numDests = cYEnd;
 
-    Value mcastStartY = c0;
+    // TODO: only valid for rows multicast
+    Value senderIndexX = xVirtIndex;
+    Value senderIndexY = c0;
+
+    Value mcastEndX = xVirtIndex;
     Value mcastEndY = cYEnd;
+
+    // start info
+    Value isLeftSide = arith::CmpIOp::create(
+        rewriter, loc, arith::CmpIPredicate::eq, yVirtIndex,
+        arith::createIndexConstant(loc, rewriter, 0));
+
+    Value isSenderBool = isLeftSide;
 
     // two semaphores - one on the sender core as an acknowledgement counter and
     // one on the receiver cores as a data ready flag
@@ -827,16 +840,6 @@ struct ConvertMulticastOp : public OpConversionPattern<npu::tt::MulticastOp> {
         cast<ttkernel::CBType>(cb.getType()).getNumTiles();
     Value numPages = arith::createConstantI32(loc, rewriter, numCbTiles);
 
-    // start info
-    Value isTopRow = arith::CmpIOp::create(
-        rewriter, loc, arith::CmpIPredicate::eq, yVirtIndex,
-        arith::createIndexConstant(loc, rewriter, 0));
-    Value isX0 = arith::CmpIOp::create(
-        rewriter, loc, arith::CmpIPredicate::eq, xVirtIndex,
-        arith::createIndexConstant(loc, rewriter, 0));
-
-    Value isSenderBool = arith::AndIOp::create(rewriter, loc, isTopRow, isX0);
-
     scf::IfOp isSender =
         scf::IfOp::create(rewriter, loc, ValueRange{}, isSenderBool);
     scf::IfOp::ensureTerminator(isSender.getThenRegion(), rewriter, loc);
@@ -862,17 +865,10 @@ struct ConvertMulticastOp : public OpConversionPattern<npu::tt::MulticastOp> {
       // get the CB address
       Value l1BaseAddr = ttkernel::GetWritePtrOp::create(rewriter, loc, cb);
 
-      // multicast send
-      Value groupSize = arith::createIndexConstant(loc, rewriter, 40);
-      Value numDests =
-          arith::SubIOp::create(rewriter, loc, groupSize,
-                                arith::createIndexConstant(loc, rewriter, 1));
-
       // start with a wait and a set on the sender semaphore
       auto l1SenderAddr =
           ttkernel::CastToL1PtrOp::create(rewriter, loc, senderSemaphore);
       // wait for all receiver cores to acknowledge ready
-      // should be checking for 6 (or 4 for the last row)
       ttkernel::NocSemaphoreWaitOp::create(rewriter, loc, l1SenderAddr,
                                            numDests);
       ttkernel::NocSemaphoreSetOp::create(
