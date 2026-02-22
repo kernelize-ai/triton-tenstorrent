@@ -776,9 +776,6 @@ struct ConvertMulticastOp : public OpConversionPattern<npu::tt::MulticastOp> {
     Value c0 = arith::createIndexConstant(loc, rewriter, 0);
 
     // size per row
-    Value groupSize = arith::AddIOp::create(
-        rewriter, loc, cYEnd,
-        arith::createIndexConstant(loc, rewriter, 1)); // TODO: needed?
     Value numDests = cYEnd;
 
     // TODO: only valid for rows multicast

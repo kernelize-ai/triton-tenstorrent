@@ -126,16 +126,6 @@ void matmul_multi_core(
     const uint32_t grid_n = ceil_div(Nt, BNt);
     const uint32_t num_output_blocks_total = grid_m * grid_n;
 
-    // Use the split_work_to_cores utility function to distribute matrix multiplication work
-    // across available cores for efficient SPMD (Single Program, Multiple Data) execution.
-    // This function takes the total number of output tiles and available cores, then calculates
-    // how to divide the work when it cannot be evenly distributed. It returns two groups of cores:
-    // - Primary group: handles more tiles per core
-    // - Secondary group: handles fewer tiles per core
-    // The secondary group is empty if the work can be evenly distributed across all cores. This
-    // approach minimizes workload imbalance between cores for optimal performance.
-#if 1
-
     uint32_t num_cores = 40;
     CoreCoord start_core = {0, 0};
     uint32_t start_core_x = start_core.x;
@@ -155,10 +145,7 @@ void matmul_multi_core(
     CoreRangeSet core_group_2; // empty
     uint32_t work_per_core1 = num_output_blocks_total / num_cores;
     uint32_t work_per_core2 = 0;
-#else
-    auto [num_cores, all_cores, core_group_1, core_group_2, work_per_core1, work_per_core2] =
-        split_work_to_cores(core_grid, num_output_blocks_total);
-#endif 
+
     fmt::print(
         "Distributing {} output tiles across {} cores: {} cores ({}) x {} tiles/core + {} cores ({}) x {} tiles/core\n",
         num_output_blocks_total,
@@ -182,30 +169,6 @@ void matmul_multi_core(
         M,
         N,
         Mt * Nt);
-
-     auto matmul_params = bmm_op_utils::get_large_matmul_params(Mt, Nt, core_grid.y, core_grid.x, 2);
-    uint32_t per_core_M = std::get<0>(matmul_params);
-    uint32_t per_core_N = std::get<1>(matmul_params);
-    uint32_t out_subblock_h = std::get<2>(matmul_params);
-    uint32_t out_subblock_w = std::get<3>(matmul_params);
-
-    fmt::print(" -- Metalium Core Sizing --\n");
-    fmt::print(
-        " -- per_core_M= {} -- per_core_N= {} -- out_subblock_h= {} -- out_subblock_w= {} --\n",
-        per_core_M,
-        per_core_N,
-        out_subblock_h,
-        out_subblock_w);
-    uint32_t num_blocks_y = Mt / per_core_M;
-    uint32_t num_blocks_x = Nt / per_core_N;
-    uint32_t num_blocks_total = num_blocks_y * num_blocks_x;
-    CoreCoord core_range = bmm_op_utils::get_core_range(num_blocks_y, num_blocks_x, core_grid.y, core_grid.x);
-
-    fmt::print("Matmul params using get core range:"
-                " num_blocks_y= {} -- num_blocks_x= {} -- core_range_end= {}\n",
-                num_blocks_y,
-                num_blocks_x,
-                core_range);
 
     // Create DRAM buffers for input and output matrices (replicated per device across the mesh).
     // We allocate DRAM buffers for the input matrices and output matrix.
