@@ -126,24 +126,40 @@ void matmul_multi_core(
     const uint32_t grid_n = ceil_div(Nt, BNt);
     const uint32_t num_output_blocks_total = grid_m * grid_n;
 
+    uint32_t num_cores_x = core_grid.x;
+    uint32_t num_cores_y = core_grid.y;
+    uint32_t num_cores_total = num_cores_x * num_cores_y;
+    uint32_t num_cores = num_cores_total; // TODO: de-dupe
+    fmt::print("Number of cores: {} x {} = {}\n", num_cores_x, num_cores_y, num_cores_total);
+    fmt::print("Number of grid blocks: {} x {} = {}\n", grid_m, grid_n, num_output_blocks_total);
+    auto all_cores = CoreRangeSet(CoreRange({0, 0}, {num_cores_x - 1, num_cores_y - 1}));
+    
+    // map the required blocks over all cores in the core range set 
+    uint32_t work_per_core = ceil_div(num_output_blocks_total, num_cores_total);
+    fmt::print("work per core = {}\n", work_per_core);
+#if 0
     uint32_t num_cores = 40;
     CoreCoord start_core = {0, 0};
     uint32_t start_core_x = start_core.x;
     uint32_t start_core_y = start_core.y;
-    uint32_t num_cores_x = 8;
-    uint32_t num_cores_y = 5;
+    uint32_t _num_cores_x = 8;
+    uint32_t _num_cores_y = 5;
     // this defines the first rectangle. build up the core range by adding rectangles    
     std::vector<CoreRange> ranges;
-    for (uint32_t i = 0; i < num_cores_x; i++) {
+    for (uint32_t i = 0; i < _num_cores_x; i++) {
         ranges.emplace_back(
             CoreCoord((std::size_t)start_core_x + i, (std::size_t)start_core_y),
-            CoreCoord((std::size_t)start_core_x + i, (std::size_t)start_core_y + num_cores_y - 1));
+            CoreCoord((std::size_t)start_core_x + i, (std::size_t)start_core_y + _num_cores_y - 1));
     }
     CoreRangeSet all_cores;  
     all_cores = all_cores.merge(ranges);
     auto core_group_1 = all_cores;
+#else
+    CoreRangeSet core_group_1 = all_cores; 
+#endif 
     CoreRangeSet core_group_2; // empty
-    uint32_t work_per_core1 = num_output_blocks_total / num_cores;
+    // uint32_t work_per_core1 = num_output_blocks_total / num_cores;
+    uint32_t work_per_core1 = work_per_core;
     uint32_t work_per_core2 = 0;
 
     fmt::print(
@@ -319,35 +335,27 @@ void matmul_multi_core(
     // Iterate through each work group and assign work to cores
     for (const auto& [ranges, work_per_core] : work_groups) {
         for (const auto& range : ranges.ranges()) {
-            for (const auto& core : range) {
-#if 0
-                uint32_t pid;
-                if (core.x < 4) {
-                    uint32_t n = 4*core.y + core.x;      // 0..19
-                    pid = 2*n;                           // even
-                } else {
-                    uint32_t n = 4*core.y + (core.x-4);  // 0..19
-                    pid = 2*n + 1;                       // odd
-                }
-                work_offset = pid;
-#endif 
-                fmt::print("Core {} assigned {} output tiles starting at offset {}\n", core.str(), work_per_core, work_offset);
+            for (const auto& core : range) {  
+                uint32_t block_start = work_offset;
+                uint32_t block_end = work_offset + work_per_core < num_output_blocks_total ? work_offset + work_per_core : num_output_blocks_total;
+                
+                fmt::print("Core {} assigned grid range ({}, {})\n", core.str(), block_start, block_end);
                 // Set arguments for the reader kernel (data input)
                 tt_metal::SetRuntimeArgs(
                     program,
                     reader_id,
                     core,
                     {                        
-                        work_offset,
-                        work_offset + work_per_core
+                        block_start,
+                        block_end
                     });          
 
                 // Set arguments for the writer kernel (data output)
                 tt_metal::SetRuntimeArgs(
                     program, writer_id, core,             
                     {                         
-                        work_offset,
-                        work_offset + work_per_core
+                        block_start,
+                        block_end
                     });  
 
                 // Set arguments for the compute kernel
@@ -356,8 +364,8 @@ void matmul_multi_core(
                     compute_kernel_id,
                     core,
                     {                   
-                        work_offset,
-                        work_offset + work_per_core
+                        block_start,
+                        block_end
                     });                   
                 work_offset += work_per_core;  // Update offset for next core
             }
