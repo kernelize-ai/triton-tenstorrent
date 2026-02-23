@@ -756,6 +756,12 @@ struct ConvertMulticastOp : public OpConversionPattern<npu::tt::MulticastOp> {
         !(dotOpEncoding && (dotOpEncoding.getOpIdx() == 1));
     assert(rowsMulticast && "only rows multicast is supported");
 
+    Block *multicastOpBody = &multicastOp.getBody().front();
+    assert(multicastOpBody && "expected multicast op body block");
+    auto multicastYield = cast<npu::tt::YieldOp>(multicastOpBody->back());
+    // delete the multicast yield
+    rewriter.eraseOp(multicastYield);
+
     // convert logical (virtual) indices to translated (physical) indices
     auto convertVirtualToPhysicalIndex = [&](Value virtIndex,
                                              bool isX) -> Value {
@@ -770,20 +776,37 @@ struct ConvertMulticastOp : public OpConversionPattern<npu::tt::MulticastOp> {
     Value yVirtIndex = ttkernel::MyLogicalYOp::create(rewriter, loc);
 
     // each row multicasts
-    // TODO: instead of hard coding the y index end, we need to pull the y index
-    // end based on the grid dimensions (as an argument?)
-    Value cYEnd = arith::createIndexConstant(loc, rewriter, 4);
+    // TODO: currently we get the number of active cores in the row from the
+    // runtime. It would be better if we could encode this into the kernel
+    // configuration similarly to numWarps, numCtas, etc
+    auto parentFuncOp = multicastOp->getParentOfType<func::FuncOp>();
+    assert(parentFuncOp && "expected parent func op");
+    // TODO: this is currently shared with GetProgramIdOp lowering. We don't
+    // update the value there. Can we update the values in both places
+    // simultaneously and avoid race conditions? For now we assume 1D grid and
+    // offset by 2 for the 1D (block_start, block_end) pair
+    auto perCoreArgsBase =
+        parentFuncOp->getAttrOfType<IntegerAttr>(kTTNumPerCoreArgsAttr)
+            .getInt();
+    Value paramIndexValue =
+        arith::createIndexConstant(loc, rewriter, perCoreArgsBase + 2);
+    auto activeCoresInRowInt = ttkernel::GetArgValOp::create(
+        rewriter, loc, rewriter.getI32Type(), paramIndexValue);
+
+    Value rowEnd =
+        arith::SubIOp::create(rewriter, loc, activeCoresInRowInt.getResult(),
+                              arith::createConstantI32(loc, rewriter, 1));
     Value c0 = arith::createIndexConstant(loc, rewriter, 0);
 
     // size per row
-    Value numDests = cYEnd;
+    Value numDests = rowEnd;
 
     // TODO: only valid for rows multicast
     Value senderIndexX = xVirtIndex;
     Value senderIndexY = c0;
 
     Value mcastEndX = xVirtIndex;
-    Value mcastEndY = cYEnd;
+    Value mcastEndY = rowEnd;
 
     // start info
     Value isLeftSide = arith::CmpIOp::create(
@@ -794,9 +817,6 @@ struct ConvertMulticastOp : public OpConversionPattern<npu::tt::MulticastOp> {
 
     // two semaphores - one on the sender core as an acknowledgement counter and
     // one on the receiver cores as a data ready flag
-    auto parentFuncOp = multicastOp->getParentOfType<func::FuncOp>();
-    assert(parentFuncOp && "expected parent func op");
-
     auto argSpec = parentFuncOp->getAttrOfType<ttkernel::ArgSpecAttr>(
         ttkernel::ArgSpecAttr::name);
     SmallVector<ttkernel::ArgAttr> ctArgs;
@@ -844,12 +864,6 @@ struct ConvertMulticastOp : public OpConversionPattern<npu::tt::MulticastOp> {
     {
       rewriter.setInsertionPointToStart(isSender.thenBlock());
 
-      Block *multicastOpBody = &multicastOp.getBody().front();
-      assert(multicastOpBody && "expected multicast op body block");
-      // delete the multicast yield
-      auto multicastYield = cast<npu::tt::YieldOp>(multicastOpBody->back());
-      rewriter.eraseOp(multicastYield);
-
       // copy the block from the multicast op here
       rewriter.inlineBlockBefore(multicastOpBody, isSender.thenBlock(),
                                  isSender.thenBlock()->begin());
@@ -881,9 +895,7 @@ struct ConvertMulticastOp : public OpConversionPattern<npu::tt::MulticastOp> {
       ttkernel::NocAsyncWriteMulticastOp::create(
           rewriter, loc, l1BaseAddr, mcastAddr,
           arith::createConstantI32(loc, rewriter, cbPageSize * numCbTiles),
-          arith::IndexCastOp::create(rewriter, loc, rewriter.getI32Type(),
-                                     numDests),
-          nullptr, nullptr, nullptr);
+          numDests, nullptr, nullptr, nullptr);
       ttkernel::NocAsyncWriteBarrierOp::create(rewriter, loc);
 
       // signal multicast completion using the receiver data ready semaphore
@@ -903,9 +915,7 @@ struct ConvertMulticastOp : public OpConversionPattern<npu::tt::MulticastOp> {
               convertVirtualToPhysicalIndex(mcastEndY, false),
               receiverSemaphore, nullptr);
       ttkernel::NocSemaphoreSetMulticastOp::create(
-          rewriter, loc, receiverSemaphore, mcastCompleteAddr,
-          arith::IndexCastOp::create(rewriter, loc, rewriter.getI32Type(),
-                                     numDests),
+          rewriter, loc, receiverSemaphore, mcastCompleteAddr, numDests,
           nullptr, nullptr);
     }
 

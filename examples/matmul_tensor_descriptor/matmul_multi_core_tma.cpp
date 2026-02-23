@@ -21,6 +21,8 @@ using namespace std;
 using namespace tt;
 using namespace tt::tt_metal;
 
+#define MULTICAST_DISPATCH 1
+
 #ifndef OVERRIDE_KERNEL_PREFIX
 #define OVERRIDE_KERNEL_PREFIX ""
 #endif
@@ -332,6 +334,68 @@ void matmul_multi_core(
     tt_metal::SetCommonRuntimeArgs(program, writer_id, common_args);
     tt_metal::SetCommonRuntimeArgs(program, compute_kernel_id, common_args);
 
+#ifdef MULTICAST_DISPATCH
+    // dispatch by row. prioritizes full rows (better for row-wise multicast) and allow us to easily determine the number of cores in a row up front 
+    unsigned crtIndex = 0;
+    for (auto coreRange : all_cores.ranges()) {
+        auto start = coreRange.start_coord;
+        auto end = coreRange.end_coord;
+
+        for (unsigned r = start.x; r <= end.x; ++r) {
+            // calculate number of participating cores in this row using work per core 
+            unsigned active_cores_in_row = 0;
+            uint32_t pid = crtIndex;
+            for (unsigned c = start.y; c <= end.y; ++c) {
+                if (pid < num_output_blocks_total) 
+                    active_cores_in_row++;
+                pid += work_per_core; 
+            }
+            fmt::print("Active cores in row {}: {}\n", r, active_cores_in_row);
+
+            for (unsigned c = start.y; c <= end.y; ++c) {
+                auto core = tt::tt_metal::CoreCoord{r, c};
+                uint32_t pid = crtIndex; 
+                uint32_t block_start = pid; 
+                uint32_t block_end = pid + work_per_core < num_output_blocks_total ? pid + work_per_core : num_output_blocks_total;
+
+                fmt::print("Core {} assigned grid range ({}, {})\n", core.str(), block_start, block_end);
+
+                tt_metal::SetRuntimeArgs(
+                    program,
+                    reader_id,
+                    core,
+                    {                        
+                        block_start,
+                        block_end,
+                        active_cores_in_row
+                    });          
+
+                // Set arguments for the writer kernel (data output)
+                tt_metal::SetRuntimeArgs(
+                    program, writer_id, core,             
+                    {                         
+                        block_start,
+                        block_end,
+                        active_cores_in_row
+                    });  
+
+                // Set arguments for the compute kernel
+                tt_metal::SetRuntimeArgs(
+                    program,
+                    compute_kernel_id,
+                    core,
+                    {                   
+                        block_start,
+                        block_end,
+                        active_cores_in_row
+                    });      
+
+                crtIndex += work_per_core;
+            }   
+        }
+    }
+#else
+
     // Iterate through each work group and assign work to cores
     for (const auto& [ranges, work_per_core] : work_groups) {
         for (const auto& range : ranges.ranges()) {
@@ -371,7 +435,7 @@ void matmul_multi_core(
             }
         }
     }
-    
+#endif 
     // Launch program & read in output buffer result into the host vector
     // 1. Upload input data to DRAM buffers
     // 2. Execute the program (all kernels run in parallel across cores)
