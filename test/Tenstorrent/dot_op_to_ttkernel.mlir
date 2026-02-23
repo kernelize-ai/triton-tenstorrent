@@ -765,8 +765,8 @@ module attributes {"ttg.num-ctas" = 1 : i32, "ttg.num-warps" = 1 : i32, "ttg.thr
       // CHECK: ttkernel.noc_semaphore_set_multicast(%[[SEM_RECV]], %{{.*}}, %{{.*}})
 
       // CHECK: } else {
-      // CHECK: %[[NY:.*]] = ttkernel.experimental::convert_logical_y_to_translated(%[[c0_index]])
-      // CHECK: %[[NX:.*]] = ttkernel.experimental::convert_logical_x_to_translated(%[[LX]])
+      // CHECK-DAG: %[[NY:.*]] = ttkernel.experimental::convert_logical_y_to_translated(%[[c0_index]])
+      // CHECK-DAG: %[[NX:.*]] = ttkernel.experimental::convert_logical_x_to_translated(%[[LX]])
 
       // COM: signal readiness to receive
       // CHECK: %[[SEND_NOC:.*]] = ttkernel.get_noc_addr(%[[NX]], %[[NY]], %[[SEM_SEND]])
