@@ -302,7 +302,6 @@ void matmul_multi_core(
     uint32_t stride_CM = N;
     fmt::print("Matrix strides: AM={}, BK={}, CM={}\n", stride_AM, stride_BK, stride_CM);
 
-    // TODO: Update me! add semaphores 
     // Set common runtime args per kernel
     auto common_args = std::vector<uint32_t>{(uint32_t)src0_dram_buffer->address(),  // Address of matrix A in DRAM
                         M, // shape[0]
