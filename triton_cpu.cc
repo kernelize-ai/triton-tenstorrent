@@ -185,15 +185,6 @@ void init_triton_cpu(py::module &&m) {
           context.loadAllAvailableDialects();
         });
 
-  m.def(
-      "translate_to_ttnn",
-      [](mlir::ModuleOp moduleOp, const std::string &symbolName) -> py::object {
-        mlir::MLIRContext *ctx = moduleOp.getContext();
-        mlir::SymbolTable symbolTable(moduleOp);
-
-        return py::str("");
-      });
-
   m.def("get_default_target_triple",
         []() { return getDefaultTargerOrProcessTriple(); });
 
