@@ -95,9 +95,9 @@ void matmul_multi_core(
         N,
         TILE_HW);
 
-    uint32_t BM = 32;  // block M in elements
+    uint32_t BM = 64;  // block M in elements
     uint32_t BN = 128;  // block N in elements
-    uint32_t BK = 64;  // block K in elements
+    uint32_t BK = 512;  // block K in elements
 
     TT_ASSERT(BM % TILE_HEIGHT == 0 && BN % TILE_WIDTH == 0 && BK % TILE_WIDTH == 0,
           "Block sizes must be tile-multiple (32).");
@@ -169,7 +169,7 @@ void matmul_multi_core(
         M,
         N,
         Mt * Nt);
-        return;
+
     // Create DRAM buffers for input and output matrices (replicated per device across the mesh).
     // We allocate DRAM buffers for the input matrices and output matrix.
     // Setting page_size to single_tile_size is the most common configuration for memory buffers in Metalium
@@ -534,7 +534,7 @@ int main(int argc, char* argv[]) {
         float pearson = check_bfloat16_vector_pcc(golden_vec, result_vec);
         fmt::print("Metalium vs Golden -- PCC = {}\n", pearson);
          
-        // TT_FATAL(pearson > 0.97, "PCC not high enough. Result PCC: {}, Expected PCC: 0.97", pearson);
+        TT_FATAL(pearson > 0.97, "PCC not high enough. Result PCC: {}, Expected PCC: 0.97", pearson);
 
         pass &= mesh_device->close();
 
