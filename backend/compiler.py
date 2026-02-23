@@ -34,6 +34,7 @@ class CPUOptions:
     matrix_instr_nonkdim: int = 32
     warp_size: int = 1
     min_dot_size: int = 1
+    enable_dot_op_multicast: bool = False
 
     def hash(self):
         hash_dict = dict(self.__dict__)
@@ -60,6 +61,8 @@ class CPUBackend(BaseBackend):
         args = {'arch': "BLACKHOLE"}
         if "enable_fp_fusion" not in options:
             args["enable_fp_fusion"] = knobs.language.default_fp_fusion
+        if "enable_dot_op_multicast" not in options:
+            args["enable_dot_op_multicast"] = os.environ.get("TRITON_ENABLE_DOT_OP_MULTICAST", "0") == "1"
         args.update(
             {k: options[k]
              for k in CPUOptions.__dataclass_fields__.keys()
@@ -222,7 +225,8 @@ class CPUBackend(BaseBackend):
         passes.common.add_cse(pm)
         passes.common.add_canonicalizer(pm)
 
-        cpu.passes.tenstorrent.add_materialize_multicasts(pm)
+        if options.enable_dot_op_multicast:
+            cpu.passes.tenstorrent.add_materialize_multicasts(pm)
         cpu.passes.tenstorrent.add_register_allocation(pm)
         cpu.passes.tenstorrent.add_canonicalize_matmul_loops(pm)
         cpu.passes.tenstorrent.add_to_ttkernel_dialect(pm)
