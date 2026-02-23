@@ -295,9 +295,6 @@ struct ConvertTensorDescLoadOp
         baseTileW);
 
     Value const0 = arith::createConstantI32(loc, rewriter, 0);
-
-    SmallVector<Value> l1TileAddresses;
-    l1TileAddresses.reserve(blockTilesH * blockTilesW);
     for (unsigned i = 0; i < blockTilesH; i++) {
       for (unsigned j = 0; j < blockTilesW; j++) {
         // compute the L1 index for this row and column
@@ -321,9 +318,6 @@ struct ConvertTensorDescLoadOp
             loc, rewriter, result[1].second * cbPageSize);
         Value crtL1Address =
             arith::AddIOp::create(rewriter, loc, l1BaseAddr, l1TileOffsetBytes);
-        // TODO: should we order these? currently they will be in random order
-        // since the loads are in DRAM order
-        l1TileAddresses.push_back(crtL1Address);
 
         // compute the global tile index for this row and column
         Value crtIndex = baseRemoteIdx;
