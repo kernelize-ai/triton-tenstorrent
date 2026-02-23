@@ -232,15 +232,6 @@ class CPUBackend(BaseBackend):
         cpu.passes.tenstorrent.add_to_ttkernel_dialect(pm)
         passes.common.add_canonicalizer(pm)
 
-        pm.run(mod, "make_ttmlir")
-        return mod
-
-    @staticmethod
-    def make_emitc(mod, metadata, options):
-        pm = ir.pass_manager(mod.context)
-        pm.enable_debug()
-
-        # tt-mlir continued
         cpu.passes.tenstorrent.add_ttkernel_device_zone_scopes(pm)
         passes.common.add_canonicalizer(pm)
         passes.common.add_licm(pm)
@@ -251,8 +242,18 @@ class CPUBackend(BaseBackend):
         cpu.passes.common.add_arith_expand(pm)
         sys_desc_path = os.getenv("TT_SYSTEM_DESC_PATH", "")
         cpu.passes.tenstorrent.add_ttcore_register_device_pass(pm, sys_desc_path)
-        cpu.passes.tenstorrent.add_ttkernel_to_emitc(pm)
+
+        pm.run(mod, "make_ttmlir")
+        return mod
+
+    @staticmethod
+    def make_emitc(mod, metadata, options):
+        pm = ir.pass_manager(mod.context)
+        pm.enable_debug()
+
         passes.common.add_canonicalizer(pm)
+        cpu.passes.tenstorrent.add_ttkernel_device_zone_scopes(pm)
+        cpu.passes.tenstorrent.add_ttkernel_to_emitc(pm)
 
         pm.run(mod, "make_emit_c")
         return mod
@@ -318,26 +319,14 @@ class CPUBackend(BaseBackend):
                 return f.read()
 
     @staticmethod
-    def make_flatbuffer(mod, metadata, options):
+    def make_ttnn_generic(mod, metadata, options):
+        # TODO: conditionally enable
         pm = ir.pass_manager(mod.context)
         pm.enable_debug()
 
-        cpu.passes.common.add_arith_int_range_opts(pm)
-        cpu.passes.common.add_arith_expand(pm)
-        passes.common.add_canonicalizer(pm)
-        passes.common.add_licm(pm)
-        passes.common.add_sccp(pm)
-        passes.common.add_cse(pm)
-
-        sys_desc_path = os.getenv("TT_SYSTEM_DESC_PATH", "")
-        cpu.passes.tenstorrent.add_ttcore_register_device_pass(pm, sys_desc_path)
         cpu.passes.tenstorrent.add_create_ttnn_generic_op(pm)
 
-        cpu.passes.tenstorrent.add_ttkernel_device_zone_scopes(pm)
-        cpu.passes.tenstorrent.add_ttkernel_to_emitc(pm)
-        # NOTE: add_ttkernel_to_emitc must be the last pass in the pipeline
-
-        pm.run(mod, "make_flatbuffer")
+        pm.run(mod, "make_ttnn_generic")
         return mod
 
     def add_stages(self, stages, options, language):
@@ -353,8 +342,8 @@ class CPUBackend(BaseBackend):
             stages["so"] = lambda src, metadata: self.make_library(src, metadata, options)
         elif self.device == 'Tenstorrent':
             stages["ttmlir"] = lambda src, metadata: self.make_tenstorrent_mlir(src, metadata, options)
+            stages['ttnn'] = lambda src, metadata: self.make_ttnn_generic(src, metadata, options)
             stages["emitc"] = lambda src, metadata: self.make_emitc(src, metadata, options)
-            stages['flatbuffer'] = lambda src, metadata: self.make_flatbuffer(src, metadata, options)
             stages["cpp"] = lambda src, metadata: self.make_ttmlir_cpp_file(src, metadata, options)
 
     @functools.lru_cache()
