@@ -139,26 +139,8 @@ void matmul_multi_core(
     // map the required blocks over all cores in the core range set 
     uint32_t work_per_core = ceil_div(num_output_blocks_total, num_cores_total);
     fmt::print("work per core = {}\n", work_per_core);
-#if 0
-    uint32_t num_cores = 40;
-    CoreCoord start_core = {0, 0};
-    uint32_t start_core_x = start_core.x;
-    uint32_t start_core_y = start_core.y;
-    uint32_t _num_cores_x = 8;
-    uint32_t _num_cores_y = 5;
-    // this defines the first rectangle. build up the core range by adding rectangles    
-    std::vector<CoreRange> ranges;
-    for (uint32_t i = 0; i < _num_cores_x; i++) {
-        ranges.emplace_back(
-            CoreCoord((std::size_t)start_core_x + i, (std::size_t)start_core_y),
-            CoreCoord((std::size_t)start_core_x + i, (std::size_t)start_core_y + _num_cores_y - 1));
-    }
-    CoreRangeSet all_cores;  
-    all_cores = all_cores.merge(ranges);
-    auto core_group_1 = all_cores;
-#else
+
     CoreRangeSet core_group_1 = all_cores; 
-#endif 
     CoreRangeSet core_group_2; // empty
     // uint32_t work_per_core1 = num_output_blocks_total / num_cores;
     uint32_t work_per_core1 = work_per_core;
@@ -395,7 +377,6 @@ void matmul_multi_core(
         }
     }
 #else
-
     // Iterate through each work group and assign work to cores
     for (const auto& [ranges, work_per_core] : work_groups) {
         for (const auto& range : ranges.ranges()) {
