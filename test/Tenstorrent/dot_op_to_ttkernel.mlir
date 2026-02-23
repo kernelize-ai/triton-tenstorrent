@@ -550,8 +550,8 @@ module attributes {"ttg.num-ctas" = 1 : i32, "ttg.num-warps" = 1 : i32, "ttg.thr
     // CHECK: %[[CB:.*]] = ttkernel.get_compile_time_arg_val(0) : () -> !ttkernel.cb<2, !ttcore.tile<32x32, f16>>
     // CHECK: %[[DATAFORMAT:.*]] = ttkernel.get_dataformat(%[[CB]]) : (!ttkernel.cb<2, !ttcore.tile<32x32, f16>>) -> !ttkernel.DataFormat
     // CHECK: %[[TILESIZE:.*]] = ttkernel.get_tile_size(%[[CB]]) : (!ttkernel.cb<2, !ttcore.tile<32x32, f16>>) -> i32
-    // CHECK: %[[ADDR_GEN:.*]] = ttkernel.get_interleaved_addr_gen_fast(%[[TRUE]], %[[PTR]], %[[TILESIZE]], %[[DATAFORMAT]]) : (i1, i32, i32, !ttkernel.DataFormat) -> !ttkernel.interleaved_addr_gen_fast
     // CHECK: ttkernel.cb_reserve_back(%[[CB]], %[[c2_i32]]) : (!ttkernel.cb<2, !ttcore.tile<32x32, f16>>, i32) -> ()
+    // CHECK: %[[ADDR_GEN:.*]] = ttkernel.get_interleaved_addr_gen_fast(%[[TRUE]], %[[PTR]], %[[TILESIZE]], %[[DATAFORMAT]]) : (i1, i32, i32, !ttkernel.DataFormat) -> !ttkernel.interleaved_addr_gen_fast
     // CHECK: %[[CB_WRITE_PTR:.*]] = ttkernel.get_write_ptr(%[[CB]]) : (!ttkernel.cb<2, !ttcore.tile<32x32, f16>>) -> i32
 
     // CHECK-DAG: %[[TILES_PER_DIM0:.*]] = arith.ceildivsi %[[DESC_SHAPE0]], %[[c32_i32]] : i32
@@ -607,8 +607,8 @@ module attributes {"ttg.num-ctas" = 1 : i32, "ttg.num-warps" = 1 : i32, "ttg.thr
     // CHECK: %[[CB:.*]] = ttkernel.get_compile_time_arg_val(1) : () -> !ttkernel.cb<4, !ttcore.tile<32x32, f16>>
 
     %b = ttg.local_alloc {alloc_idx = 1 : i32} : () -> !ttg.memdesc<64x64xf16, #shared, #smem, mutable>
-    // CHECK: %[[ADDR_GEN:.*]] = ttkernel.get_interleaved_addr_gen_fast({{.*}})
     // CHECK: ttkernel.cb_reserve_back
+    // CHECK: %[[ADDR_GEN:.*]] = ttkernel.get_interleaved_addr_gen_fast({{.*}})
     // CHECK: %[[CB_ADDR:.*]] = ttkernel.get_write_ptr(%[[CB]])
 
     // CHECK-DAG: %[[TILES_PER_DIM0:.*]] = arith.ceildivsi %[[DESC_SHAPE0]], %[[c32_i32]] : i32
@@ -712,4 +712,80 @@ module attributes {"ttg.num-ctas" = 1 : i32, "ttg.num-warps" = 1 : i32, "ttg.thr
     // CHECK: return
     tt.return
   }
+}
+
+// -----
+
+// COM: multicast
+#shared = #ttg.padded_shared<[1:+1] {order = [1, 0], shape = [64, 64]}>
+#smem = #ttg.shared_memory
+#tiled = #triton_tenstorrent.tiled_encoding<{tilesPerCore = [2, 2], order = [1, 0], tileShape = [32, 32]}>
+module attributes {"ttg.num-ctas" = 1 : i32, "ttg.num-warps" = 1 : i32, "ttg.threads-per-warp" = 1 : i32} {
+ // CHECK: func.func public @matmul_kernel_tma__writer
+ tt.func public @matmul_kernel_tma__writer(%arg0: !tt.tensordesc<tensor<64x64xf16>>, %offs_am: i32, %k_tiles_2: i32) {
+  %c0_i32 = arith.constant 0 : i32
+  %c64_i32 = arith.constant 64 : i32
+  %c1_i32 = arith.constant 1 : i32
+  // CHECK-DAG: %[[c0_index:.*]] = arith.constant 0 : index
+  // CHECK-DAG: %[[MCAST_SZ:.*]] = arith.constant 8192 : i32
+
+  %a = ttg.local_alloc {alloc_idx = 0 : i32} : () -> !ttg.memdesc<64x64xf16, #shared, #smem, mutable>
+  // CHECK: %[[CB:.*]] = ttkernel.get_compile_time_arg_val(0)
+
+  scf.for %accumulator = %c0_i32 to %k_tiles_2 step %c1_i32  : i32 {
+    // CHECK-DAG: %[[LX:.*]] = ttkernel.my_logical_x_
+    // CHECK-DAG: %[[LY:.*]] = ttkernel.my_logical_y_
+    // CHECK: %[[IS_SENDER:.*]] = arith.cmpi eq, %[[LY]], %[[c0_index]] : index
+
+    // CHECK-DAG: %[[SEM_SEND_ID:.*]] = ttkernel.get_compile_time_arg_val(1)
+    // CHECK-DAG: %[[SEM_RECV_ID:.*]] = ttkernel.get_compile_time_arg_val(2)
+    // CHECK-DAG: %[[SEM_SEND:.*]] = ttkernel.get_semaphore(%[[SEM_SEND_ID]])
+    // CHECK-DAG: %[[SEM_RECV:.*]] = ttkernel.get_semaphore(%[[SEM_RECV_ID]])
+
+    %offs_k = arith.muli %accumulator, %c64_i32 : i32
+    %a_6 = triton_tenstorrent.multicast %a {
+      // CHECK: scf.if %[[IS_SENDER]] {
+      // CHECK: ttkernel.cb_reserve_back(%[[CB]], %{{.*}}) {{.*}}
+      // COM: read from DRAM into sender SRAM
+      // CHECK-COUNT-4: ttkernel.noc_async_read
+      // CHECK: ttkernel.noc_async_read_barrier
+
+      // COM: wait for receivers to be ready
+      // CHECK: %[[SEND_L1:.*]] = ttkernel.reinterpret_cast<volatile tt_l1_ptr uint32_t*>(%[[SEM_SEND]])
+      // CHECK: ttkernel.noc_semaphore_wait(%[[SEND_L1]], %{{.*}})
+
+      // COM: multicast
+      // CHECK: %[[MCAST_ADDR:.*]] = ttkernel.experimental::get_noc_multicast_addr
+      // CHECK: ttkernel.noc_async_write_multicast(%{{.*}}, %[[MCAST_ADDR]], %[[MCAST_SZ]], %{{.*}})
+      // CHECK: ttkernel.noc_async_write_barrier
+
+      // COM: signal multicast data is available
+      // CHECK: %[[RECV_L1:.*]] = ttkernel.reinterpret_cast<volatile tt_l1_ptr uint32_t*>(%[[SEM_RECV]])
+      // CHECK: ttkernel.noc_semaphore_set(%[[RECV_L1]], %{{.*}})
+      // CHECK: ttkernel.noc_semaphore_set_multicast(%[[SEM_RECV]], %{{.*}}, %{{.*}})
+
+      // CHECK: } else {
+      // CHECK: %[[NY:.*]] = ttkernel.experimental::convert_logical_y_to_translated(%[[c0_index]])
+      // CHECK: %[[NX:.*]] = ttkernel.experimental::convert_logical_x_to_translated(%[[LX]])
+
+      // COM: signal readiness to receive
+      // CHECK: %[[SEND_NOC:.*]] = ttkernel.get_noc_addr(%[[NX]], %[[NY]], %[[SEM_SEND]])
+      // CHECK: ttkernel.noc_semaphore_inc(%[[SEND_NOC]], %{{.*}})
+
+      // COM: wait for the sender to indicate data is available
+      // CHECK: %[[RECV_L1B:.*]] = ttkernel.reinterpret_cast<volatile tt_l1_ptr uint32_t*>(%[[SEM_RECV]])
+      // CHECK: ttkernel.noc_semaphore_wait(%[[RECV_L1B]], %{{.*}})
+      // CHECK: ttkernel.noc_semaphore_set(%[[RECV_L1B]], %{{.*}})
+      // CHECK: }
+
+      // COM: both sender and receiver push back
+      // CHECK: ttkernel.cb_push_back(%[[CB]], %{{.*}})
+
+      %a_7 = tt.descriptor_load %arg0[%offs_am, %offs_k] : !tt.tensordesc<tensor<64x64xf16>> -> tensor<64x64xf16, #triton_tenstorrent.tiled_dot_op<{opIdx = 0, parent = #tiled}>>
+      triton_tenstorrent.yield %a_7, %a : tensor<64x64xf16, #triton_tenstorrent.tiled_dot_op<{opIdx = 0, parent = #tiled}>>, !ttg.memdesc<64x64xf16, #shared, #smem, mutable>
+    } : (!ttg.memdesc<64x64xf16, #shared, #smem, mutable>) -> tensor<64x64xf16, #triton_tenstorrent.tiled_dot_op<{opIdx = 0, parent = #tiled}>>
+    ttg.local_store %a_6, %a : tensor<64x64xf16, #triton_tenstorrent.tiled_dot_op<{opIdx = 0, parent = #tiled}>> -> !ttg.memdesc<64x64xf16, #shared, #smem, mutable>
+  }
+  tt.return
+ }
 }
