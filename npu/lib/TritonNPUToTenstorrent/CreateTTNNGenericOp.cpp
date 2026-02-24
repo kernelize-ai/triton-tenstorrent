@@ -92,7 +92,6 @@ createCBDescriptors(MLIRContext *ctx, func::FuncOp func,
   return cbDescriptors;
 }
 
-// map the worker grid to the identity mapping (one block per core)
 static SmallVector<ttnn::CoreRuntimeArgsAttr>
 populateBlockStartEndArgs(Builder &b,
                           const ttnn::CoreRangeSetAttr &coreRangeSet,
@@ -274,7 +273,6 @@ createSemaphoreDescriptors(Builder &builder, Kernels &kernels,
     }
   }
   size_t numSemaphores = seenSemaphoreIndices.size();
-#if 1
   if (numSemaphores > 0) {
     // Semaphore indices are assigned sequentially in D2MToTTKernel, so they
     // should be dense.
@@ -283,7 +281,6 @@ createSemaphoreDescriptors(Builder &builder, Kernels &kernels,
     assert((minIndex == 0u && maxIndex == numSemaphores - 1) &&
            "Semaphore indices must be dense (0, 1, 2, ..., n-1)");
   }
-#endif
   SmallVector<ttnn::KernelSemaphoreAttr> semaphoreDescriptors(numSemaphores);
   for (size_t i = 0; i < numSemaphores; ++i) {
     semaphoreDescriptors[i] = builder.getAttr<ttnn::KernelSemaphoreAttr>(
@@ -520,11 +517,6 @@ struct CreateTTNNGenericOp
     ttnn::CoreRangeSetAttr allCores =
         ttnn::CoreRangeSetAttr::get(context, {getCoreRange(0, 0, 7, 6)});
 
-    // split work to cores typically creates two core range sets.
-    // Distributing 80 output tiles across 56 cores: 24 cores ({[(x=0,y=0) -
-    // (x=2,y=6)], [(x=3,y=0) - (x=3,y=2)]}) x 2 tiles/core + 32 cores
-    // ({[(x=3,y=3) - (x=3,y=6)], [(x=4,y=0) - (x=7,y=6)]}) x 1 tiles/core
-
     unsigned gridId = 0;
     auto populateBlockStartEndArgsForSet =
         [&](OpBuilder &builder, ttnn::CoreRangeSetAttr coreRangeSet,
@@ -539,39 +531,6 @@ struct CreateTTNNGenericOp
     OpBuilder builder(m);
 
     SmallVector<ttnn::CoreRuntimeArgsAttr> kernelRTArgs;
-// 20260202
-
-// 1024x1024x1024
-#if 0
-  // 64x128xK
-  // Distributing 128 output tiles across 56 cores: 16 cores ({[(x=0,y=0) - (x=1,y=6)], [(x=2,y=0) - (x=2,y=1)]}) x 3 tiles/core + 40 cores ({[(x=2,y=2) - (x=2,y=6)], [(x=3,y=0) - (x=7,y=6)]}) x 2 tiles/core
-  ttnn::CoreRangeSetAttr coreRangeSet1 = ttnn::CoreRangeSetAttr::get(
-      context, {getCoreRange(0, 0, 1, 6), getCoreRange(2, 0, 2, 1)});
-  populateBlockStartEndArgsForSet(builder, coreRangeSet1, /*tilesPerCore=*/3,
-                                  kernelRTArgs);
-  ttnn::CoreRangeSetAttr coreRangeSet2 = ttnn::CoreRangeSetAttr::get(
-      context, {getCoreRange(2, 2, 2, 6), getCoreRange(3, 0, 7, 6)});
-  populateBlockStartEndArgsForSet(builder, coreRangeSet2, /*tilesPerCore=*/2,
-                                  kernelRTArgs);
-  assert(kernelRTArgs.size() == 56 && "expected dispatch for 56 cores");
-#endif
-
-#if 0
-  // 64x64xK
-  // Distributing 256 output tiles across 56 cores: 32 cores ({[(x=0,y=0) - (x=3,y=6)], [(x=4,y=0) - (x=4,y=3)]}) x 5 tiles/core + 24 cores ({[(x=4,y=4) - (x=4,y=6)], [(x=5,y=0) - (x=7,y=6)]}) x 4 tiles/core
-  ttnn::CoreRangeSetAttr coreRangeSet1 = ttnn::CoreRangeSetAttr::get(
-      context, {getCoreRange(0, 0, 3, 6), getCoreRange(4, 0, 4, 3)});
-  populateBlockStartEndArgsForSet(builder, coreRangeSet1, /*tilesPerCore=*/5,
-                                  kernelRTArgs);
-  ttnn::CoreRangeSetAttr coreRangeSet2 = ttnn::CoreRangeSetAttr::get(
-      context, {getCoreRange(4, 4, 4, 6), getCoreRange(5, 0, 7, 6)});
-  populateBlockStartEndArgsForSet(builder, coreRangeSet2, /*tilesPerCore=*/4,
-                                  kernelRTArgs);
-  assert(kernelRTArgs.size() == 56 && "expected dispatch for 56 cores");
-#endif
-
-// Qwen
-#if 1
     // 32x128xK with multicast (or 64x64xK with multicast)
     ttnn::CoreRangeSetAttr coreRangeSet1 =
         ttnn::CoreRangeSetAttr::get(context, {getCoreRange(0, 0, 7, 4)});
@@ -579,87 +538,6 @@ struct CreateTTNNGenericOp
                                     kernelRTArgs);
     assert(kernelRTArgs.size() == 40 && "expected dispatch for 40 cores");
     allCores = coreRangeSet1;
-#endif
-
-#if 0
-    // 32x64xK
-    // Distributing 80 output tiles across 56 cores: 24 cores ({[(x=0,y=0) - (x=2,y=6)], [(x=3,y=0) - (x=3,y=2)]}) x 2 tiles/core + 32 cores ({[(x=3,y=3) - (x=3,y=6)], [(x=4,y=0) - (x=7,y=6)]}) x 1 tiles/core
-    ttnn::CoreRangeSetAttr coreRangeSet1 = ttnn::CoreRangeSetAttr::get(
-        context, {getCoreRange(0, 0, 2, 6), getCoreRange(3, 0, 3, 2)});
-    populateBlockStartEndArgsForSet(builder, coreRangeSet1, /*tilesPerCore=*/2,
-                                    kernelRTArgs);
-    ttnn::CoreRangeSetAttr coreRangeSet2 = ttnn::CoreRangeSetAttr::get(
-        context, {getCoreRange(3, 3, 3, 6), getCoreRange(4, 0, 7, 6)});
-    populateBlockStartEndArgsForSet(builder, coreRangeSet2, /*tilesPerCore=*/1,
-                                    kernelRTArgs);
-    assert(kernelRTArgs.size() == 56 && "expected dispatch for 56 cores");
-
-#endif
-#if 0
-      // 64x128xK or 32x256xK
-      // Distributing 20 output tiles across 20 cores: 20 cores ({[(x=0,y=0) - (x=1,y=6)], [(x=2,y=0) - (x=2,y=5)]}) x 1 tiles/core + 0 cores ({}) x 0 tiles/core
-      ttnn::CoreRangeSetAttr coreRangeSet1 = ttnn::CoreRangeSetAttr::get(
-        context, {getCoreRange(0, 0, 1, 6), getCoreRange(2, 0, 2, 5)});
-    populateBlockStartEndArgsForSet(builder, coreRangeSet1, /*tilesPerCore=*/1,
-                                    kernelRTArgs);
-    assert(kernelRTArgs.size() == 20 && "expected dispatch for 20 cores");
-#endif
-
-#if 0
-    // did not work - out of DEST?
-    // 64x256x256
-    // Distributing 10 output tiles across 10 cores: 10 cores ({[(x=0,y=0) - (x=0,y=6)], [(x=1,y=0) - (x=1,y=2)]}) x 1 tiles/core + 0 cores ({}) x 0 tiles/core
-// All cores: {[(x=0,y=0) - (x=0,y=6)], [(x=1,y=0) - (x=1,y=2)]}
-// Matrix A: 64x9728 (608 tiles), Matrix B: 9728x2560 (24320 tiles), Output C: 64x2560 (160 tiles)
-  ttnn::CoreRangeSetAttr coreRangeSet1 = ttnn::CoreRangeSetAttr::get(
-        context, {getCoreRange(0, 0, 0, 6), getCoreRange(1, 0, 1, 2)});
-    populateBlockStartEndArgsForSet(builder, coreRangeSet1, /*tilesPerCore=*/1, kernelRTArgs);
-     assert(kernelRTArgs.size() == 10 && "expected dispatch for 10 cores");
-#endif
-#if 0
-    // ~64x64x64 but using only 8 cores~ (getCoreRange(0, 0, 7, 0))
-    // 64x128x128 but using only 10 cores ({[(x=0,y=0) - (x=0,y=6)], [(x=1,y=0) - (x=1,y=2)]})
-    ttnn::CoreRangeSetAttr coreRangeSet1 = ttnn::CoreRangeSetAttr::get(
-        context, {getCoreRange(0, 0, 0, 6), getCoreRange(1, 0, 1, 2)});
-    unsigned mBlocks = M / 64;
-    unsigned nBlocks = N / 128;
-    unsigned totalBlocks = mBlocks * nBlocks;
-    unsigned totalCores = 10;
-    assert(totalBlocks % totalCores == 0 &&
-           "expected total blocks to be evenly divisible by total cores");
-    unsigned totalBlocksPerCore = totalBlocks / totalCores;
-    llvm::errs() << "totalBlocksPerCore = " << totalBlocksPerCore << " (mBlocks=" << mBlocks << ", nBlocks=" << nBlocks << ")\n";
-    populateBlockStartEndArgsForSet(builder, coreRangeSet1, /*tilesPerCore=*/totalBlocksPerCore,
-                                    kernelRTArgs);
-#endif
-
-#if 0
-    // 64x64x64
-    // Distributing 40 output tiles across 40 cores: 40 cores ({[(x=0,y=0) -
-    // (x=4,y=6)], [(x=5,y=0) - (x=5,y=4)]}) x 1 tiles/core + 0 cores ({}) x 0
-    // tiles/core
-    ttnn::CoreRangeSetAttr coreRangeSet1 = ttnn::CoreRangeSetAttr::get(
-        context, {getCoreRange(0, 0, 4, 6), getCoreRange(5, 0, 5, 4)});
-    populateBlockStartEndArgsForSet(builder, coreRangeSet1, /*tilesPerCore=*/1,
-                                    kernelRTArgs);
-#endif
-
-#if 0
-    // TODO: these are hardcoded as the TTKernel arg spec does not support RT
-    // args We will need to use CoreRuntimeArgsAttr
-    ttnn::CoreRangeSetAttr coreRangeSet1 = ttnn::CoreRangeSetAttr::get(
-        context, {getCoreRange(0, 0, 2, 6), getCoreRange(3, 0, 3, 2)});
-    populateBlockStartEndArgsForSet(builder, coreRangeSet1, /*tilesPerCore=*/2,
-                                    kernelRTArgs);
-
-    ttnn::CoreRangeSetAttr coreRangeSet2 = ttnn::CoreRangeSetAttr::get(
-        context, {getCoreRange(3, 3, 3, 6), getCoreRange(4, 0, 7, 6)});
-    populateBlockStartEndArgsForSet(builder, coreRangeSet2, /*tilesPerCore=*/1,
-                                    kernelRTArgs);
-    llvm::errs() << "final grid id = " << gridId << "\n";
-    assert(gridId == 80 && "expected dispatch for 80 tiles");
-    assert(kernelRTArgs.size() == 56 && "expected dispatch for 56 cores");
-#endif
 
     // Create CB descriptors.
     SmallVector<ttnn::KernelCBAttr> cbDescriptors =
