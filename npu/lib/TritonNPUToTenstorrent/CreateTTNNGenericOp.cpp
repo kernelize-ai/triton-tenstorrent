@@ -67,18 +67,13 @@ createCBDescriptors(MLIRContext *ctx, func::FuncOp func,
   // similar to D2MToTTNN.cppp:createCBDescriptors
   for (auto [i, cb] : llvm::enumerate(llvm::reverse(cbs))) {
     auto cbType = cast<ttkernel::CBType>(cb.getType());
-    llvm::errs() << "Creating CB descriptor for CB " << i << ": " << cbType
-                 << "\n";
+
     auto elementType = cast<ttcore::TileType>(cbType.getElementType());
     size_t pageSize = elementType.getSizeBytes();
     size_t numPages =
         static_cast<size_t>(cbType.getNumElements()); // or getNumTiles()?
 
-    llvm::errs() << "  pageSize = " << pageSize << ", numPages = " << numPages
-                 << ", numTiles = " << cbType.getNumTiles() << "\n";
     ttcore::DataType dtype = elementType.getDataType();
-    // ttcore::elementTypeToDataType(elementType);
-
     ttnn::KernelCBFormatAttr cbFormat =
         ttnn::KernelCBFormatAttr::get(ctx, i, dtype, pageSize);
 
@@ -92,12 +87,14 @@ createCBDescriptors(MLIRContext *ctx, func::FuncOp func,
   return cbDescriptors;
 }
 
-static SmallVector<ttnn::CoreRuntimeArgsAttr>
-populateBlockStartEndArgs(Builder &b,
-                          const ttnn::CoreRangeSetAttr &coreRangeSet,
-                          unsigned tilesPerCore, unsigned &crtId) {
+static SmallVector<ttnn::CoreRuntimeArgsAttr> populateBlockStartEndArgs(
+    Builder &b, const ttnn::CoreRangeSetAttr &coreRangeSet,
+    unsigned tilesPerCore, unsigned coresPerRow, unsigned &crtId) {
   MLIRContext *ctx = b.getContext();
   auto coreRanges = coreRangeSet.getCoreRanges();
+
+  Attribute coresPerRowAttr = ttnn::KernelArgNamedArgAttr::get(
+      ctx, StringAttr::get(ctx, "tiles_per_core"), coresPerRow);
 
   SmallVector<ttnn::CoreRuntimeArgsAttr> perCore;
   for (auto coreRange : coreRanges) {
@@ -122,7 +119,8 @@ populateBlockStartEndArgs(Builder &b,
 
         auto rt = ttnn::CoreRuntimeArgsAttr::get(
             ctx, coord,
-            ArrayRef<mlir::Attribute>{blockStartAttr, blockEndAttr});
+            ArrayRef<mlir::Attribute>{blockStartAttr, blockEndAttr,
+                                      coresPerRowAttr});
         perCore.push_back(rt);
       }
     }
@@ -431,7 +429,6 @@ void createMainFunc(MLIRContext *context, OpBuilder &builder,
       RankedTensorType::get({K, N}, aElementType.getElementType(), bLayout);
   auto cType =
       RankedTensorType::get({M, N}, aElementType.getElementType(), cLayout);
-  llvm::errs() << "cType = " << cType << "\n";
 
   SmallVector<Type> kernelArgTypes{aType, bType};
 #ifdef BIAS
@@ -502,7 +499,6 @@ struct CreateTTNNGenericOp
 
     auto grid = device.getWorkerGrid();
     assert(grid.getRank() == 2 && "expected rank 2 device grid");
-    llvm::errs() << "grid: " << grid << "\n";
 
     auto getCoreCoord = [&](int x, int y) {
       return ttnn::CoreCoordAttr::get(context, x, y);
@@ -520,10 +516,10 @@ struct CreateTTNNGenericOp
     unsigned gridId = 0;
     auto populateBlockStartEndArgsForSet =
         [&](OpBuilder &builder, ttnn::CoreRangeSetAttr coreRangeSet,
-            const unsigned tilesPerCore,
+            const unsigned tilesPerCore, const unsigned coresPerRow,
             SmallVector<ttnn::CoreRuntimeArgsAttr> &kernelRTArgs) {
-          auto perCoreArgs = populateBlockStartEndArgs(builder, coreRangeSet,
-                                                       tilesPerCore, gridId);
+          auto perCoreArgs = populateBlockStartEndArgs(
+              builder, coreRangeSet, tilesPerCore, coresPerRow, gridId);
           kernelRTArgs.append(perCoreArgs.begin(), perCoreArgs.end());
         };
 
@@ -531,11 +527,11 @@ struct CreateTTNNGenericOp
     OpBuilder builder(m);
 
     SmallVector<ttnn::CoreRuntimeArgsAttr> kernelRTArgs;
-    // 32x128xK with multicast (or 64x64xK with multicast)
+    // 64x64xK with multicast
     ttnn::CoreRangeSetAttr coreRangeSet1 =
         ttnn::CoreRangeSetAttr::get(context, {getCoreRange(0, 0, 7, 4)});
     populateBlockStartEndArgsForSet(builder, coreRangeSet1, /*tilesPerCore=*/1,
-                                    kernelRTArgs);
+                                    /*coresPerRow=*/5, kernelRTArgs);
     assert(kernelRTArgs.size() == 40 && "expected dispatch for 40 cores");
     allCores = coreRangeSet1;
 
@@ -554,7 +550,6 @@ struct CreateTTNNGenericOp
 
     ttnn::ProgramAttr program = ttnn::ProgramAttr::get(
         context, kernelDescriptors, cbDescriptors, semaphoreDescriptors);
-    llvm::errs() << "Program: " << program << "\n";
 
     auto deviceOps = llvm::to_vector(m.getOps<ttcore::DeviceOp>());
     assert(deviceOps.size() == 1 && "expected only one device op");
