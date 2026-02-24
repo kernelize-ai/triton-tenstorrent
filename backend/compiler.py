@@ -232,7 +232,6 @@ class CPUBackend(BaseBackend):
         cpu.passes.tenstorrent.add_to_ttkernel_dialect(pm)
         passes.common.add_canonicalizer(pm)
 
-        cpu.passes.tenstorrent.add_ttkernel_device_zone_scopes(pm)
         passes.common.add_canonicalizer(pm)
         passes.common.add_licm(pm)
         passes.common.add_sccp(pm)
@@ -320,10 +319,10 @@ class CPUBackend(BaseBackend):
 
     @staticmethod
     def make_ttnn_generic(mod, metadata, options):
-        # TODO: conditionally enable
         pm = ir.pass_manager(mod.context)
         pm.enable_debug()
 
+        # TODO: running this breaks the cpp flow because arguments get replaced 
         cpu.passes.tenstorrent.add_create_ttnn_generic_op(pm)
 
         pm.run(mod, "make_ttnn_generic")
