@@ -127,7 +127,6 @@ void kernel_main() {
     noc_async_read(temp_544, v68, v22);
     {
     DeviceZoneScopedN("noc_async_read_barrier");
-    noc_async_read_barrier();
     }
     cb_push_back(get_compile_time_arg_val(2), v13);
   }
