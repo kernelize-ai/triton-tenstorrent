@@ -87,14 +87,23 @@ createCBDescriptors(MLIRContext *ctx, func::FuncOp func,
   return cbDescriptors;
 }
 
-static SmallVector<ttnn::CoreRuntimeArgsAttr> populateBlockStartEndArgs(
-    Builder &b, const ttnn::CoreRangeSetAttr &coreRangeSet,
-    unsigned tilesPerCore, unsigned coresPerRow, unsigned &crtId) {
+static SmallVector<ttnn::CoreRuntimeArgsAttr>
+populateBlockStartEndArgs(Builder &b,
+                          const ttnn::CoreRangeSetAttr &coreRangeSet,
+                          unsigned tilesPerCore, unsigned &crtId) {
   MLIRContext *ctx = b.getContext();
   auto coreRanges = coreRangeSet.getCoreRanges();
 
-  Attribute coresPerRowAttr = ttnn::KernelArgNamedArgAttr::get(
-      ctx, StringAttr::get(ctx, "tiles_per_core"), coresPerRow);
+  auto packMulticastCoord = [](uint32_t x, uint32_t y) {
+    return ((x & 0xFFFFu) << 16) | (y & 0xFFFFu);
+  };
+
+  Attribute multicastGroupStart = ttnn::KernelArgNamedArgAttr::get(
+      ctx, StringAttr::get(ctx, "multicast_group_start"),
+      packMulticastCoord(0, 0));
+  Attribute multicastGroupEnd = ttnn::KernelArgNamedArgAttr::get(
+      ctx, StringAttr::get(ctx, "multicast_group_end"),
+      packMulticastCoord(7, 4));
 
   SmallVector<ttnn::CoreRuntimeArgsAttr> perCore;
   for (auto coreRange : coreRanges) {
@@ -120,7 +129,7 @@ static SmallVector<ttnn::CoreRuntimeArgsAttr> populateBlockStartEndArgs(
         auto rt = ttnn::CoreRuntimeArgsAttr::get(
             ctx, coord,
             ArrayRef<mlir::Attribute>{blockStartAttr, blockEndAttr,
-                                      coresPerRowAttr});
+                                      multicastGroupStart, multicastGroupEnd});
         perCore.push_back(rt);
       }
     }
@@ -516,10 +525,10 @@ struct CreateTTNNGenericOp
     unsigned gridId = 0;
     auto populateBlockStartEndArgsForSet =
         [&](OpBuilder &builder, ttnn::CoreRangeSetAttr coreRangeSet,
-            const unsigned tilesPerCore, const unsigned coresPerRow,
+            const unsigned tilesPerCore,
             SmallVector<ttnn::CoreRuntimeArgsAttr> &kernelRTArgs) {
-          auto perCoreArgs = populateBlockStartEndArgs(
-              builder, coreRangeSet, tilesPerCore, coresPerRow, gridId);
+          auto perCoreArgs = populateBlockStartEndArgs(builder, coreRangeSet,
+                                                       tilesPerCore, gridId);
           kernelRTArgs.append(perCoreArgs.begin(), perCoreArgs.end());
         };
 
@@ -531,7 +540,7 @@ struct CreateTTNNGenericOp
     ttnn::CoreRangeSetAttr coreRangeSet1 =
         ttnn::CoreRangeSetAttr::get(context, {getCoreRange(0, 0, 7, 4)});
     populateBlockStartEndArgsForSet(builder, coreRangeSet1, /*tilesPerCore=*/1,
-                                    /*coresPerRow=*/5, kernelRTArgs);
+                                    kernelRTArgs);
     assert(kernelRTArgs.size() == 40 && "expected dispatch for 40 cores");
     allCores = coreRangeSet1;
 
