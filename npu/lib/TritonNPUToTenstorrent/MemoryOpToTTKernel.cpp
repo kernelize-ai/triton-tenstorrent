@@ -766,48 +766,84 @@ struct ConvertMulticastOp : public OpConversionPattern<npu::tt::MulticastOp> {
           rewriter, loc, rewriter.getIndexType(), virtIndex);
     };
 
+    // Note: these are index types, so we have to cast when comparing with the
+    // outputs of getX and getY
     Value xVirtIndex = ttkernel::MyLogicalXOp::create(rewriter, loc);
     Value yVirtIndex = ttkernel::MyLogicalYOp::create(rewriter, loc);
 
-    // each row multicasts
-    // TODO: currently we get the number of active cores in the row from the
-    // runtime. It would be better if we could encode this into the kernel
-    // configuration similarly to numWarps, numCtas, etc
+    // New plan:
+    // take the starting multicast core ID and the ending multicast core ID and
+
+    Value coordsMask =
+        arith::createConstantI32(loc, rewriter, 65535); // 0x0000ffff
+    auto getY = [&](Value coord) {
+      return arith::AndIOp::create(rewriter, loc, coord, coordsMask);
+    };
+
+    auto getX = [&](Value coord) {
+      Value shift = arith::ShRUIOp::create(
+          rewriter, loc, coord, arith::createConstantI32(loc, rewriter, 16));
+      return arith::AndIOp::create(rewriter, loc, shift, coordsMask);
+    };
+
     auto parentFuncOp = multicastOp->getParentOfType<func::FuncOp>();
     assert(parentFuncOp && "expected parent func op");
     // TODO: this is currently shared with GetProgramIdOp lowering. We don't
     // update the value there. Can we update the values in both places
     // simultaneously and avoid race conditions? For now we assume 1D grid and
     // offset by 2 for the 1D (block_start, block_end) pair
-    auto perCoreArgsBase =
+    auto multicastGroupArgsBase =
         parentFuncOp->getAttrOfType<IntegerAttr>(kTTNumPerCoreArgsAttr)
-            .getInt();
-    Value paramIndexValue =
-        arith::createIndexConstant(loc, rewriter, perCoreArgsBase + 2);
-    auto activeCoresInRowInt = ttkernel::GetArgValOp::create(
-        rewriter, loc, rewriter.getI32Type(), paramIndexValue);
+            .getInt() +
+        2;
+    Value multicastStartIndex =
+        arith::createIndexConstant(loc, rewriter, multicastGroupArgsBase);
+    Value multicastEndIndex =
+        arith::createIndexConstant(loc, rewriter, multicastGroupArgsBase + 1);
 
-    Value rowEnd =
-        arith::SubIOp::create(rewriter, loc, activeCoresInRowInt.getResult(),
-                              arith::createConstantI32(loc, rewriter, 1));
+    Value multicastStartCoord = ttkernel::GetArgValOp::create(
+        rewriter, loc, rewriter.getI32Type(), multicastStartIndex);
+    Value multicastEndCoord = ttkernel::GetArgValOp::create(
+        rewriter, loc, rewriter.getI32Type(), multicastEndIndex);
+
+    Value multicastStartX = getX(multicastStartCoord);
+    Value multicastStartY = getY(multicastStartCoord);
+    Value multicastEndX = getX(multicastEndCoord);
+    Value multicastEndY = getY(multicastEndCoord);
+
     Value c0 = arith::createIndexConstant(loc, rewriter, 0);
 
     // size per row
-    Value numDests = rowEnd;
+    Value numDests = arith::SubIOp::create(
+        rewriter, loc,
+        arith::MulIOp::create(
+            rewriter, loc,
+            arith::AddIOp::create(rewriter, loc, multicastEndX,
+                                  arith::createConstantI32(loc, rewriter, 1)),
+            arith::AddIOp::create(rewriter, loc, multicastEndY,
+                                  arith::createConstantI32(loc, rewriter, 1))),
+        arith::createConstantI32(loc, rewriter, 1));
 
     // TODO: only valid for rows multicast
-    Value senderIndexX = xVirtIndex;
-    Value senderIndexY = c0;
+    Value senderIndexX = multicastStartX;
+    Value senderIndexY = multicastStartY;
 
-    Value mcastEndX = xVirtIndex;
-    Value mcastEndY = rowEnd;
+    Value mcastEndX = multicastEndX;
+    Value mcastEndY = multicastEndY;
 
     // start info
-    Value isLeftSide = arith::CmpIOp::create(
-        rewriter, loc, arith::CmpIPredicate::eq, yVirtIndex,
-        arith::createIndexConstant(loc, rewriter, 0));
+    Value isStartCoord = arith::AndIOp::create(
+        rewriter, loc,
+        arith::CmpIOp::create(
+            rewriter, loc, arith::CmpIPredicate::eq, multicastStartX,
+            arith::IndexCastOp::create(rewriter, loc, rewriter.getI32Type(),
+                                       xVirtIndex)),
+        arith::CmpIOp::create(
+            rewriter, loc, arith::CmpIPredicate::eq, multicastStartY,
+            arith::IndexCastOp::create(rewriter, loc, rewriter.getI32Type(),
+                                       yVirtIndex)));
 
-    Value isSenderBool = isLeftSide;
+    Value isSenderBool = isStartCoord;
 
     // two semaphores - one on the sender core as an acknowledgement counter and
     // one on the receiver cores as a data ready flag
