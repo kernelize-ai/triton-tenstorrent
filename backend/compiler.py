@@ -322,7 +322,7 @@ class CPUBackend(BaseBackend):
         pm = ir.pass_manager(mod.context)
         pm.enable_debug()
 
-        # TODO: running this breaks the cpp flow because arguments get replaced 
+        # TODO: running this breaks the cpp flow because arguments get replaced
         cpu.passes.tenstorrent.add_create_ttnn_generic_op(pm)
 
         pm.run(mod, "make_ttnn_generic")
