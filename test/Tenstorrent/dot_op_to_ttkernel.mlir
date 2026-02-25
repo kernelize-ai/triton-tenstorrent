@@ -727,15 +727,33 @@ module attributes {"ttg.num-ctas" = 1 : i32, "ttg.num-warps" = 1 : i32, "ttg.thr
   %c64_i32 = arith.constant 64 : i32
   %c1_i32 = arith.constant 1 : i32
   // CHECK-DAG: %[[c0_index:.*]] = arith.constant 0 : index
+  // CHECK-DAG: %[[c2_index:.*]] = arith.constant 2 : index
+  // CHECK-DAG: %[[c3_index:.*]] = arith.constant 3 : index
   // CHECK-DAG: %[[MCAST_SZ:.*]] = arith.constant 8192 : i32
 
   %a = ttg.local_alloc {alloc_idx = 0 : i32} : () -> !ttg.memdesc<64x64xf16, #shared, #smem, mutable>
   // CHECK: %[[CB:.*]] = ttkernel.get_compile_time_arg_val(0)
 
   scf.for %accumulator = %c0_i32 to %k_tiles_2 step %c1_i32  : i32 {
-    // CHECK-DAG: %[[LX:.*]] = ttkernel.my_logical_x_
-    // CHECK-DAG: %[[LY:.*]] = ttkernel.my_logical_y_
-    // CHECK: %[[IS_SENDER:.*]] = arith.cmpi eq, %[[LY]], %[[c0_index]] : index
+    // CHECK-DAG: %[[LX_Index:.*]] = ttkernel.my_logical_x_
+    // CHECK-DAG: %[[LY_Index:.*]] = ttkernel.my_logical_y_
+    // CHECK-DAG: %[[MCAST_START_COORD:.*]] = ttkernel.get_arg_val(%[[c2_index]])
+    // CHECK-DAG: %[[MCAST_END_COORD:.*]] = ttkernel.get_arg_val(%[[c3_index]])
+
+    // CHECK-DAG: %[[LX:.*]] = arith.index_cast %[[LX_Index]] : index to i32
+    // CHECK-DAG: %[[LY:.*]] = arith.index_cast %[[LY_Index]] : index to i32
+
+    // CHECK-DAG: %[[START_X_SHIFT:.*]] = arith.shrui %[[MCAST_START_COORD]]
+    // CHECK-DAG: %[[START_X:.*]] = arith.andi %[[START_X_SHIFT]]
+    // CHECK-DAG: %[[START_Y:.*]] = arith.andi %[[MCAST_START_COORD]]
+
+    // CHECK-DAG: %[[END_X_SHIFT:.*]] = arith.shrui %[[MCAST_END_COORD]]
+    // CHECK-DAG: %[[END_X:.*]] = arith.andi %[[END_X_SHIFT]]
+    // CHECK-DAG: %[[END_Y:.*]] = arith.andi %[[MCAST_END_COORD]]
+
+    // CHECK-DAG: %[[IS_SENDER_X:.*]] = arith.cmpi eq, %[[START_X]], %[[LX]]
+    // CHECK-DAG: %[[IS_SENDER_Y:.*]] = arith.cmpi eq, %[[START_Y]], %[[LY]]
+    // CHECK: %[[IS_SENDER:.*]] = arith.andi %[[IS_SENDER_X]], %[[IS_SENDER_Y]]
 
     // CHECK-DAG: %[[SEM_SEND_ID:.*]] = ttkernel.get_compile_time_arg_val(1)
     // CHECK-DAG: %[[SEM_RECV_ID:.*]] = ttkernel.get_compile_time_arg_val(2)
@@ -765,8 +783,8 @@ module attributes {"ttg.num-ctas" = 1 : i32, "ttg.num-warps" = 1 : i32, "ttg.thr
       // CHECK: ttkernel.noc_semaphore_set_multicast(%[[SEM_RECV]], %{{.*}}, %{{.*}})
 
       // CHECK: } else {
-      // CHECK-DAG: %[[NY:.*]] = ttkernel.experimental::convert_logical_y_to_translated(%[[c0_index]])
-      // CHECK-DAG: %[[NX:.*]] = ttkernel.experimental::convert_logical_x_to_translated(%[[LX]])
+      // CHECK-DAG: %[[NY:.*]] = ttkernel.experimental::convert_logical_y_to_translated(%[[START_Y]])
+      // CHECK-DAG: %[[NX:.*]] = ttkernel.experimental::convert_logical_x_to_translated(%[[START_X]])
 
       // COM: signal readiness to receive
       // CHECK: %[[SEND_NOC:.*]] = ttkernel.get_noc_addr(%[[NX]], %[[NY]], %[[SEM_SEND]])
