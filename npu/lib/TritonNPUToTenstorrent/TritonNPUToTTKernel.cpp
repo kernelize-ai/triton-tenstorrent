@@ -13,9 +13,11 @@
 
 #include "PatternTritonNPUToTenstorrent.h"
 #include "PointerInfoAnalysis.h"
+#include "TypeConverter.h"
 #include "Utility.h"
 
 #include "npu/include/Dialect/TritonTenstorrent/IR/Attributes.h"
+
 #include "npu/include/Dialect/TritonTenstorrent/Transforms/Utility.h"
 
 #include "cpu/include/Dialect/TritonCPU/IR/Dialect.h" // BlockIndexOps from MakePersistentKernel
@@ -221,67 +223,7 @@ struct ConvertTritonNPUToTTKernelPass
     MLIRContext *context = &getContext();
     ModuleOp mod = getOperation();
 
-    TypeConverter typeConverter;
-    typeConverter.addConversion([](Type type) { return type; });
-    typeConverter.addConversion([](gpu::MemDescType memdesc) {
-      // convert memdesc to memref
-      auto shape = convertShapeToTileShape(memdesc.getShape());
-      auto ttcoreTileType = ttcore::TileType::get(
-          memdesc.getContext(), ttcore::TileType::getDefaultShape(),
-          ttcore::elementTypeToDataType(memdesc.getElementType()));
-
-      MemRefType cbMemRefType = MemRefType::get(
-          shape, ttcoreTileType, MemRefLayoutAttrInterface{},
-          ttcore::MemorySpaceAttr::get(memdesc.getContext(),
-                                       ttcore::MemorySpace::DeviceL1));
-      return ttkernel::CBType::get(cbMemRefType);
-    });
-    typeConverter.addConversion([](RankedTensorType type) -> Type {
-      auto etype = type.getElementType();
-      if (isa<triton::PointerType>(etype)) {
-        return IntegerType::get(type.getContext(), 32);
-      }
-      if (!type.getEncoding()) {
-        return type;
-      }
-      if (isa<npu::tt::TiledDotOperandEncodingAttr>(type.getEncoding()) ||
-          isa<gpu::DotOperandEncodingAttr>(type.getEncoding())) {
-        // dot operands read directly from cbs, so convert to cb type
-        assert(type.getShape().size() == 2 &&
-               "expecting rank 2 tensor for dot operand");
-        return convertTypeToCBType(type);
-      }
-      return type;
-    });
-    typeConverter.addConversion([](triton::PointerType type) -> Type {
-      // convert pointer to i32
-      return IntegerType::get(type.getContext(), 32);
-    });
-    typeConverter.addSourceMaterialization(
-        [](OpBuilder &builder, PointerType type, ValueRange inputs,
-           Location loc) -> Value {
-          return UnrealizedConversionCastOp::create(builder, loc, type, inputs)
-              .getResult(0);
-        });
-    typeConverter.addConversion([](mlir::triton::TensorDescType t,
-                                   llvm::SmallVectorImpl<mlir::Type> &out) {
-      // We convert a tensor descriptor into an pointer, and a shape and stride
-      // for each dimension, and padding option. i.e., we create 1+2*rank+1
-      // values. Note that tensor descriptors may be signed/unsigned integers
-      // whereas pointers should always be signless.
-      auto tensorType = t.getSignlessBlockType();
-      out.push_back(triton::getPointerType(tensorType.getElementType()));
-      out.insert(out.end(), 2 * tensorType.getRank(),
-                 mlir::IntegerType::get(t.getContext(), 32));
-      out.push_back(mlir::IntegerType::get(t.getContext(), 1));
-      return mlir::success();
-    });
-    typeConverter.addSourceMaterialization(
-        [](OpBuilder &builder, mlir::triton::TensorDescType type,
-           ValueRange inputs, Location loc) -> Value {
-          return UnrealizedConversionCastOp::create(builder, loc, type, inputs)
-              .getResult(0);
-        });
+    TritonNPUToTenstorrentTypeConverter typeConverter(context);
 
     mlir::ConversionTarget funcTarget(*context);
     funcTarget.addIllegalOp<triton::FuncOp>();

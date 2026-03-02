@@ -21,8 +21,6 @@ constexpr int kNumBlocks = 2;
 constexpr int kThreadId = 3;
 } // namespace PerCoreArgOffsets
 
-Type convertTypeToCBType(Type type);
-
 } // namespace npu
 } // namespace triton
 
