@@ -26,6 +26,21 @@ struct ConvertAddPtrOp : public OpConversionPattern<AddPtrOp> {
                   ConversionPatternRewriter &rewriter) const override {
     Location loc = op.getLoc();
 
+    auto tensorType = dyn_cast<RankedTensorType>(op.getPtr().getType());
+    if (!tensorType) {
+      // replace scalar addptr with arith.add
+      auto ptrType = cast<triton::PointerType>(op.getPtr().getType());
+      auto elemType = ptrType.getPointeeType();
+      auto elemSize = elemType.getIntOrFloatBitWidth() / 8;
+      Value offsetInBytes = arith::MulIOp::create(
+          rewriter, loc, adaptor.getOffset(),
+          arith::createConstantI32(loc, rewriter, elemSize));
+      Value newVal =
+          arith::AddIOp::create(rewriter, loc, adaptor.getPtr(), offsetInBytes);
+      rewriter.replaceOp(op, newVal);
+      return success();
+    }
+
     SetVector<Operation *> slice;
     BackwardSliceOptions opt;
     opt.filter = [](Operation *op) {
@@ -105,7 +120,6 @@ struct ConvertAddPtrOp : public OpConversionPattern<AddPtrOp> {
     LDBG("Computed scalar offset: " << offset);
 
     // Drop the base addr and just return the offset converted to bytes
-    auto tensorType = cast<RankedTensorType>(op.getPtr().getType());
     auto ptrType = cast<triton::PointerType>(tensorType.getElementType());
     auto elemType = ptrType.getPointeeType();
     auto elemSize = elemType.getIntOrFloatBitWidth() / 8;

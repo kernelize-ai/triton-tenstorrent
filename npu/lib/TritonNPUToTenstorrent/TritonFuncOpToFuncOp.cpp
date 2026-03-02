@@ -141,7 +141,16 @@ struct ConvertTritonFunc : public OpConversionPattern<triton::FuncOp> {
           LDBG("Replacing arg " << idx << " of type " << oldType
                                 << " with type " << newType);
 
-          argReplacements.push_back(getArg(idx++, newType));
+          Value replacement = getArg(idx++, newType);
+          // TODO: Do we need the unrealized conversion cast type converter
+          // source materialization? This if is necessary to avoid source
+          // materializations on the type converter from failing the funcTarget
+          // section of the NPU To TTKernel lowering
+          if (isa<PointerType>(oldType))
+            replacement = UnrealizedConversionCastOp::create(
+                              rewriter, loc, oldType, replacement)
+                              .getResult(0);
+          argReplacements.push_back(replacement);
         }
       }
       numArgs = idx;

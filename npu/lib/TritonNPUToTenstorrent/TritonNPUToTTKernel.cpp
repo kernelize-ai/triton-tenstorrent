@@ -231,6 +231,7 @@ struct ConvertTritonNPUToTTKernelPass
 
     funcTarget.addLegalDialect<arith::ArithDialect>();
     funcTarget.addLegalDialect<func::FuncDialect>();
+    funcTarget.addLegalDialect<triton::TritonDialect>();
     funcTarget.addLegalOp<UnrealizedConversionCastOp>();
     funcTarget.addLegalOp<ttkernel::GetArgValOp>();
     funcTarget.addLegalOp<ttkernel::GetCommonArgValOp>();

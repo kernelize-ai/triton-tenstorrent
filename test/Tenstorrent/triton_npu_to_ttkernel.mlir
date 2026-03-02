@@ -232,9 +232,26 @@ module attributes {"ttg.num-ctas" = 1 : i32, "ttg.num-warps" = 1 : i32, ttg.targ
 // -----
 
 module attributes {"ttg.num-ctas" = 1 : i32, "ttg.num-warps" = 1 : i32, ttg.target = "cpu", "ttg.threads-per-warp" = 1 : i32} {
-tt.func public @addptr_scalar__writer() attributes {noinline = false} {
-  // CHECK: ttkernel.dprint("ptr address: ") : () -> ()
-  tt.print "ptr address: " {hex = false, isSigned = array<i32: 0>}
-  tt.return
+  tt.func public @addptr_scalar__writer() attributes {noinline = false} {
+    // CHECK: ttkernel.dprint("ptr address: ") : () -> ()
+    tt.print "ptr address: " {hex = false, isSigned = array<i32: 0>}
+    tt.return
+  }
 }
+
+// -----
+
+module attributes {"ttg.num-ctas" = 1 : i32, "ttg.num-warps" = 1 : i32, ttg.target = "cpu", "ttg.threads-per-warp" = 1 : i32} {
+  tt.func public @addptr_scalar__writer(%ptr: !tt.ptr<f32>, %offset: i32, %val: f32) attributes {noinline = false} {
+    // CHECK-DAG: %[[c0:.*]] = arith.constant 0 : index
+    // CHECK-DAG: %[[c1:.*]] = arith.constant 1 : index
+    // CHECK-DAG: %[[c4_i32:.*]] = arith.constant 4 : i32
+    // CHECK-DAG: %[[PTR:.*]] = ttkernel.get_common_arg_val(%[[c0]])
+    // CHECK-DAG: %[[OFFSET:.*]] = ttkernel.get_common_arg_val(%[[c1]])
+    // CHECK: %[[OFFSET_BYTES:.*]] = arith.muli %[[OFFSET]], %[[c4_i32:.*]] : i32
+    // CHECK: %[[PTR_OFFSET:.*]] = arith.addi %[[PTR]], %[[OFFSET_BYTES]] : i32
+    %0 = tt.addptr %ptr, %offset : !tt.ptr<f32>, i32
+    tt.print "ptr address: " {hex = false, isSigned = array<i32: 1>} : %0 : !tt.ptr<f32>
+    tt.return
+  }
 }
