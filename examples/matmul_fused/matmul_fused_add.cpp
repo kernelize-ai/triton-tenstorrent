@@ -370,6 +370,7 @@ void matmul_multi_core(
                     {                        
                         work_offset,
                         work_offset + work_per_core,
+                        num_output_blocks_total,
                         packMulticastCoord(0, 0),
                         packMulticastCoord(7, 4)
                     });          
@@ -380,6 +381,7 @@ void matmul_multi_core(
                     {                         
                         work_offset,
                         work_offset + work_per_core,
+                        num_output_blocks_total,
                         packMulticastCoord(0, 0),
                         packMulticastCoord(7, 4)
                     });  
@@ -392,6 +394,7 @@ void matmul_multi_core(
                     {                   
                         work_offset,
                         work_offset + work_per_core,
+                        num_output_blocks_total,
                         packMulticastCoord(0, 0),
                         packMulticastCoord(7, 4)
                     });                   

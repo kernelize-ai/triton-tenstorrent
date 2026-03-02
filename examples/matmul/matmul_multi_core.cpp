@@ -273,14 +273,16 @@ void matmul_multi_core(
                     core,
                     {
                         work_offset,
-                        work_offset + work_per_core
+                        work_offset + work_per_core,
+                        num_output_tiles_total
                     });             
 
                 // Set arguments for the writer kernel (data output)
                 tt_metal::SetRuntimeArgs(
                     program, writer_id, core, {
                         work_offset,
-                        work_offset + work_per_core
+                        work_offset + work_per_core,
+                        num_output_tiles_total
                     });
 
                 // Set arguments for the compute kernel
@@ -290,7 +292,8 @@ void matmul_multi_core(
                     core,
                     {
                         work_offset,
-                        work_offset + work_per_core
+                        work_offset + work_per_core,
+                        num_output_tiles_total
                     });                    
                 work_offset += work_per_core;  // Update offset for next core
             }

@@ -14,6 +14,13 @@ static constexpr llvm::StringLiteral kTTNumCommonArgsAttr =
 static constexpr llvm::StringLiteral kTTNumPerCoreArgsAttr =
     "tt.num_per_core_args";
 
+namespace PerCoreArgOffsets {
+constexpr int kBlockStart = 0;
+constexpr int kBlockEnd = 1;
+constexpr int kNumBlocks = 2;
+constexpr int kThreadId = 3;
+} // namespace PerCoreArgOffsets
+
 Type convertTypeToCBType(Type type);
 
 } // namespace npu

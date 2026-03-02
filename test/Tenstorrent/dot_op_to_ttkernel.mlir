@@ -727,8 +727,8 @@ module attributes {"ttg.num-ctas" = 1 : i32, "ttg.num-warps" = 1 : i32, "ttg.thr
   %c64_i32 = arith.constant 64 : i32
   %c1_i32 = arith.constant 1 : i32
   // CHECK-DAG: %[[c0_index:.*]] = arith.constant 0 : index
-  // CHECK-DAG: %[[c2_index:.*]] = arith.constant 2 : index
   // CHECK-DAG: %[[c3_index:.*]] = arith.constant 3 : index
+  // CHECK-DAG: %[[c4_index:.*]] = arith.constant 4 : index
   // CHECK-DAG: %[[MCAST_SZ:.*]] = arith.constant 8192 : i32
 
   %a = ttg.local_alloc {alloc_idx = 0 : i32} : () -> !ttg.memdesc<64x64xf16, #shared, #smem, mutable>
@@ -737,8 +737,8 @@ module attributes {"ttg.num-ctas" = 1 : i32, "ttg.num-warps" = 1 : i32, "ttg.thr
   scf.for %accumulator = %c0_i32 to %k_tiles_2 step %c1_i32  : i32 {
     // CHECK-DAG: %[[LX_Index:.*]] = ttkernel.my_logical_x_
     // CHECK-DAG: %[[LY_Index:.*]] = ttkernel.my_logical_y_
-    // CHECK-DAG: %[[MCAST_START_COORD:.*]] = ttkernel.get_arg_val(%[[c2_index]])
-    // CHECK-DAG: %[[MCAST_END_COORD:.*]] = ttkernel.get_arg_val(%[[c3_index]])
+    // CHECK-DAG: %[[MCAST_START_COORD:.*]] = ttkernel.get_arg_val(%[[c3_index]])
+    // CHECK-DAG: %[[MCAST_END_COORD:.*]] = ttkernel.get_arg_val(%[[c4_index]])
 
     // CHECK-DAG: %[[LX:.*]] = arith.index_cast %[[LX_Index]] : index to i32
     // CHECK-DAG: %[[LY:.*]] = arith.index_cast %[[LY_Index]] : index to i32

@@ -788,14 +788,11 @@ struct ConvertMulticastOp : public OpConversionPattern<npu::tt::MulticastOp> {
 
     auto parentFuncOp = multicastOp->getParentOfType<func::FuncOp>();
     assert(parentFuncOp && "expected parent func op");
-    // TODO: this is currently shared with GetProgramIdOp lowering. We don't
-    // update the value there. Can we update the values in both places
-    // simultaneously and avoid race conditions? For now we assume 1D grid and
-    // offset by 2 for the 1D (block_start, block_end) pair
+    // Use the thread ID slot for multicast info
     auto multicastGroupArgsBase =
         parentFuncOp->getAttrOfType<IntegerAttr>(kTTNumPerCoreArgsAttr)
             .getInt() +
-        2;
+        PerCoreArgOffsets::kThreadId;
     Value multicastStartIndex =
         arith::createIndexConstant(loc, rewriter, multicastGroupArgsBase);
     Value multicastEndIndex =

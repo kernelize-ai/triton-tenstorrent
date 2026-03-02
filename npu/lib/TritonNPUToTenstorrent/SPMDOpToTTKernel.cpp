@@ -18,13 +18,6 @@ namespace npu {
 
 namespace {
 
-namespace LaunchIDOffsets {
-constexpr int kBlockStart = 0;
-constexpr int kBlockEnd = 1;
-constexpr int kThreadId = 2;
-
-} // namespace LaunchIDOffsets
-
 struct ConvertGetProgramIdOp : public OpConversionPattern<GetProgramIdOp> {
   using OpConversionPattern<GetProgramIdOp>::OpConversionPattern;
 
@@ -40,6 +33,8 @@ struct ConvertGetProgramIdOp : public OpConversionPattern<GetProgramIdOp> {
     assert(funcOp && "expected FuncOp as a parent of GetProgramIdOp");
     auto launchParamIndex =
         funcOp->getAttrOfType<IntegerAttr>(kTTNumPerCoreArgsAttr).getInt();
+    // TODO: this needs to support multiple dimensions for each per core arg
+    // offset
     Value paramIndexValue =
         arith::createIndexConstant(loc, rewriter, launchParamIndex + axis);
     auto launchParam = ttkernel::GetArgValOp::create(
@@ -50,6 +45,29 @@ struct ConvertGetProgramIdOp : public OpConversionPattern<GetProgramIdOp> {
   }
 };
 
+struct ConvertGetNumProgramsOp : public OpConversionPattern<GetNumProgramsOp> {
+  using OpConversionPattern<GetNumProgramsOp>::OpConversionPattern;
+
+  LogicalResult
+  matchAndRewrite(GetNumProgramsOp op, OpAdaptor adaptor,
+                  ConversionPatternRewriter &rewriter) const override {
+    Location loc = op.getLoc();
+
+    auto funcOp = op->getParentOfType<func::FuncOp>();
+    assert(funcOp && "expected FuncOp as a parent of GetProgramIdOp");
+    auto perCoreArgsBase =
+        funcOp->getAttrOfType<IntegerAttr>(kTTNumPerCoreArgsAttr).getInt();
+    // TODO: this needs to support multiple dimensions for each per core arg
+    // offset
+    Value index = arith::createIndexConstant(
+        loc, rewriter, perCoreArgsBase + PerCoreArgOffsets::kNumBlocks);
+    auto runtimeArgVal = ttkernel::GetArgValOp::create(
+        rewriter, loc, rewriter.getI32Type(), index);
+    rewriter.replaceOp(op, runtimeArgVal);
+
+    return success();
+  }
+};
 template <typename OpTy>
 class BlockIndexOpConversion : public OpConversionPattern<OpTy> {
   using OpConversionPattern<OpTy>::OpConversionPattern;
@@ -104,10 +122,11 @@ void populateSPMDOpConversionPattern(TypeConverter &typeConverter,
                                      RewritePatternSet &patterns,
                                      PatternBenefit benefit) {
   patterns.add<ConvertGetProgramIdOp>(typeConverter, patterns.getContext());
+  patterns.add<ConvertGetNumProgramsOp>(typeConverter, patterns.getContext());
   patterns.add<BlockIndexOpConversion<mlir::triton::cpu::BlockStartOp>>(
-      typeConverter, LaunchIDOffsets::kBlockStart, patterns.getContext());
+      typeConverter, PerCoreArgOffsets::kBlockStart, patterns.getContext());
   patterns.add<BlockIndexOpConversion<mlir::triton::cpu::BlockEndOp>>(
-      typeConverter, LaunchIDOffsets::kBlockEnd, patterns.getContext());
+      typeConverter, PerCoreArgOffsets::kBlockEnd, patterns.getContext());
   patterns.add<CurrentBlockConversion>(typeConverter, patterns.getContext());
 }
 
