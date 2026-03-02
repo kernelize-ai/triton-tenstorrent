@@ -228,3 +228,13 @@ module attributes {"ttg.num-ctas" = 1 : i32, "ttg.num-warps" = 1 : i32, ttg.targ
     tt.return
   }
 }
+
+// -----
+
+module attributes {"ttg.num-ctas" = 1 : i32, "ttg.num-warps" = 1 : i32, ttg.target = "cpu", "ttg.threads-per-warp" = 1 : i32} {
+tt.func public @addptr_scalar__writer() attributes {noinline = false} {
+  // CHECK: ttkernel.dprint("ptr address: ") : () -> ()
+  tt.print "ptr address: " {hex = false, isSigned = array<i32: 0>}
+  tt.return
+}
+}
