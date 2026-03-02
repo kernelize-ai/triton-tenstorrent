@@ -29,7 +29,16 @@ struct ConvertPrintOp : public OpConversionPattern<triton::PrintOp> {
       return success();
     }
 
-    return failure();
+    // generate the format string
+    std::string formatStr = op.getPrefix().str();
+    for (size_t i = 0; i < op.getNumOperands(); ++i) {
+      formatStr += "{} ";
+    }
+
+    rewriter.replaceOpWithNewOp<ttkernel::DPrintOp>(op, formatStr,
+                                                    adaptor.getOperands());
+
+    return success();
   }
 };
 
