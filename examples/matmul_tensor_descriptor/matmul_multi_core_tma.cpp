@@ -351,6 +351,7 @@ void matmul_multi_core(
                     {                        
                         block_start,
                         block_end,
+                        num_output_blocks_total,
                         packMulticastCoord(0, 0),
                         packMulticastCoord(7, 4)
                     });          
@@ -361,6 +362,7 @@ void matmul_multi_core(
                     {                         
                         block_start,
                         block_end,
+                        num_output_blocks_total,
                         packMulticastCoord(0, 0),
                         packMulticastCoord(7, 4)
                     });  
@@ -373,6 +375,7 @@ void matmul_multi_core(
                     {                   
                         block_start,
                         block_end,
+                        num_output_blocks_total,
                         packMulticastCoord(0, 0),
                         packMulticastCoord(7, 4)
                     });                   
