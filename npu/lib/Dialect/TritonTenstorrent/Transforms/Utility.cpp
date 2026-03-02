@@ -260,33 +260,16 @@ int64_t getNumTiles(Type type) {
     auto shape = rankedType.getShape();
     if (shape.size() == 1) {
       // 1D tensor, use 1024 size tiles
-      return cdiv(shape[0], kTileDimSize * kTileDimSize);
+      return cdiv(shape[0], getTileDimSize() * getTileDimSize());
     } else if (shape.size() == 2) {
       // 2D tensor, use 32x32 size tiles
-      return cdiv(shape[0], kTileDimSize) * cdiv(shape[1], kTileDimSize);
+      return cdiv(shape[0], getTileDimSize()) *
+             cdiv(shape[1], getTileDimSize());
     } else {
       assert(false && "Unsupported tensor rank");
     }
   }
   return 0;
-}
-
-SmallVector<int64_t, 2> convertShapeToTileShape(ArrayRef<int64_t> shape) {
-  if (shape.size() == 1) {
-    return SmallVector<int64_t, 2>{shape[0] / (kTileDimSize * kTileDimSize)};
-  }
-  SmallVector<int64_t, 2> tileShape;
-  tileShape.reserve(shape.size());
-  for (unsigned i = 0; i < shape.size(); ++i) {
-    if (shape[i] == 1) {
-      tileShape.push_back(1);
-      continue;
-    }
-    assert(shape[i] % kTileDimSize == 0 &&
-           "expecting shape dimensions to be multiple of 32");
-    tileShape.push_back(shape[i] / kTileDimSize);
-  }
-  return tileShape;
 }
 
 } // namespace npu

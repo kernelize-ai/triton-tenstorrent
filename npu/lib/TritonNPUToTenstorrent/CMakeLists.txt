@@ -9,6 +9,7 @@ add_triton_library(TritonNPUToTenstorrent
     SPMDOpToTTKernel.cpp
     TritonFuncOpToFuncOp.cpp
     TritonNPUToTTKernel.cpp
+    TypeConverter.cpp
     Utility.cpp
     ViewOpToTTKernel.cpp
 

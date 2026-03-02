@@ -3,13 +3,19 @@
 
 #include "mlir/Transforms/DialectConversion.h"
 
-using namespace mlir;
-using namespace mlir::triton;
+namespace mlir {
+namespace triton {
+namespace npu {
 
-class TritonNPUToTenstorrentTypeConverter : public TypeConverter {
+class TritonNPUToTenstorrentTypeConverter : public mlir::TypeConverter {
 public:
-  using TypeConverter::convertType;
-  TritonNPUToTenstorrentTypeConverter(MLIRContext *ctx) : TypeConverter() {}
+  using mlir::TypeConverter::convertType;
+
+  TritonNPUToTenstorrentTypeConverter(mlir::MLIRContext *ctx);
 };
+
+} // namespace npu
+} // namespace triton
+} // namespace mlir
 
 #endif

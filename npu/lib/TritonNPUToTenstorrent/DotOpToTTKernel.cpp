@@ -61,9 +61,10 @@ struct ConvertDotOp : public OpConversionPattern<triton::DotOp> {
     int64_t K = aType.getShape()[1];
     int64_t N = bType.getShape()[1];
 
-    int64_t mTiles = (M + kTileDimSize - 1) / kTileDimSize;
-    int64_t kTiles = (K + kTileDimSize - 1) / kTileDimSize;
-    int64_t nTiles = (N + kTileDimSize - 1) / kTileDimSize;
+    // TODO: we should read the tile sizes from the layout
+    int64_t mTiles = (M + getTileDimSize() - 1) / getTileDimSize();
+    int64_t kTiles = (K + getTileDimSize() - 1) / getTileDimSize();
+    int64_t nTiles = (N + getTileDimSize() - 1) / getTileDimSize();
 
     assert(mTiles * kTiles == aCBType.getNumTiles() &&
            "a cb num tiles does not match a tensor shape");

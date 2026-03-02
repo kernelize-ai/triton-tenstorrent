@@ -51,24 +51,3 @@ Value createIndexConstant(Location loc, OpBuilder &builder, int64_t value) {
 }
 
 } // namespace mlir::arith
-
-using namespace mlir::tt;
-
-namespace mlir::triton::npu {
-
-Type convertTypeToCBType(Type type) {
-  assert(isa<RankedTensorType>(type) && "expected ranked tensor type");
-  auto rankedType = cast<RankedTensorType>(type);
-  auto etype = rankedType.getElementType();
-  auto shape = convertShapeToTileShape(rankedType.getShape());
-  auto ttcoreTileType = ttcore::TileType::get(
-      type.getContext(), ttcore::TileType::getDefaultShape(),
-      ttcore::elementTypeToDataType(etype));
-  MemRefType cbMemRefType =
-      MemRefType::get(shape, ttcoreTileType, MemRefLayoutAttrInterface{},
-                      ttcore::MemorySpaceAttr::get(
-                          type.getContext(), ttcore::MemorySpace::DeviceL1));
-  return ttkernel::CBType::get(cbMemRefType);
-}
-
-} // namespace mlir::triton::npu

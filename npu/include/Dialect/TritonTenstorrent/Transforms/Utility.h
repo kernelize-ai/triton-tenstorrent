@@ -60,13 +60,12 @@ protected:
 int64_t lookupRegisterIndex(Value v);
 
 /// Tile dim size
-const int64_t kTileDimSize = 32;
+// TODO: this should go in a layout or as a dialect-level attribute since it is
+// used in both Transforms and Conversion passes
+constexpr int64_t getTileDimSize() { return 32; }
 
 /// Calculate the number of tiles to cover a type shape
 int64_t getNumTiles(Type type);
-
-/// Convert a elements shape to a tiles shape
-SmallVector<int64_t, 2> convertShapeToTileShape(ArrayRef<int64_t> shape);
 
 } // namespace npu
 } // namespace triton
