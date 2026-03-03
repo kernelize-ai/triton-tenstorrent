@@ -282,6 +282,8 @@ struct ConvertTritonNPUToTTKernelPass
                                          PatternBenefit(1));
     populatePrintOpConversionPattern(typeConverter, patterns,
                                      PatternBenefit(1));
+    populateReduceOpConversionPattern(typeConverter, patterns,
+                                      PatternBenefit(1));
     populateSPMDOpConversionPattern(typeConverter, patterns, PatternBenefit(1));
     populateViewOpConversionPattern(typeConverter, patterns, PatternBenefit(1));
     mlir::scf::populateSCFStructuralTypeConversionsAndLegality(
