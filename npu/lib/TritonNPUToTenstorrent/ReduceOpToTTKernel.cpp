@@ -61,7 +61,8 @@ struct ReduceOpConversion : public OpConversionPattern<triton::ReduceOp> {
 
     // TODO: this isn't quite right, we need to get the local alloc _through_
     // the local load
-    auto cbValue = localLoadInput.getSrc();
+    Value localAlloc = localLoadInput.getSrc();
+    Value cbValue = rewriter.getRemappedValue(localAlloc);
     llvm::errs() << "cbValue: " << cbValue << "\n";
     auto cbMemRefType =
         cast<ttkernel::CBType>(typeConverter->convertType(cbValue.getType()));
@@ -78,7 +79,6 @@ struct ReduceOpConversion : public OpConversionPattern<triton::ReduceOp> {
 
     const bool isFp32Reduction = true; // TODO: get from resultType
     UnitAttr fullFp32 = isFp32Reduction ? rewriter.getUnitAttr() : nullptr;
-#if 1
     ttkernel::ReduceInitOp::create(rewriter, loc, cbValue, scalingCb, outputCb,
                                    reduceType, reduceDim, isFp32Reduction);
 
@@ -86,7 +86,6 @@ struct ReduceOpConversion : public OpConversionPattern<triton::ReduceOp> {
     // TODO: support tiled layout here
     ttkernel::ReduceTileOp::create(rewriter, loc, cbValue, scalingCb, c0, c0,
                                    c0, reduceType, reduceDim, isFp32Reduction);
-#endif
     ttkernel::ReduceUninitOp::create(rewriter, loc);
 
     rewriter.eraseOp(op);
