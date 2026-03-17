@@ -12,7 +12,11 @@
 #include "api/compute/transpose_wh.h"
 #include "api/compute/eltwise_binary.h"
 #include "api/compute/eltwise_binary_sfpu.h"
+#include "api/compute/add_int_sfpu.h"
+#include "api/compute/sub_int_sfpu.h"
+#include "api/compute/mul_int_sfpu.h"
 #include "api/compute/compute_kernel_api.h"
+#include "api/compute/copy_dest_values.h"
 #include "api/compute/tile_move_copy.h"
 #include "api/compute/eltwise_unary/activations.h"
 #include "api/compute/eltwise_unary/eltwise_unary.h"
@@ -26,7 +30,7 @@
 #include "api/compute/eltwise_unary/trigonometry.h"
 #include "api/compute/eltwise_unary/gelu.h"
 #include "api/compute/eltwise_unary/erf_erfc.h"
-#include "api/compute/eltwise_unary/logical_not_noti.h"
+#include "api/compute/eltwise_unary/logical_not.h"
 #include "api/compute/eltwise_unary/comp.h"
 #include "api/compute/eltwise_unary/rsqrt.h"
 #include "api/compute/eltwise_unary/typecast.h"
@@ -36,6 +40,7 @@
 #include "api/compute/eltwise_unary/binop_with_scalar.h"
 #include "api/compute/eltwise_unary/where.h"
 #include "api/compute/eltwise_unary/clamp.h"
+#include "api/compute/pack_untilize.h"
 inline uint32_t float_to_bits(float f) { uint32_t r; __builtin_memcpy(&r, &f, sizeof(r)); return r; }
 #ifndef INFINITY
 #define INFINITY __builtin_inff()
