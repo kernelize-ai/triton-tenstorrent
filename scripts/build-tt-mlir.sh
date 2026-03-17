@@ -62,8 +62,8 @@ if [[ -z "${NO_TTMLIR_RUNTIME:-}" ]]; then
         -DTT_RUNTIME_ENABLE_TTMETAL=ON \
         -DTTMLIR_ENABLE_RUNTIME_TESTS=ON \
         -DTTMLIR_ENABLE_ALCHEMIST=OFF \
-        -DTTMLIR_ENABLE_SHARED_LIB=OFF
-
+        -DTTMLIR_ENABLE_SHARED_LIB=OFF \
+        -DTT_USE_SYSTEM_SFPI=OFF
     cmake --build build
 else
     echo "Building tt-mlir without runtime"
