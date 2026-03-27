@@ -12,6 +12,8 @@ endif()
 set(TTMLIR_LIB_DIR "${TENSTORRENT_MLIR}/build/lib")
 
 set(TTMLIR_LIB_NAMES
+    MLIRD2MDialect
+    MLIRD2MUtils
     MLIRTTKernelDialect
     MLIRTTKernelTransforms
     TTKernelTargetCpp
@@ -74,6 +76,7 @@ if(TRITON_BUILD_PYTHON_MODULE)
     LINK_LIBS
     TritonCPUToLLVM
     TritonNPUToTenstorrent
+    TritonNPUToD2M
     MLIRQuantDialect
     MLIREmitCDialect
     MLIRArithToEmitC
