@@ -35,6 +35,7 @@ class CPUOptions:
     warp_size: int = 1
     min_dot_size: int = 1
     enable_dot_op_multicast: bool = False
+    ttmlir_target: str = os.environ.get("TRITON_TTMLIR_TARGET", "ttkernel")
 
     def hash(self):
         hash_dict = dict(self.__dict__)
@@ -207,6 +208,17 @@ class CPUBackend(BaseBackend):
         return ret
 
     @staticmethod
+    def make_d2m(mod, metadata, options):
+        pm = ir.pass_manager(mod.context)
+        pm.enable_debug()
+
+        cpu.passes.tenstorrent.add_to_d2m_dialect(pm)
+        passes.common.add_canonicalizer(pm)
+
+        pm.run(mod, "make_d2m")
+        return mod
+
+    @staticmethod
     def make_tenstorrent_mlir(mod, metadata, options):
         pm = ir.pass_manager(mod.context)
         pm.enable_debug()
@@ -334,10 +346,15 @@ class CPUBackend(BaseBackend):
             stages["asm"] = lambda src, metadata: self.make_asm(src, metadata, options)
             stages["so"] = lambda src, metadata: self.make_library(src, metadata, options)
         elif self.device == 'Tenstorrent':
-            stages["ttmlir"] = lambda src, metadata: self.make_tenstorrent_mlir(src, metadata, options)
-            stages["emitc"] = lambda src, metadata: self.make_emitc(src, metadata, options)
-            stages["cpp"] = lambda src, metadata: self.make_ttmlir_cpp_file(src, metadata, options)
-            stages['so'] = lambda src, metadata: self.make_tenstorrent_binary(src, metadata, options)
+            if options.ttmlir_target == "ttkernel":
+                stages["ttmlir"] = lambda src, metadata: self.make_tenstorrent_mlir(src, metadata, options)
+                stages["emitc"] = lambda src, metadata: self.make_emitc(src, metadata, options)
+                stages["cpp"] = lambda src, metadata: self.make_ttmlir_cpp_file(src, metadata, options)
+                stages['so'] = lambda src, metadata: self.make_tenstorrent_binary(src, metadata, options)
+            elif options.ttmlir_target == "d2m":
+                stages["d2m"] = lambda src, metadata: self.make_d2m(src, metadata, options)
+            else:
+                raise ValueError(f"Unsupported TTMLIR target: {options.ttmlir_target}")
 
     @functools.lru_cache()
     def hash(self):

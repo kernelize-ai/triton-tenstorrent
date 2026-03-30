@@ -77,6 +77,8 @@ if(TRITON_BUILD_PYTHON_MODULE)
     TritonNPUToD2M
     MLIRQuantDialect
     MLIREmitCDialect
+    MLIRAffineDialect
+    MLIRAffineUtils
     MLIRArithToEmitC
     MLIRMemRefToEmitC
     MLIRSCFToEmitC
