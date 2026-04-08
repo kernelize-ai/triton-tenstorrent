@@ -10,6 +10,8 @@
 #include "ttmlir/Dialect/D2M/IR/D2M.h"
 #include "ttmlir/Dialect/D2M/IR/D2MOps.h"
 
+#include "../TypeConverter.h"
+
 namespace mlir {
 
 using namespace tt;
@@ -30,8 +32,35 @@ struct ConvertTritonNPUToD2MPass
     MLIRContext *context = &getContext();
     ModuleOp mod = getOperation();
 
-    TypeConverter typeConverter;
-    typeConverter.addConversion([](Type type) { return type; });
+    TritonNPUToTenstorrentTypeConverter typeConverter(context);
+    typeConverter.addConversion([](mlir::triton::TensorDescType t,
+                                   llvm::SmallVectorImpl<mlir::Type> &out) {
+      // We convert a tensor descriptor into a memref, and a shape and stride
+      // for each dimension, and padding option. i.e., we create 1+2*rank+1
+      // values. Note that tensor descriptors may be signed/unsigned integers
+      // whereas pointers should always be signless.
+      auto tensorType = t.getSignlessBlockType();
+      auto eType = tensorType.getElementType();
+      auto tileType = ttcore::TileType::get(
+          t.getContext(), ttcore::TileType::getDefaultShape(),
+          ttcore::elementTypeToDataType(eType));
+      auto shardShape = llvm::to_vector(
+          map_range((llvm::zip(tensorType.getShape(), tileType.getShape())),
+                    [](auto pair) -> int64_t {
+                      auto [dim, tileDim] = pair;
+                      return dim / tileDim;
+                    }));
+
+      auto memRefType =
+          MemRefType::get(shardShape, tileType, MemRefLayoutAttrInterface{},
+                          ttcore::MemorySpaceAttr::get(
+                              t.getContext(), ttcore::MemorySpace::DeviceDRAM));
+      out.push_back(memRefType);
+      out.insert(out.end(), 2 * tensorType.getRank(),
+                 mlir::IntegerType::get(t.getContext(), 32));
+      out.push_back(mlir::IntegerType::get(t.getContext(), 1));
+      return mlir::success();
+    });
 
     mlir::ConversionTarget funcTarget(*context);
     funcTarget.addIllegalOp<triton::FuncOp>();
@@ -39,6 +68,7 @@ struct ConvertTritonNPUToD2MPass
 
     funcTarget.addLegalOp<UnrealizedConversionCastOp>();
     funcTarget.addLegalOp<d2m::GenericOp>();
+    funcTarget.addLegalDialect<func::FuncDialect>();
 
     mlir::RewritePatternSet funcPatterns(context);
     experimental::populateFuncOpConversionPattern(typeConverter, funcPatterns,
