@@ -19,7 +19,7 @@ from types import ModuleType
 
 
 @dataclass(frozen=True)
-class CPUOptions:
+class TTOptions:
     num_warps: int = 1
     num_ctas: int = 1
     num_stages: int = 1
@@ -42,7 +42,7 @@ class CPUOptions:
         return hashlib.sha256(key.encode("utf-8")).hexdigest()
 
 
-class CPUBackend(BaseBackend):
+class TTBackend(BaseBackend):
     instrumentation = None  # TODO: intra-kernel instrumentation not yet supported
 
     @staticmethod
@@ -65,10 +65,10 @@ class CPUBackend(BaseBackend):
             args["enable_dot_op_multicast"] = os.environ.get("TRITON_ENABLE_DOT_OP_MULTICAST", "0") == "1"
         args.update(
             {k: options[k]
-             for k in CPUOptions.__dataclass_fields__.keys()
+             for k in TTOptions.__dataclass_fields__.keys()
              if k in options if options[k] is not None})
 
-        return CPUOptions(**args)
+        return TTOptions(**args)
 
     def pack_metadata(self, metadata):
         return (

@@ -61,32 +61,25 @@ def library_dirs():
 
 
 def get_nexus_runtime():
+    import torch_nexus
     import nexus
     return nexus.get_runtime("tt-metal")
 
 
-class CpuUtils(object):
+class TTUtils(object):
 
-    def __init__(self, runtime):
-        self.runtime = runtime
+    def __init__(self, driver):
+        self.driver = driver
 
     def load_binary(self, name, kernel, shared_mem, device):
-        ## TODO: change to load_library from kernel string so the tmp files are not needed
-        ## tmpfile must be persistent since the file will be jit compiled on the first run
-        device = self.runtime.get_device(device)
-        with tempfile.NamedTemporaryFile(mode="wb", suffix=".cpp", delete=False) as f:
-            f.write(kernel)
-            f.flush()
-            os.fsync(f.fileno())
-            os.stat(f.name)
-            lib = device.load_library(f.name)
-            kernel = lib.get_kernel(name)
-            # TODO: properly handle num registers / max number threads
-            return (lib, kernel, 1, shared_mem, 2**12)
+        device = get_nexus_runtime().get_device(device)
+        lib = device.load_library(kernel, len(kernel))
+        kernel = lib.get_kernel(name)
+        return (lib, kernel, 1, shared_mem, 2**12)
 
     def get_device_properties(self, *args):
         # import nexus
-        core_count = 130  # self.device.get_property_int(nexus.property.Size)
+        core_count = 56
         return {
             "max_num_regs": core_count * 4, "max_shared_mem": 1024 * 1024 * 1024, "multiprocessor_count": core_count,
             "warpSize": 1
@@ -115,11 +108,9 @@ def ty_to_cpp(ty):
     }[ty]
 
 
-class CPULauncher(object):
+class TTLauncher(object):
 
     def __init__(self, src, metadata):
-        runtime = get_nexus_runtime()
-        self.device = runtime.get_device(0)
         self.schedule = None
         constants = src.constants if hasattr(src, "constants") else dict()
         arg_idx = lambda x: (src.fn.arg_names.index(x), ) if isinstance(x, str) else x
@@ -127,7 +118,11 @@ class CPULauncher(object):
         self.signature = {idx: value for idx, value in src.signature.items()}
 
     def __call__(self, gridX, gridY, gridZ, stream, function, *args):
+        import torch
+        import torch_nexus
         import nexus
+
+        print(f"TTLaunder call: {function} {gridX} {gridY} {gridZ}")
         #self.launch(gridX, gridY, gridZ, stream, function, *args)
         kernel_metadata = args[0]
         num_warps = kernel_metadata[0]
@@ -141,54 +136,46 @@ class CPULauncher(object):
         launch_exit_hook = args[3]
 
         if self.schedule is None:
-            self.schedule = self.device.create_schedule()
+            device = torch.nexus.get_device()
+            self.schedule = device.create_schedule()
             schedule = self.schedule
-            command = schedule.create_command(function)
+            self.command = schedule.create_command(function)
             import torch
             ## TODO: Get CB depth from TuningConfig
             cb_depth = 1
-            buffers = []
             sig_types = list(self.signature.values())
             idx = 0
-            add_arg = lambda arg: (command.set_arg(idx, arg), idx + 1)
             cb_idx = 0
             for i, arg in enumerate(args[4:]):
+                #print(f"ARG({i}): {arg}")
                 ty = sig_types[i]
                 if ty == "constexpr":
                     continue
                 if isinstance(arg, torch.Tensor) or isinstance(arg, nexus.buffer):
-                    command.set_const(cb_idx, cb_depth, "CB", nexus.get_data_type(arg))
+                    self.command.set_const(cb_idx, cb_depth, "CB", nexus.get_data_type(arg))
                     cb_idx += 1
-                    arg = self.device.create_buffer(arg)
-                    _, idx = add_arg(arg)
-                    buffers.append(arg)
+                    print(f"ARG({i}): {arg.data_ptr()}")
+                    self.command.set_arg(idx, arg)
+                    idx += 1
                 elif isinstance(arg, TensorDescriptor):
                     arg_base = arg.base
-                    command.set_const(cb_idx, cb_depth, "CB", nexus.get_data_type(arg_base))
+                    self.command.set_const(cb_idx, cb_depth, "CB", nexus.get_data_type(arg_base))
                     cb_idx += 1
-                    arg_buf = self.device.create_buffer(arg.base)
-                    _, idx = add_arg(arg_buf)
+                    self.command.set_arg(idx, arg)
+                    idx += 1
                     # shape flattened
                     for dim in arg.shape:
-                        _, idx = add_arg(dim)
+                        self.command.set_arg(idx, dim)
+                        idx += 1
                     # strides flattened
                     for stride in arg.strides:
-                        _, idx = add_arg(stride)
-                    padded = 1  # arg.padding == "nan"
-                    _, idx = add_arg(padded)
-                    ##  Repeat since the tensor descriptor is lowered with redundant information
-                    # shape flattened
-                    for dim in arg.shape:
-                        _, idx = add_arg(dim)
-                    # strides flattened
-                    for stride in arg.strides:
-                        _, idx = add_arg(stride)
-                    # block shape? Not used by kernel
-                    buffers.append(arg_buf)
+                        self.command.set_arg(idx, stride)
+                        idx += 1
                 else:
-                    _, idx = add_arg(arg)
+                    self.command.set_arg(idx, arg)
+                    idx += 1
 
-            command.finalize([gridX, gridY, gridZ], [num_warps, 1, 1], shared_memory)
+            self.command.finalize([gridX, gridY, gridZ], [num_warps, 1, 1], shared_memory)
 
         if launch_enter_hook is not None:
             launch_enter_hook(launch_metadata)
@@ -197,7 +184,7 @@ class CPULauncher(object):
             launch_exit_hook(launch_metadata)
 
 
-class CPUDeviceInterface:
+class TTDeviceInterface:
 
     class HooksTimeAccessor:
 
@@ -248,61 +235,61 @@ class CPUDeviceInterface:
 
     def Event(self, enable_timing=True):
         if self.use_hooks:
-            return CPUDeviceInterface.HooksTimeAccessor(self)
-        return CPUDeviceInterface.TimerEvent()
+            return TTDeviceInterface.HooksTimeAccessor(self)
+        return TTDeviceInterface.TimerEvent()
 
 
-class CPUDriver(DriverBase):
+class TTDriver(DriverBase):
 
     @staticmethod
     def is_active():
         # Always active so the off-line compiler doesn't complain
         # TODO: Fix the off-line compiler
-        return True
         try:
-            return bool(CPUDriver.get_device())
+            import torch
+            import torch_nexus
+            return torch.nexus.is_available()
         except ImportError:
             return False
 
-    def get_device(self, device_id=0):
-        if self.runtime is None:
-            self.runtime = get_nexus_runtime()
-        return self.runtime.get_device(device_id)
-
     def __init__(self):
-        self.runtime = None
-        self.utils = CpuUtils(self)
+        print("TT_NEXUS: __init__")
         import torch
-        self.get_current_stream = lambda idx: torch.cpu.Stream()
-        self.launcher_cls = CPULauncher
-
-    def get_device_interface(self):
-        return CPUDeviceInterface()
+        import torch_nexus
+        torch.nexus.set_runtime('tt-metal')
+        self.current_device_id = 0
+        self.utils = TTUtils(self)
+        self.get_current_stream = lambda idx: torch.nexus.get_stream()
+        self.launcher_cls = TTLauncher
 
     def get_current_device(self):
-        return 0
+        return self.current_device_id
+
+    def set_current_device(self, devid):
+        self.current_device_id = devid
+        import torch_nexus
+        torch.nexus.set_device(devid)
+    
+    def get_device_interface(self):
+        import torch
+        return torch.nexus
+        #return TTDeviceInterface()
 
     def map_python_to_cpp_type(self, ty: str) -> str:
         return ty_to_cpp(ty)
 
     def get_current_target(self):
-        capability = "cpu"
+        capability = "tt-metal"
         warp_size = 1
         return GPUTarget("tenstorrent", capability, warp_size)
 
     def get_active_torch_device(self):
         import torch
-        return torch.device("cpu")
-
-    def get_empty_device_buffer(self, size, dtype):
-        import nexus
-        return self.get_device().create_buffer(size, nexus.get_data_type(dtype))
-
-    def get_device_buffer(self, torch_buffer):
-        return self.get_device().create_buffer(torch_buffer)
-
-    def copy_buffer_to_host(self, device_buffer, host_buffer):
-        return device_buffer.copy(host_buffer)
+        import torch_nexus
+        print(f"TT_NEXUS: active_torch_device {torch.nexus.is_available()}")
+        torch.nexus.set_runtime('tt-metal', self.get_current_device())
+        return torch.device("nexus", self.get_current_device())
+        #return torch.device("nexus:0")
 
     def get_benchmarker(self):
         from triton.testing import do_bench
@@ -312,7 +299,7 @@ class CPUDriver(DriverBase):
         import torch
 
         cache_size = 1024
-        return torch.empty(int(cache_size // 4), dtype=torch.int, device='cpu')
+        return torch.empty(int(cache_size // 4), dtype=torch.int, device='nexus:tt-metal')
 
     def clear_cache(self, cache):
         cache.zero_()
