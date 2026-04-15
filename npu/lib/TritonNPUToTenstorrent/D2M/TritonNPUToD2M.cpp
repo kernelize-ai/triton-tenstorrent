@@ -11,6 +11,10 @@
 #include "ttmlir/Dialect/D2M/IR/D2M.h"
 #include "ttmlir/Dialect/D2M/IR/D2MOps.h"
 
+#include "mlir/Dialect/Linalg/IR/Linalg.h"
+
+#include "npu/include/Dialect/TritonTenstorrent/IR/Attributes.h"
+
 #include "../TypeConverter.h"
 
 namespace mlir {
@@ -62,6 +66,35 @@ struct ConvertTritonNPUToD2MPass
       out.push_back(mlir::IntegerType::get(t.getContext(), 1));
       return mlir::success();
     });
+    typeConverter.addConversion([](RankedTensorType tensorType) -> Type {
+      auto eType = tensorType.getElementType();
+      if (isa<triton::PointerType>(eType)) {
+        return IntegerType::get(tensorType.getContext(), 32);
+      }
+      if (!tensorType.getEncoding()) {
+        return tensorType;
+      }
+      if (isa<npu::tt::TiledEncodingAttr>(tensorType.getEncoding()) ||
+          isa<npu::tt::TiledDotOperandEncodingAttr>(tensorType.getEncoding()) ||
+          isa<gpu::DotOperandEncodingAttr>(tensorType.getEncoding())) {
+        // convert to memref in L1
+        auto tileType = ttcore::TileType::get(
+            tensorType.getContext(), ttcore::TileType::getDefaultShape(),
+            ttcore::elementTypeToDataType(eType));
+        auto shardShape = llvm::to_vector(
+            map_range((llvm::zip(tensorType.getShape(), tileType.getShape())),
+                      [](auto pair) -> int64_t {
+                        auto [dim, tileDim] = pair;
+                        return dim / tileDim;
+                      }));
+        auto memRefType = MemRefType::get(
+            shardShape, tileType, MemRefLayoutAttrInterface{},
+            ttcore::MemorySpaceAttr::get(tensorType.getContext(),
+                                         ttcore::MemorySpace::DeviceL1));
+        return memRefType;
+      }
+      return tensorType;
+    });
 
     mlir::ConversionTarget funcTarget(*context);
     funcTarget.addIllegalOp<triton::FuncOp>();
@@ -90,6 +123,7 @@ struct ConvertTritonNPUToD2MPass
     target.addLegalDialect<arith::ArithDialect>();
     target.addLegalDialect<func::FuncDialect>();
     target.addLegalDialect<memref::MemRefDialect>();
+    target.addLegalDialect<linalg::LinalgDialect>();
 
     target.addIllegalDialect<triton::TritonDialect>();
     // target.addIllegalDialect<triton::cpu::TritonCPUDialect>();
@@ -104,6 +138,8 @@ struct ConvertTritonNPUToD2MPass
     });
 
     mlir::RewritePatternSet patterns(context);
+    experimental::populateDotOpConversionPattern(typeConverter, patterns,
+                                                 PatternBenefit(1));
     experimental::populateMemoryOpConversionPattern(typeConverter, patterns,
                                                     PatternBenefit(1));
 

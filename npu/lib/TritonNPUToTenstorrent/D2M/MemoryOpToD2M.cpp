@@ -111,7 +111,7 @@ struct ConvertTensorDescLoadOp
     auto remoteLoad = d2m::RemoteLoadOp::create(
         rewriter, loc, resultType, allocOp.getResult(), descPtr, indices);
 
-    op.replaceAllUsesWith(remoteLoad.getResult());
+    rewriter.replaceOp(op, remoteLoad.getResult());
 
     return success();
   }
