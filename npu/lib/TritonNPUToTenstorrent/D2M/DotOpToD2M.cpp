@@ -25,6 +25,48 @@ namespace experimental {
 
 namespace {
 
+// TODO: move (at some point)
+struct ConvertTiledConstantOp : public OpConversionPattern<arith::ConstantOp> {
+  using OpConversionPattern<arith::ConstantOp>::OpConversionPattern;
+
+  LogicalResult
+  matchAndRewrite(arith::ConstantOp op, OpAdaptor adaptor,
+                  ConversionPatternRewriter &rewriter) const override {
+    auto resultTensorType = dyn_cast<RankedTensorType>(op.getType());
+    if (!resultTensorType)
+      return failure();
+
+    if (!isa<npu::tt::TiledEncodingAttr>(resultTensorType.getEncoding()))
+      return failure();
+
+    // TODO: check if the constant is 0
+
+    // convert to alloc
+    Type newType = getTypeConverter()->convertType(op.getType());
+    auto allocOp = memref::AllocOp::create(rewriter, op.getLoc(),
+                                           cast<MemRefType>(newType));
+    rewriter.replaceOp(op, allocOp.getResult());
+
+    return success();
+  }
+};
+
+struct ConvertTruncateOp : public OpConversionPattern<arith::TruncFOp> {
+  using OpConversionPattern<arith::TruncFOp>::OpConversionPattern;
+
+  LogicalResult
+  matchAndRewrite(arith::TruncFOp op, OpAdaptor adaptor,
+                  ConversionPatternRewriter &rewriter) const override {
+    if (isa<RankedTensorType>(op.getOperand().getType())) {
+      Type newType = getTypeConverter()->convertType(op.getType());
+      rewriter.replaceOpWithNewOp<d2m::TileTypecastOp>(op, newType,
+                                                       adaptor.getIn());
+      return success();
+    }
+    return failure();
+  }
+};
+
 struct ConvertDotOp : public OpConversionPattern<triton::DotOp> {
   using OpConversionPattern<triton::DotOp>::OpConversionPattern;
 
@@ -82,8 +124,8 @@ struct ConvertDotOp : public OpConversionPattern<triton::DotOp> {
           // args[0] = tile element from A
           // args[1] = tile element from B
           // args[2] = tile element from C (accumulator)
-          auto tileResult = b_.create<d2m::TileMatmulOp>(
-              innerLoc, args[2].getType(), args[0], args[1], args[2]);
+          auto tileResult = d2m::TileMatmulOp::create(
+              b_, innerLoc, args[2].getType(), args[0], args[1], args[2]);
           linalg::YieldOp::create(b_, innerLoc, tileResult.getResult());
         });
 
@@ -97,6 +139,8 @@ struct ConvertDotOp : public OpConversionPattern<triton::DotOp> {
 void populateDotOpConversionPattern(TypeConverter &typeConverter,
                                     RewritePatternSet &patterns,
                                     PatternBenefit benefit) {
+  patterns.add<ConvertTiledConstantOp>(typeConverter, patterns.getContext());
+  patterns.add<ConvertTruncateOp>(typeConverter, patterns.getContext());
   patterns.add<ConvertDotOp>(typeConverter, patterns.getContext());
 }
 

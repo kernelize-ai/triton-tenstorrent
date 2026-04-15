@@ -11,6 +11,8 @@
 #include "ttmlir/Dialect/D2M/IR/D2MGenericRegionOps.h"
 #include "ttmlir/Dialect/D2M/IR/D2MOps.h"
 
+#include "mlir/Dialect/Arith/IR/Arith.h"
+
 namespace mlir {
 using namespace tt;
 namespace triton {
@@ -56,7 +58,10 @@ struct ConvertTensorDescLoadOp
         blockShape, descType.getElementType(), MemRefLayoutAttrInterface{},
         ttcore::MemorySpaceAttr::get(context, ttcore::MemorySpace::DeviceL1));
 
-    auto indices = op.getIndices();
+    SmallVector<Value> indices;
+    for (Value idx : op.getIndices())
+      indices.push_back(arith::IndexCastOp::create(
+          rewriter, loc, rewriter.getIndexType(), idx));
 
     // step 3: create the remote load
     auto remoteLoad = d2m::RemoteLoadOp::create(
@@ -82,14 +87,16 @@ struct ConvertTensorDescStoreOp
     assert(desc.size() >= 1 && "expected at least one value in the descriptor");
     auto descPtr = desc[0];
 
-    auto indices = op.getIndices();
+    SmallVector<Value> indices;
+    for (Value idx : op.getIndices())
+      indices.push_back(arith::IndexCastOp::create(
+          rewriter, loc, rewriter.getIndexType(), idx));
 
     Value src = adaptor.getSrc()[0];
 
     // local buffer variant of remote store
     auto remoteStore = d2m::RemoteStoreOp::create(
-        rewriter, loc, /*resultType=*/descPtr.getType(), descPtr,
-        ValueRange(indices), src);
+        rewriter, loc, /*resultType=*/descPtr.getType(), descPtr, indices, src);
 
     // remote store produces a result where descriptor store does not, so we
     // erase the descriptor store instead of replacing it

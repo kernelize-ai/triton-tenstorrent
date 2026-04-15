@@ -12,6 +12,7 @@
 #include "ttmlir/Dialect/D2M/IR/D2MOps.h"
 
 #include "mlir/Dialect/Linalg/IR/Linalg.h"
+#include "mlir/Dialect/SCF/Transforms/Patterns.h"
 
 #include "npu/include/Dialect/TritonTenstorrent/IR/Attributes.h"
 
@@ -121,7 +122,6 @@ struct ConvertTritonNPUToD2MPass
     mlir::ConversionTarget target{*context};
 
     target.addLegalDialect<d2m::D2MDialect>();
-    target.addLegalDialect<arith::ArithDialect>();
     target.addLegalDialect<func::FuncDialect>();
     target.addLegalDialect<memref::MemRefDialect>();
     target.addLegalDialect<linalg::LinalgDialect>();
@@ -132,7 +132,13 @@ struct ConvertTritonNPUToD2MPass
 
     target.addLegalOp<UnrealizedConversionCastOp>();
     target.addDynamicallyLegalDialect<arith::ArithDialect>([&](Operation *op) {
-      // only legal if not operating on tensors
+      if (llvm::isa<arith::ConstantOp>(op)) {
+        // allow constant ops as long as they do not produce tensor types
+        return llvm::all_of(op->getResults(), [](Value v) {
+          return !isa<RankedTensorType>(v.getType());
+        });
+      }
+      // other arith ops are only legal if not operating on tensors
       return llvm::all_of(op->getOperands(), [](Value v) {
         return !(isa<RankedTensorType>(v.getType()));
       });
@@ -141,10 +147,12 @@ struct ConvertTritonNPUToD2MPass
     mlir::RewritePatternSet patterns(context);
     experimental::populateDotOpConversionPattern(typeConverter, patterns,
                                                  PatternBenefit(1));
-    populateElementwiseOpConversionPattern(typeConverter, patterns,
-                                           PatternBenefit(1));
+    // populateElementwiseOpConversionPattern(typeConverter, patterns,
+    //  PatternBenefit(1));
     experimental::populateMemoryOpConversionPattern(typeConverter, patterns,
                                                     PatternBenefit(1));
+    mlir::scf::populateSCFStructuralTypeConversionsAndLegality(
+        typeConverter, patterns, target);
 
     if (failed(applyPartialConversion(mod, target, std::move(patterns))))
       return signalPassFailure();
