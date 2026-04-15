@@ -1,3 +1,4 @@
+#include "npu/include/Dialect/TritonTenstorrent/IR/Dialect.h"
 #include "npu/include/TritonNPUToD2M/Passes.h"
 
 #include "PatternTritonNPUToD2M.h"
@@ -82,6 +83,32 @@ struct ConvertTritonNPUToD2MPass
       DBGS() << "After FuncOp conversion:\n";
       mod.dump();
     });
+
+    mlir::ConversionTarget target{*context};
+
+    target.addLegalDialect<d2m::D2MDialect>();
+    target.addLegalDialect<arith::ArithDialect>();
+    target.addLegalDialect<func::FuncDialect>();
+    target.addLegalDialect<memref::MemRefDialect>();
+
+    target.addIllegalDialect<triton::TritonDialect>();
+    // target.addIllegalDialect<triton::cpu::TritonCPUDialect>();
+    target.addIllegalDialect<triton::gpu::TritonGPUDialect>();
+
+    target.addLegalOp<UnrealizedConversionCastOp>();
+    target.addDynamicallyLegalDialect<arith::ArithDialect>([&](Operation *op) {
+      // only legal if not operating on tensors
+      return llvm::all_of(op->getOperands(), [](Value v) {
+        return !(isa<RankedTensorType>(v.getType()));
+      });
+    });
+
+    mlir::RewritePatternSet patterns(context);
+    experimental::populateMemoryOpConversionPattern(typeConverter, patterns,
+                                                    PatternBenefit(1));
+
+    if (failed(applyPartialConversion(mod, target, std::move(patterns))))
+      return signalPassFailure();
   }
 };
 

@@ -14,7 +14,8 @@ def ConvertTritonNPUToD2M : Pass<"convert-triton-npu-to-d2m", "mlir::ModuleOp"> 
                              "mlir::triton::gpu::TritonGPUDialect",
                              "mlir::d2m::D2MDialect",
                              "mlir::arith::ArithDialect",
-                             "func::FuncDialect"
+                             "func::FuncDialect",
+                             "mlir::triton::npu::tt::TritonTenstorrentDialect"
                             ];
 }
 

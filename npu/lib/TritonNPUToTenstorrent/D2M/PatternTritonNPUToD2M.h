@@ -12,7 +12,11 @@ void populateFuncOpConversionPattern(TypeConverter &typeConverter,
                                      RewritePatternSet &patterns,
                                      PatternBenefit benefit);
 
-}
+void populateMemoryOpConversionPattern(TypeConverter &typeConverter,
+                                       RewritePatternSet &patterns,
+                                       PatternBenefit benefit);
+
+} // namespace experimental
 } // namespace npu
 } // namespace triton
 } // namespace mlir
