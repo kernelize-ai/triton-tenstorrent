@@ -44,9 +44,21 @@ struct ConvertTensorDescLoadOp
 
     // step 1: allocate L1 space for the load
     MemRefType descType = cast<MemRefType>(descPtr.getType());
-    auto blockShape = descType.getShape();
+    auto gridShardShape = descType.getShape();
+
+    auto loadTensorType = cast<RankedTensorType>(op.getType());
+    assert(gridShardShape.size() == 2 * loadTensorType.getRank() &&
+           "expecting descriptor to have 2*rank dimensions for grid shape and "
+           "shard shape");
+    auto tileShape = llvm::to_vector(
+        llvm::drop_begin(gridShardShape, loadTensorType.getRank()));
+
+    auto cbLayout = ttcore::CBLayoutAttr::get(
+        context, tileShape,
+        ttcore::getElementSizeBytes(descType.getElementType()),
+        /*buffers=*/tileShape.size());
     auto allocType = MemRefType::get(
-        blockShape, descType.getElementType(), MemRefLayoutAttrInterface{},
+        tileShape, descType.getElementType(), cbLayout,
         ttcore::MemorySpaceAttr::get(context, ttcore::MemorySpace::DeviceL1));
     auto allocOp = memref::AllocOp::create(rewriter, loc, allocType);
 
@@ -55,7 +67,7 @@ struct ConvertTensorDescLoadOp
     // convert result type to memref with block shape
     // TODO: this is just the same as the alloc type?
     auto resultType = MemRefType::get(
-        blockShape, descType.getElementType(), MemRefLayoutAttrInterface{},
+        tileShape, descType.getElementType(), MemRefLayoutAttrInterface{},
         ttcore::MemorySpaceAttr::get(context, ttcore::MemorySpace::DeviceL1));
 
     SmallVector<Value> indices;

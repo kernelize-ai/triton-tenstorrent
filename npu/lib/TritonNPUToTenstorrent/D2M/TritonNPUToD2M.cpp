@@ -58,10 +58,13 @@ struct ConvertTritonNPUToD2MPass
                       return dim / tileDim;
                     }));
 
-      auto memRefType =
-          MemRefType::get(shardShape, tileType, MemRefLayoutAttrInterface{},
-                          ttcore::MemorySpaceAttr::get(
-                              t.getContext(), ttcore::MemorySpace::DeviceDRAM));
+      SmallVector<int64_t> shape{1, 1};
+      shape.append(shardShape.begin(), shardShape.end());
+      auto memRefType = MemRefType::get(
+          shape, tileType,
+          ttcore::ViewLayoutAttr::get(t.getContext(), shape.size()),
+          ttcore::MemorySpaceAttr::get(t.getContext(),
+                                       ttcore::MemorySpace::DeviceDRAM));
       out.push_back(memRefType);
       out.insert(out.end(), 2 * tensorType.getRank(),
                  mlir::IntegerType::get(t.getContext(), 32));
