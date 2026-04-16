@@ -117,7 +117,7 @@ struct ConvertDotOp : public OpConversionPattern<triton::DotOp> {
 
     auto genericOp = linalg::GenericOp::create(
         rewriter, loc,
-        /*resultTypes=*/TypeRange{c.getType()},
+        /*resultTypes=*/TypeRange{},
         /*inputs=*/ValueRange{a, b},
         /*outputs=*/ValueRange{c}, indexingMaps, iterTypes,
         [&](OpBuilder &b_, Location innerLoc, ValueRange args) {
@@ -129,7 +129,7 @@ struct ConvertDotOp : public OpConversionPattern<triton::DotOp> {
           linalg::YieldOp::create(b_, innerLoc, tileResult.getResult());
         });
 
-    rewriter.replaceOp(op, genericOp.getResult(0));
+    rewriter.replaceOp(op, c);
     return success();
   }
 };
