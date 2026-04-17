@@ -14,6 +14,7 @@ def TritonTenstorrent_Dialect : Dialect {
 
   let dependentDialects = [
     "triton::TritonDialect",
+    "triton::gpu::TritonGPUDialect"
   ];
 
   let discardableAttrs = (ins
