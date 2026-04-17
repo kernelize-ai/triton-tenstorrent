@@ -57,13 +57,35 @@ struct ConvertTruncateOp : public OpConversionPattern<arith::TruncFOp> {
   LogicalResult
   matchAndRewrite(arith::TruncFOp op, OpAdaptor adaptor,
                   ConversionPatternRewriter &rewriter) const override {
-    if (isa<RankedTensorType>(op.getOperand().getType())) {
-      Type newType = getTypeConverter()->convertType(op.getType());
-      rewriter.replaceOpWithNewOp<d2m::TileTypecastOp>(op, newType,
-                                                       adaptor.getIn());
-      return success();
-    }
-    return failure();
+    if (!isa<RankedTensorType>(op.getOperand().getType()))
+      return failure();
+
+    Location loc = op.getLoc();
+    MLIRContext *ctx = rewriter.getContext();
+
+    Type newType = getTypeConverter()->convertType(op.getType());
+    auto outMemRefType = cast<MemRefType>(newType);
+    Value inMemRef = adaptor.getIn();
+    int64_t rank = cast<MemRefType>(inMemRef.getType()).getRank();
+
+    AffineMap identityMap = AffineMap::getMultiDimIdentityMap(rank, ctx);
+    SmallVector<AffineMap> indexingMaps(2, identityMap);
+    SmallVector<utils::IteratorType> iterTypes(rank,
+                                               utils::IteratorType::parallel);
+
+    auto outAlloc = memref::AllocOp::create(rewriter, loc, outMemRefType);
+    linalg::GenericOp::create(
+        rewriter, loc, /*resultTypes=*/TypeRange{},
+        /*inputs=*/ValueRange{inMemRef},
+        /*outputs=*/ValueRange{outAlloc.getResult()}, indexingMaps, iterTypes,
+        [&](OpBuilder &b_, Location innerLoc, ValueRange args) {
+          auto tileResult = d2m::TileTypecastOp::create(
+              b_, innerLoc, args[1].getType(), args[0]);
+          linalg::YieldOp::create(b_, innerLoc, tileResult.getResult());
+        });
+
+    rewriter.replaceOp(op, outAlloc.getResult());
+    return success();
   }
 };
 
