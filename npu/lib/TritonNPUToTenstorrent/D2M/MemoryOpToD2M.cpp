@@ -64,8 +64,8 @@ struct ConvertTensorDescLoadOp
 
     // step 2: process the indices
     auto loadResultType = cast<RankedTensorType>(op.getResult().getType());
-    // convert result type to memref with block shape
-    // TODO: this is just the same as the alloc type?
+    // convert result type to memref with tile shape
+    // the result type does not use the grid shape (block shape + tile shape)
     auto resultType = MemRefType::get(
         tileShape, descType.getElementType(), MemRefLayoutAttrInterface{},
         ttcore::MemorySpaceAttr::get(context, ttcore::MemorySpace::DeviceL1));

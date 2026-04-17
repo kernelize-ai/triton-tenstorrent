@@ -150,8 +150,6 @@ struct ConvertTritonNPUToD2MPass
     mlir::RewritePatternSet patterns(context);
     experimental::populateDotOpConversionPattern(typeConverter, patterns,
                                                  PatternBenefit(1));
-    // populateElementwiseOpConversionPattern(typeConverter, patterns,
-    //  PatternBenefit(1));
     experimental::populateMemoryOpConversionPattern(typeConverter, patterns,
                                                     PatternBenefit(1));
     mlir::scf::populateSCFStructuralTypeConversionsAndLegality(
