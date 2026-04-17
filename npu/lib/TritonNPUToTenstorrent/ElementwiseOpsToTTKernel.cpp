@@ -180,7 +180,8 @@ struct ArithUnaryOpOnTensorsConversion : public OpConversionPattern<OpTy> {
   matchAndRewrite(OpTy op, OpAdaptor adaptor,
                   ConversionPatternRewriter &rewriter) const override {
     if (isa<RankedTensorType>(op.getOperand().getType())) {
-      rewriter.eraseOp(op);
+      auto operands = llvm::to_vector(adaptor.getOperands());
+      rewriter.replaceOp(op, operands[0]);
       return success();
     }
     return failure();
