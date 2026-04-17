@@ -108,6 +108,8 @@ Attribute TiledEncodingAttr::parse(AsmParser &parser, Type type) {
   // Assume CTALayout is always default in textual IR -- TODO: consider parsing
   // if we make parseCTAAttr shared
   unsigned rank = order.size();
+  // Ensure TritonGPUDialect is loaded before accessing its attribute storage
+  parser.getContext()->loadDialect<mlir::triton::gpu::TritonGPUDialect>();
   auto CTALayout = gpu::CTAEncodingAttr::getDefault(parser.getContext(), rank);
 
   return parser.getChecked<TiledEncodingAttr>(parser.getContext(), tilesPerCore,
