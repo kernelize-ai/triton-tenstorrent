@@ -78,12 +78,6 @@ struct ConvertTritonFunc : public OpConversionPattern<triton::FuncOp> {
     auto grid = ttcore::GridAttr::get(context, {1, 1});
     auto emptyAttr = rewriter.getArrayAttr({});
 
-    // TODO: The verifier requires
-    // exactly one output of ranked-tensor/memref type.
-    assert(!convertedArgTypes.empty() &&
-           "expected at least one triton function argument - empty functions "
-           "not yet supported in D2M path");
-
     auto genericOp = rewriter.create<d2m::GenericOp>(
         loc,
         /*results=*/TypeRange{},
