@@ -22,10 +22,6 @@ echo "Using tt-mlir venv dir: $TTMLIR_VENV_DIR"
 echo "Changing to tt-mlir directory"
 cd "$REPO_ROOT/third_party/tt-mlir" || exit 1
 
-echo "Building tt-mlir env"
-cmake -B env/build env -DTTMLIR_BUILD_LLVM=OFF
-cmake --build env/build
-
 export _ACTIVATE_ECHO_TOOLCHAIN_DIR_AND_EXIT=""
 source env/activate
 
