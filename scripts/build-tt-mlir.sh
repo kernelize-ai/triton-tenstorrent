@@ -29,8 +29,10 @@ cmake --build env/build
 export _ACTIVATE_ECHO_TOOLCHAIN_DIR_AND_EXIT=""
 source env/activate
 
-echo "Installing tt-mlir python dependencies"
-python -m pip install 'nanobind==2.10'
+if ! python -c "import nanobind; assert nanobind.__version__ == '2.10'" 2>/dev/null; then
+    echo "Installing tt-mlir python dependencies"
+    python -m pip install 'nanobind==2.10'
+fi
 
 LLVM_LIBRARY_DIR="$LLVM_BUILD_DIR/lib"
 MLIR_DIR="$LLVM_LIBRARY_DIR/cmake/mlir"
