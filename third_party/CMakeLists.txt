@@ -50,6 +50,46 @@ else()
   set(NO_TTMLIR_RUNTIME "ON")
 endif()
 
+# Build the tt-mlir Python virtual environment as an ExternalProject so CMake's
+# stamp mechanism prevents re-running init_venv.sh on every incremental build.
+include(ExternalProject)
+set(TTMLIR_DIR "${CMAKE_CURRENT_SOURCE_DIR}/tt-mlir")
+
+ExternalProject_Add(tt_mlir_env
+  SOURCE_DIR  "${TTMLIR_DIR}/env"
+  BINARY_DIR  "${TTMLIR_DIR}/env/build"
+  DOWNLOAD_COMMAND ""
+  UPDATE_COMMAND   ""
+  CONFIGURE_COMMAND
+      ${CMAKE_COMMAND} -E env
+          TTMLIR_TOOLCHAIN_DIR=${TTMLIR_TOOLCHAIN_DIR}
+          TTMLIR_VENV_DIR=${TRITON_VENV_DIR}
+          TTMLIR_PYTHON_VERSION=${TTMLIR_PYTHON_VERSION}
+      ${CMAKE_COMMAND}
+          -S "${TTMLIR_DIR}/env"
+          -B "${TTMLIR_DIR}/env/build"
+          -DTTMLIR_BUILD_LLVM=OFF
+  BUILD_COMMAND
+      ${CMAKE_COMMAND} -E env
+          TTMLIR_TOOLCHAIN_DIR=${TTMLIR_TOOLCHAIN_DIR}
+          TTMLIR_VENV_DIR=${TRITON_VENV_DIR}
+          TTMLIR_PYTHON_VERSION=${TTMLIR_PYTHON_VERSION}
+      ${CMAKE_COMMAND} --build "${TTMLIR_DIR}/env/build"
+  INSTALL_COMMAND ""
+  USES_TERMINAL_CONFIGURE TRUE
+  USES_TERMINAL_BUILD     TRUE
+)
+
+ExternalProject_Add_Step(tt_mlir_env track_env_inputs
+  DEPENDERS configure
+  DEPENDS
+      "${TTMLIR_DIR}/env/init_venv.sh"
+      "${TTMLIR_DIR}/env/build-requirements.txt"
+      "${TTMLIR_DIR}/env/ttnn-requirements.txt"
+      "${TTMLIR_DIR}/test/python/requirements.txt"
+  ALWAYS OFF
+)
+
 add_custom_target(build_tt_mlir
   COMMAND ${CMAKE_COMMAND} -E env
           CC=${CLANG_BIN}
@@ -65,3 +105,5 @@ add_custom_target(build_tt_mlir
   USES_TERMINAL
   COMMENT "Building tt-mlir via scripts/build-tt-mlir.sh"
 )
+
+add_dependencies(build_tt_mlir tt_mlir_env)
