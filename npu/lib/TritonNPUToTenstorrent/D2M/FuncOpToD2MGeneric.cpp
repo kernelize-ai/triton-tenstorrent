@@ -93,7 +93,7 @@ struct ConvertTritonFunc : public OpConversionPattern<triton::FuncOp> {
     auto genericOp = rewriter.create<d2m::GenericOp>(
         loc,
         /*results=*/TypeRange{},
-        /*inputs=*/ValueRange{tensorArgs},
+        /*inputs=*/ValueRange{},
         /*outputs=*/ValueRange{tensorArgs},
         /*additionalArgs=*/newFuncArgs, // TODO: we should probably split
                                         // tensors out to inputs?
