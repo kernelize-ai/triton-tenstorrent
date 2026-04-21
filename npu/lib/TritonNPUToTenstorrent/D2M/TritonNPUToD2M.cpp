@@ -14,6 +14,8 @@
 #include "mlir/Dialect/Linalg/IR/Linalg.h"
 #include "mlir/Dialect/SCF/Transforms/Patterns.h"
 
+#include "cpu/include/Dialect/TritonCPU/IR/Dialect.h" // BlockIndexOps from MakePersistentKernel
+
 #include "npu/include/Dialect/TritonTenstorrent/IR/Attributes.h"
 
 #include "../PatternTritonNPUToTenstorrent.h"
@@ -130,7 +132,7 @@ struct ConvertTritonNPUToD2MPass
     target.addLegalDialect<linalg::LinalgDialect>();
 
     target.addIllegalDialect<triton::TritonDialect>();
-    // target.addIllegalDialect<triton::cpu::TritonCPUDialect>();
+    target.addIllegalDialect<triton::cpu::TritonCPUDialect>();
     target.addIllegalDialect<triton::gpu::TritonGPUDialect>();
 
     target.addLegalOp<UnrealizedConversionCastOp>();
@@ -152,6 +154,8 @@ struct ConvertTritonNPUToD2MPass
                                                  PatternBenefit(1));
     experimental::populateMemoryOpConversionPattern(typeConverter, patterns,
                                                     PatternBenefit(1));
+    experimental::populateSPMDOpConversionPattern(typeConverter, patterns,
+                                                  PatternBenefit(1));
     mlir::scf::populateSCFStructuralTypeConversionsAndLegality(
         typeConverter, patterns, target);
 

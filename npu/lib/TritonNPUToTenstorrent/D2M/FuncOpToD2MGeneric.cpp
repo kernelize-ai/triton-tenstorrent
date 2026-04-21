@@ -50,6 +50,10 @@ struct ConvertTritonFunc : public OpConversionPattern<triton::FuncOp> {
                                            convertedArgTypes)))
       return rewriter.notifyMatchFailure(funcOp, "failed to convert arg types");
 
+    // add block start/block end args
+    convertedArgTypes.push_back(rewriter.getI32Type()); // block start
+    convertedArgTypes.push_back(rewriter.getI32Type()); // block end
+
     auto newFuncType =
         rewriter.getFunctionType(convertedArgTypes, /*results=*/{});
     auto newFunc =

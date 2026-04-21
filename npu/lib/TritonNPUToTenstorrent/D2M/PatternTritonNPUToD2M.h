@@ -20,6 +20,10 @@ void populateMemoryOpConversionPattern(TypeConverter &typeConverter,
                                        RewritePatternSet &patterns,
                                        PatternBenefit benefit);
 
+void populateSPMDOpConversionPattern(TypeConverter &typeConverter,
+                                     RewritePatternSet &patterns,
+                                     PatternBenefit benefit);
+
 } // namespace experimental
 } // namespace npu
 } // namespace triton
