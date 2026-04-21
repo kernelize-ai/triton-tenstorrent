@@ -65,6 +65,14 @@ struct ConvertTritonFunc : public OpConversionPattern<triton::FuncOp> {
     SmallVector<Value> newFuncArgs(newEntry->args_begin(),
                                    newEntry->args_end());
 
+    SmallVector<Value> tensorArgs =
+        llvm::to_vector(llvm::make_filter_range(newFuncArgs, [](Value v) {
+          if (auto memRefType = dyn_cast<MemRefType>(v.getType())) {
+            return isa<tt::ttcore::TileType>(memRefType.getElementType());
+          }
+          return false;
+        }));
+
     rewriter.setInsertionPointToStart(newEntry);
 
     // Build the GenericOp in explicit data-movement form (all three of
@@ -81,8 +89,8 @@ struct ConvertTritonFunc : public OpConversionPattern<triton::FuncOp> {
     auto genericOp = rewriter.create<d2m::GenericOp>(
         loc,
         /*results=*/TypeRange{},
-        /*inputs=*/ValueRange{},
-        /*outputs=*/ValueRange{},
+        /*inputs=*/ValueRange{tensorArgs},
+        /*outputs=*/ValueRange{tensorArgs},
         /*additionalArgs=*/newFuncArgs, // TODO: we should probably split
                                         // tensors out to inputs?
         /*grid=*/grid,
