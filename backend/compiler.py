@@ -225,7 +225,36 @@ class CPUBackend(BaseBackend):
         passes.common.add_cse(pm)
         passes.common.add_canonicalizer(pm)
 
+        sys_desc_path = os.getenv("TT_SYSTEM_DESC_PATH", "")
+        cpu.passes.tenstorrent.add_ttcore_register_device_pass(pm, sys_desc_path)
+
         cpu.passes.tenstorrent.add_to_d2m_dialect(pm)
+
+        # D2M pipeline from createTTIRToTTMetalMiddleendPipeline
+        cpu.passes.d2m.add_elementwise_fusion(pm)
+        passes.common.add_canonicalizer(pm)
+
+        cpu.passes.d2m.add_scratch_inputs(pm)
+        cpu.passes.d2m.add_allocate(pm)
+        cpu.passes.d2m.add_lower_multicast_loads(pm)
+
+        cpu.passes.d2m.add_lower_to_explicit_form(pm)
+        passes.common.add_canonicalizer(pm)
+        cpu.passes.d2m.add_decompose_masking(pm)
+        cpu.passes.d2m.add_decompose_arange(pm)
+
+        cpu.passes.d2m.add_generic_tile_compute_loops(pm)
+        cpu.passes.d2m.add_linalg_to_affine(pm)
+        cpu.passes.d2m.add_op_scheduler(pm)
+
+        cpu.passes.d2m.add_insert_spill_and_scratch(pm)
+        passes.common.add_canonicalizer(pm)
+        cpu.passes.d2m.add_lower_scratch_allocate(pm)
+        passes.common.add_canonicalizer(pm)
+
+        cpu.passes.d2m.add_insert_dst_register_access(pm)
+        cpu.passes.d2m.add_sfpu_tile_loop_fission(pm)
+
         passes.common.add_canonicalizer(pm)
 
         pm.run(mod, "make_d2m")

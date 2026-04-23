@@ -13,7 +13,10 @@ set(TTMLIR_LIB_DIR "${TENSTORRENT_MLIR}/build/lib")
 
 set(TTMLIR_LIB_NAMES
     MLIRD2MDialect
+    MLIRD2MTransforms
+    MLIRD2MAnalysis
     MLIRD2MUtils
+    MLIRD2MAllocation
     MLIRTTKernelDialect
     MLIRTTKernelTransforms
     TTKernelTargetCpp
@@ -81,6 +84,8 @@ if(TRITON_BUILD_PYTHON_MODULE)
     MLIREmitCDialect
     MLIRAffineDialect
     MLIRAffineUtils
+    MLIRAffineToStandard
+    MLIRLinalgTransforms
     MLIRArithToEmitC
     MLIRMemRefToEmitC
     MLIRSCFToEmitC
