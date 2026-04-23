@@ -31,6 +31,8 @@ from contextlib import contextmanager
 
 from typing import Optional
 
+DEVICE = triton.runtime.driver.active.get_active_torch_device()
+
 if torch.cuda.is_available():
     from triton._C.libtriton import nvidia
     cublas_workspace = torch.empty(32 * 1024 * 1024, device="cuda", dtype=torch.uint8)
@@ -143,7 +145,7 @@ def matmul_kernel_tma(a_desc, b_desc, c_desc,  #
     c_desc.store([offs_cm, offs_cn], c)
 
 
-def matmul_tma(a, b, warp_specialize: bool):
+def matmul_tma(a, b, warp_specialize: bool = False):
     # Check constraints.
     assert a.dtype == b.dtype, "Incompatible dtypes"
     assert a.shape[1] == b.shape[0], "Incompatible dimensions"
@@ -162,6 +164,7 @@ def matmul_tma(a, b, warp_specialize: bool):
     def grid(META):
         BLOCK_M = META["BLOCK_SIZE_M"]
         BLOCK_N = META["BLOCK_SIZE_N"]
+        print(f"GRID: {triton.cdiv(M, BLOCK_M) * triton.cdiv(N, BLOCK_N)}")
         return (triton.cdiv(M, BLOCK_M) * triton.cdiv(N, BLOCK_N), )
 
     matmul_kernel_tma[grid](
@@ -246,8 +249,11 @@ def bench(K, dtype, reps=10000, warmup_reps=10000):
 def run_test(expect, fn, a, b, label, enabled=True):
     print(f"  {label}: ...", end="")
     if enabled:
-        actual = fn(a, b)
+        actual = fn(a, b).to("cpu")
         passed = torch.allclose(expect, actual.to(expect.dtype), atol=1.0)
+        if not passed:
+            print(f"Expected result: {expect}")
+            print(f"{label} result: {actual}")
         icon = "✅" if passed else "❌"
     else:
         icon = "⭕"
@@ -257,13 +263,12 @@ def run_test(expect, fn, a, b, label, enabled=True):
 def validate(M, N, K, dtype):
     print(f"{M=}, {N=}, {K=}, verification naive vs: ")
     a = torch.randn((M, K), device="cpu", dtype=torch.float16).to(dtype)
+    a_tt = a.to(DEVICE)
     b = torch.randn((K, N), device="cpu", dtype=torch.float16).to(dtype)
-    #b = b.T.contiguous()
+    b_tt = b.to(DEVICE)
 
     naive_result = torch_matmul(a, b.T).to(torch.float16)
-    triton_result = matmul_tma(a, b, False)
-    print(f"triton_result: {triton_result}")
-    print(f"naive_result: {naive_result}")
+    run_test(naive_result, matmul_tma, a_tt, b_tt, "TritonTT", True)
 
     """
     run_test(naive_result, torch_matmul, a, b, "Torch", enabled=dtype == torch.float16)
