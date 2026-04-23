@@ -866,11 +866,11 @@ struct ConvertMulticastOp : public OpConversionPattern<npu::tt::MulticastOp> {
     // TODO: should this be in place?
     rewriter.modifyOpInPlace(parentFuncOp, [&]() {
       ttkernel::ArgSpecAttr::appendCompileTimeArg(
-          parentFuncOp,
-          rewriter.getAttr<ttkernel::ArgAttr>(ttkernel::ArgType::Semaphore, 0));
+          parentFuncOp, rewriter.getAttr<ttkernel::ArgAttr>(
+                            ttkernel::ArgType::LocalSemaphore, 0));
       ttkernel::ArgSpecAttr::appendCompileTimeArg(
-          parentFuncOp,
-          rewriter.getAttr<ttkernel::ArgAttr>(ttkernel::ArgType::Semaphore, 1));
+          parentFuncOp, rewriter.getAttr<ttkernel::ArgAttr>(
+                            ttkernel::ArgType::LocalSemaphore, 1));
     });
 
     // cb info
@@ -907,8 +907,7 @@ struct ConvertMulticastOp : public OpConversionPattern<npu::tt::MulticastOp> {
       auto l1SenderAddr =
           ttkernel::CastToL1PtrOp::create(rewriter, loc, senderSemaphore);
       // wait for all receiver cores to acknowledge ready
-      ttkernel::NocSemaphoreWaitOp::create(rewriter, loc, l1SenderAddr,
-                                           numDests);
+      ttkernel::SemaphoreWaitOp::create(rewriter, loc, l1SenderAddr, numDests);
       ttkernel::NocSemaphoreSetOp::create(
           rewriter, loc, l1SenderAddr,
           arith::createIndexConstant(loc, rewriter, 0));
@@ -964,7 +963,7 @@ struct ConvertMulticastOp : public OpConversionPattern<npu::tt::MulticastOp> {
       auto l1ReceiverAddr =
           ttkernel::CastToL1PtrOp::create(rewriter, loc, receiverSemaphore);
       // wait for the sender to finish transmitting data
-      ttkernel::NocSemaphoreWaitOp::create(
+      ttkernel::SemaphoreWaitOp::create(
           rewriter, loc, l1ReceiverAddr,
           arith::createIndexConstant(loc, rewriter, 1));
       // reset post transmit

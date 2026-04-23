@@ -1,8 +1,7 @@
 // add_kernel__writer
 #include <cstdint>
-#include "tools/profiler/kernel_profiler.hpp"
-#include "internal/firmware_common.h"
 #include "api/dataflow/dataflow_api.h"
+#include "tools/profiler/kernel_profiler.hpp"
 void kernel_main() {
   int32_t v1 = 1;
   bool v2 = true;

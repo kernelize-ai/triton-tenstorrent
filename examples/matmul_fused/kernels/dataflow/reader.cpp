@@ -1,8 +1,7 @@
 // matmul_kernel_fused__reader
 #include <cstdint>
-#include "tools/profiler/kernel_profiler.hpp"
-#include "internal/firmware_common.h"
 #include "api/dataflow/dataflow_api.h"
+#include "tools/profiler/kernel_profiler.hpp"
 void kernel_main() {
   bool v1 = false;
   int32_t v2 = 63;
@@ -52,54 +51,54 @@ void kernel_main() {
       InterleavedAddrGenFast<true> v42 = v41;
       int32_t v43 = get_write_ptr(get_compile_time_arg_val(1));
       int32_t v44 = (int32_t) ((uint32_t) ((int32_t) ((uint32_t) ((int32_t) ((uint32_t) j40 * (uint32_t) v4) / v9) * (uint32_t) v28)) + (uint32_t) v39);
-      uint64_t temp_532 = v42.get_noc_addr(v44, v3);
-      noc_async_read(temp_532, v43, v24);
+      uint64_t temp_528 = v42.get_noc_addr(v44, v3);
+      noc_async_read(temp_528, v43, v24);
       int32_t v45 = (int32_t) ((uint32_t) v43 + (uint32_t) 16384);
       int32_t v46 = (int32_t) ((uint32_t) v44 + (uint32_t) v6);
-      uint64_t temp_544 = v42.get_noc_addr(v46, v3);
-      noc_async_read(temp_544, v45, v24);
+      uint64_t temp_540 = v42.get_noc_addr(v46, v3);
+      noc_async_read(temp_540, v45, v24);
       int32_t v47 = (int32_t) ((uint32_t) v43 + (uint32_t) v10);
-      uint64_t temp_556 = v42.get_noc_addr((int32_t) ((uint32_t) v44 + (uint32_t) v28), v3);
-      noc_async_read(temp_556, v47, v24);
+      uint64_t temp_552 = v42.get_noc_addr((int32_t) ((uint32_t) v44 + (uint32_t) v28), v3);
+      noc_async_read(temp_552, v47, v24);
       int32_t v48 = (int32_t) ((uint32_t) v43 + (uint32_t) 18432);
-      uint64_t temp_568 = v42.get_noc_addr((int32_t) ((uint32_t) v46 + (uint32_t) v28), v3);
-      noc_async_read(temp_568, v48, v24);
+      uint64_t temp_564 = v42.get_noc_addr((int32_t) ((uint32_t) v46 + (uint32_t) v28), v3);
+      noc_async_read(temp_564, v48, v24);
       int32_t v49 = (int32_t) ((uint32_t) v43 + (uint32_t) v11);
-      uint64_t temp_580 = v42.get_noc_addr((int32_t) ((uint32_t) v44 + (uint32_t) v29), v3);
-      noc_async_read(temp_580, v49, v24);
+      uint64_t temp_576 = v42.get_noc_addr((int32_t) ((uint32_t) v44 + (uint32_t) v29), v3);
+      noc_async_read(temp_576, v49, v24);
       int32_t v50 = (int32_t) ((uint32_t) v43 + (uint32_t) 20480);
-      uint64_t temp_592 = v42.get_noc_addr((int32_t) ((uint32_t) v46 + (uint32_t) v29), v3);
-      noc_async_read(temp_592, v50, v24);
+      uint64_t temp_588 = v42.get_noc_addr((int32_t) ((uint32_t) v46 + (uint32_t) v29), v3);
+      noc_async_read(temp_588, v50, v24);
       int32_t v51 = (int32_t) ((uint32_t) v43 + (uint32_t) v12);
-      uint64_t temp_604 = v42.get_noc_addr((int32_t) ((uint32_t) v44 + (uint32_t) v30), v3);
-      noc_async_read(temp_604, v51, v24);
+      uint64_t temp_600 = v42.get_noc_addr((int32_t) ((uint32_t) v44 + (uint32_t) v30), v3);
+      noc_async_read(temp_600, v51, v24);
       int32_t v52 = (int32_t) ((uint32_t) v43 + (uint32_t) 22528);
-      uint64_t temp_616 = v42.get_noc_addr((int32_t) ((uint32_t) v46 + (uint32_t) v30), v3);
-      noc_async_read(temp_616, v52, v24);
+      uint64_t temp_612 = v42.get_noc_addr((int32_t) ((uint32_t) v46 + (uint32_t) v30), v3);
+      noc_async_read(temp_612, v52, v24);
       int32_t v53 = (int32_t) ((uint32_t) v43 + (uint32_t) 8192);
-      uint64_t temp_628 = v42.get_noc_addr((int32_t) ((uint32_t) v44 + (uint32_t) v31), v3);
-      noc_async_read(temp_628, v53, v24);
+      uint64_t temp_624 = v42.get_noc_addr((int32_t) ((uint32_t) v44 + (uint32_t) v31), v3);
+      noc_async_read(temp_624, v53, v24);
       int32_t v54 = (int32_t) ((uint32_t) v43 + (uint32_t) 24576);
-      uint64_t temp_640 = v42.get_noc_addr((int32_t) ((uint32_t) v46 + (uint32_t) v31), v3);
-      noc_async_read(temp_640, v54, v24);
+      uint64_t temp_636 = v42.get_noc_addr((int32_t) ((uint32_t) v46 + (uint32_t) v31), v3);
+      noc_async_read(temp_636, v54, v24);
       int32_t v55 = (int32_t) ((uint32_t) v43 + (uint32_t) 10240);
-      uint64_t temp_652 = v42.get_noc_addr((int32_t) ((uint32_t) v44 + (uint32_t) v32), v3);
-      noc_async_read(temp_652, v55, v24);
+      uint64_t temp_648 = v42.get_noc_addr((int32_t) ((uint32_t) v44 + (uint32_t) v32), v3);
+      noc_async_read(temp_648, v55, v24);
       int32_t v56 = (int32_t) ((uint32_t) v43 + (uint32_t) 26624);
-      uint64_t temp_664 = v42.get_noc_addr((int32_t) ((uint32_t) v46 + (uint32_t) v32), v3);
-      noc_async_read(temp_664, v56, v24);
+      uint64_t temp_660 = v42.get_noc_addr((int32_t) ((uint32_t) v46 + (uint32_t) v32), v3);
+      noc_async_read(temp_660, v56, v24);
       int32_t v57 = (int32_t) ((uint32_t) v43 + (uint32_t) 12288);
-      uint64_t temp_676 = v42.get_noc_addr((int32_t) ((uint32_t) v44 + (uint32_t) v33), v3);
-      noc_async_read(temp_676, v57, v24);
+      uint64_t temp_672 = v42.get_noc_addr((int32_t) ((uint32_t) v44 + (uint32_t) v33), v3);
+      noc_async_read(temp_672, v57, v24);
       int32_t v58 = (int32_t) ((uint32_t) v43 + (uint32_t) 28672);
-      uint64_t temp_688 = v42.get_noc_addr((int32_t) ((uint32_t) v46 + (uint32_t) v33), v3);
-      noc_async_read(temp_688, v58, v24);
+      uint64_t temp_684 = v42.get_noc_addr((int32_t) ((uint32_t) v46 + (uint32_t) v33), v3);
+      noc_async_read(temp_684, v58, v24);
       int32_t v59 = (int32_t) ((uint32_t) v43 + (uint32_t) 14336);
-      uint64_t temp_700 = v42.get_noc_addr((int32_t) ((uint32_t) v44 + (uint32_t) v34), v3);
-      noc_async_read(temp_700, v59, v24);
+      uint64_t temp_696 = v42.get_noc_addr((int32_t) ((uint32_t) v44 + (uint32_t) v34), v3);
+      noc_async_read(temp_696, v59, v24);
       int32_t v60 = (int32_t) ((uint32_t) v43 + (uint32_t) 30720);
-      uint64_t temp_712 = v42.get_noc_addr((int32_t) ((uint32_t) v46 + (uint32_t) v34), v3);
-      noc_async_read(temp_712, v60, v24);
+      uint64_t temp_708 = v42.get_noc_addr((int32_t) ((uint32_t) v46 + (uint32_t) v34), v3);
+      noc_async_read(temp_708, v60, v24);
       {
       DeviceZoneScopedN("noc_async_read_barrier");
       noc_async_read_barrier();
@@ -114,18 +113,18 @@ void kernel_main() {
     InterleavedAddrGenFast<true> v62 = v61;
     int32_t v63 = get_write_ptr(get_compile_time_arg_val(2));
     int32_t v64 = (int32_t) ((uint32_t) ((int32_t) ((uint32_t) ((int32_t) ((uint32_t) ((int32_t) ((uint32_t) v37 + (uint32_t) (i36 % v38))) * (uint32_t) v5) / v9) * (uint32_t) v35)) + (uint32_t) v39);
-    uint64_t temp_512 = v62.get_noc_addr(v64, v3);
-    noc_async_read(temp_512, v63, v22);
+    uint64_t temp_508 = v62.get_noc_addr(v64, v3);
+    noc_async_read(temp_508, v63, v22);
     int32_t v65 = (int32_t) ((uint32_t) v63 + (uint32_t) v10);
     int32_t v66 = (int32_t) ((uint32_t) v64 + (uint32_t) v6);
-    uint64_t temp_524 = v62.get_noc_addr(v66, v3);
-    noc_async_read(temp_524, v65, v22);
+    uint64_t temp_520 = v62.get_noc_addr(v66, v3);
+    noc_async_read(temp_520, v65, v22);
     int32_t v67 = (int32_t) ((uint32_t) v63 + (uint32_t) v11);
-    uint64_t temp_536 = v62.get_noc_addr((int32_t) ((uint32_t) v64 + (uint32_t) v35), v3);
-    noc_async_read(temp_536, v67, v22);
+    uint64_t temp_532 = v62.get_noc_addr((int32_t) ((uint32_t) v64 + (uint32_t) v35), v3);
+    noc_async_read(temp_532, v67, v22);
     int32_t v68 = (int32_t) ((uint32_t) v63 + (uint32_t) v12);
-    uint64_t temp_548 = v62.get_noc_addr((int32_t) ((uint32_t) v66 + (uint32_t) v35), v3);
-    noc_async_read(temp_548, v68, v22);
+    uint64_t temp_544 = v62.get_noc_addr((int32_t) ((uint32_t) v66 + (uint32_t) v35), v3);
+    noc_async_read(temp_544, v68, v22);
     {
     DeviceZoneScopedN("noc_async_read_barrier");
     noc_async_read_barrier();

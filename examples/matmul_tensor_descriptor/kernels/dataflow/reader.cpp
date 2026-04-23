@@ -1,8 +1,7 @@
 // matmul_kernel_tma__reader
 #include <cstdint>
-#include "tools/profiler/kernel_profiler.hpp"
-#include "internal/firmware_common.h"
 #include "api/dataflow/dataflow_api.h"
+#include "tools/profiler/kernel_profiler.hpp"
 void kernel_main() {
   int32_t v1 = 63;
   int32_t v2 = 0;
@@ -31,18 +30,18 @@ void kernel_main() {
       InterleavedAddrGenFast<true> v21 = v20;
       int32_t v22 = get_write_ptr(get_compile_time_arg_val(1));
       int32_t v23 = (int32_t) ((uint32_t) ((int32_t) ((uint32_t) ((int32_t) ((uint32_t) j19 * (uint32_t) v3) / v7) * (uint32_t) v17)) + (uint32_t) ((int32_t) ((uint32_t) ((i18 % ((int32_t) ((uint32_t) v11 + (uint32_t) v1) / v3)) / ((int32_t) ((uint32_t) ((int32_t) ((uint32_t) v10 + (uint32_t) v1) / v3) - (uint32_t) (i18 / ((int32_t) ((uint32_t) v11 + (uint32_t) v1) / v3))) < v4 ? (int32_t) ((uint32_t) ((int32_t) ((uint32_t) v10 + (uint32_t) v1) / v3) - (uint32_t) (i18 / ((int32_t) ((uint32_t) v11 + (uint32_t) v1) / v3))) : v4)) * (uint32_t) v3) / v7));
-      uint64_t temp_320 = v21.get_noc_addr(v23, v2);
-      noc_async_read(temp_320, v22, v14);
+      uint64_t temp_316 = v21.get_noc_addr(v23, v2);
+      noc_async_read(temp_316, v22, v14);
       int32_t v24 = (int32_t) ((uint32_t) v22 + (uint32_t) 4096);
       int32_t v25 = (int32_t) ((uint32_t) v23 + (uint32_t) v4);
-      uint64_t temp_332 = v21.get_noc_addr(v25, v2);
-      noc_async_read(temp_332, v24, v14);
+      uint64_t temp_328 = v21.get_noc_addr(v25, v2);
+      noc_async_read(temp_328, v24, v14);
       int32_t v26 = (int32_t) ((uint32_t) v22 + (uint32_t) 2048);
-      uint64_t temp_344 = v21.get_noc_addr((int32_t) ((uint32_t) v23 + (uint32_t) v17), v2);
-      noc_async_read(temp_344, v26, v14);
+      uint64_t temp_340 = v21.get_noc_addr((int32_t) ((uint32_t) v23 + (uint32_t) v17), v2);
+      noc_async_read(temp_340, v26, v14);
       int32_t v27 = (int32_t) ((uint32_t) v22 + (uint32_t) 6144);
-      uint64_t temp_356 = v21.get_noc_addr((int32_t) ((uint32_t) v25 + (uint32_t) v17), v2);
-      noc_async_read(temp_356, v27, v14);
+      uint64_t temp_352 = v21.get_noc_addr((int32_t) ((uint32_t) v25 + (uint32_t) v17), v2);
+      noc_async_read(temp_352, v27, v14);
       {
       DeviceZoneScopedN("noc_async_read_barrier");
       noc_async_read_barrier();

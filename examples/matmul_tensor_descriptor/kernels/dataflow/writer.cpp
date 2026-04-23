@@ -1,38 +1,33 @@
 // matmul_kernel_tma__writer
 #include <cstdint>
-#include "tools/profiler/kernel_profiler.hpp"
-#include "internal/firmware_common.h"
 #include "api/dataflow/dataflow_api.h"
+#include "tools/profiler/kernel_profiler.hpp"
 
 // SPDX-FileCopyrightText: (c) 2025 Tenstorrent AI ULC
 //
 // SPDX-License-Identifier: Apache-2.0
 
-#ifndef TTMLIR_TARGET_TTKERNEL_LLKS_EXPERIMENTAL_DATAFLOW_API_H
-#define TTMLIR_TARGET_TTKERNEL_LLKS_EXPERIMENTAL_DATAFLOW_API_H
+#ifndef TTMLIR_TARGET_TTKERNEL_LLKS_EXPERIMENTAL_SEMAPHORE_H
+#define TTMLIR_TARGET_TTKERNEL_LLKS_EXPERIMENTAL_SEMAPHORE_H
 
 namespace experimental {
 
 FORCE_INLINE
-std::uint64_t
-get_noc_multicast_addr(std::uint32_t noc_x_start, std::uint32_t noc_y_start,
-                       std::uint32_t noc_x_end, std::uint32_t noc_y_end,
-                       std::uint32_t addr, uint8_t noc = noc_index) {
-  /*
-      Get an encoding which contains tensix core and address you want to
-      read from/write to via the noc
-  */
-  if (noc) {
-    // noc 1
-    return NOC_MULTICAST_ADDR(
-        DYNAMIC_NOC_X(noc, noc_x_end), DYNAMIC_NOC_Y(noc, noc_y_end),
-        DYNAMIC_NOC_X(noc, noc_x_start), DYNAMIC_NOC_Y(noc, noc_y_start), addr);
-  } else {
-    // noc 0
-    return NOC_MULTICAST_ADDR(
-        DYNAMIC_NOC_X(noc, noc_x_start), DYNAMIC_NOC_Y(noc, noc_y_start),
-        DYNAMIC_NOC_X(noc, noc_x_end), DYNAMIC_NOC_Y(noc, noc_y_end), addr);
-  }
+void semaphore_wait(volatile tt_l1_ptr uint32_t *sem_addr, uint32_t val) {
+  uint32_t sem_val;
+  do {
+    invalidate_l1_cache();
+    sem_val = *sem_addr;
+  } while (sem_val != val);
+}
+
+FORCE_INLINE
+void semaphore_wait_min(volatile tt_l1_ptr uint32_t *sem_addr, uint32_t val) {
+  uint32_t sem_val;
+  do {
+    invalidate_l1_cache();
+    sem_val = *sem_addr;
+  } while (sem_val < val);
 }
 
 } // namespace experimental
@@ -63,6 +58,42 @@ std::uint32_t convert_logical_y_to_translated(std::uint32_t logical_y) {
       convert x coord from LOGICAL to TRANSLATED coordinate system
   */
   return worker_logical_row_to_virtual_row[logical_y];
+}
+
+} // namespace experimental
+
+#endif
+
+
+// SPDX-FileCopyrightText: (c) 2025 Tenstorrent AI ULC
+//
+// SPDX-License-Identifier: Apache-2.0
+
+#ifndef TTMLIR_TARGET_TTKERNEL_LLKS_EXPERIMENTAL_DATAFLOW_API_H
+#define TTMLIR_TARGET_TTKERNEL_LLKS_EXPERIMENTAL_DATAFLOW_API_H
+
+namespace experimental {
+
+FORCE_INLINE
+std::uint64_t
+get_noc_multicast_addr(std::uint32_t noc_x_start, std::uint32_t noc_y_start,
+                       std::uint32_t noc_x_end, std::uint32_t noc_y_end,
+                       std::uint32_t addr, uint8_t noc = noc_index) {
+  /*
+      Get an encoding which contains tensix core and address you want to
+      read from/write to via the noc
+  */
+  if (noc) {
+    // noc 1
+    return NOC_MULTICAST_ADDR(
+        DYNAMIC_NOC_X(noc, noc_x_end), DYNAMIC_NOC_Y(noc, noc_y_end),
+        DYNAMIC_NOC_X(noc, noc_x_start), DYNAMIC_NOC_Y(noc, noc_y_start), addr);
+  } else {
+    // noc 0
+    return NOC_MULTICAST_ADDR(
+        DYNAMIC_NOC_X(noc, noc_x_start), DYNAMIC_NOC_Y(noc, noc_y_start),
+        DYNAMIC_NOC_X(noc, noc_x_end), DYNAMIC_NOC_Y(noc, noc_y_end), addr);
+  }
 }
 
 } // namespace experimental
@@ -150,7 +181,7 @@ void kernel_main() {
         }
         int32_t v59 = get_write_ptr(get_compile_time_arg_val(0));
         volatile tt_l1_ptr uint32_t* v60 = reinterpret_cast<volatile tt_l1_ptr uint32_t*>(v48);
-        noc_semaphore_wait(v60, v41);
+        experimental::semaphore_wait(v60, v41);
         noc_semaphore_set(v60, v4);
         size_t v61 = experimental::convert_logical_y_to_translated(v40);
         size_t v62 = experimental::convert_logical_x_to_translated(v39);
@@ -164,21 +195,17 @@ void kernel_main() {
         }
         volatile tt_l1_ptr uint32_t* v66 = reinterpret_cast<volatile tt_l1_ptr uint32_t*>(v49);
         noc_semaphore_set(v66, v5);
-        size_t v67 = experimental::convert_logical_y_to_translated(v40);
-        size_t v68 = experimental::convert_logical_x_to_translated(v39);
-        size_t v69 = experimental::convert_logical_y_to_translated(v38);
-        size_t v70 = experimental::convert_logical_x_to_translated(v37);
-        int64_t v71 = experimental::get_noc_multicast_addr(v70, v69, v68, v67, v49);
-        noc_semaphore_set_multicast(v49, v71, v41);
+        int64_t v67 = experimental::get_noc_multicast_addr(v64, v63, v62, v61, v49);
+        noc_semaphore_set_multicast(v49, v67, v41);
       } else {
         cb_reserve_back(get_compile_time_arg_val(0), v13);
-        size_t v72 = experimental::convert_logical_y_to_translated(v38);
-        size_t v73 = experimental::convert_logical_x_to_translated(v37);
-        int64_t v74 = get_noc_addr(v73, v72, v48);
-        noc_semaphore_inc(v74, v5);
-        volatile tt_l1_ptr uint32_t* v75 = reinterpret_cast<volatile tt_l1_ptr uint32_t*>(v49);
-        noc_semaphore_wait(v75, v5);
-        noc_semaphore_set(v75, v4);
+        size_t v68 = experimental::convert_logical_y_to_translated(v38);
+        size_t v69 = experimental::convert_logical_x_to_translated(v37);
+        int64_t v70 = get_noc_addr(v69, v68, v48);
+        noc_semaphore_inc(v70, v5);
+        volatile tt_l1_ptr uint32_t* v71 = reinterpret_cast<volatile tt_l1_ptr uint32_t*>(v49);
+        experimental::semaphore_wait(v71, v5);
+        noc_semaphore_set(v71, v4);
       }
       cb_push_back(get_compile_time_arg_val(0), v13);
     }
@@ -186,20 +213,20 @@ void kernel_main() {
     DeviceZoneScopedN("cb_wait_front");
     cb_wait_front(get_compile_time_arg_val(2), v13);
     }
-    int32_t v76 = get_read_ptr(get_compile_time_arg_val(2));
-    int32_t v77 = (int32_t) ((uint32_t) ((int32_t) ((uint32_t) (v46 / v14) * (uint32_t) v42)) + (uint32_t) ((int32_t) ((uint32_t) ((i43 % v34) / v45) * (uint32_t) v8) / v14));
-    uint64_t temp_260 = v29.get_noc_addr(v77, v7);
-    noc_async_write(v76, temp_260, v27);
-    int32_t v78 = (int32_t) ((uint32_t) v76 + (uint32_t) v15);
-    int32_t v79 = (int32_t) ((uint32_t) v77 + (uint32_t) v9);
-    uint64_t temp_272 = v29.get_noc_addr(v79, v7);
-    noc_async_write(v78, temp_272, v27);
-    int32_t v80 = (int32_t) ((uint32_t) v76 + (uint32_t) v16);
-    uint64_t temp_284 = v29.get_noc_addr((int32_t) ((uint32_t) v77 + (uint32_t) v42), v7);
-    noc_async_write(v80, temp_284, v27);
-    int32_t v81 = (int32_t) ((uint32_t) v76 + (uint32_t) v17);
-    uint64_t temp_296 = v29.get_noc_addr((int32_t) ((uint32_t) v79 + (uint32_t) v42), v7);
-    noc_async_write(v81, temp_296, v27);
+    int32_t v72 = get_read_ptr(get_compile_time_arg_val(2));
+    int32_t v73 = (int32_t) ((uint32_t) ((int32_t) ((uint32_t) (v46 / v14) * (uint32_t) v42)) + (uint32_t) ((int32_t) ((uint32_t) ((i43 % v34) / v45) * (uint32_t) v8) / v14));
+    uint64_t temp_260 = v29.get_noc_addr(v73, v7);
+    noc_async_write(v72, temp_260, v27);
+    int32_t v74 = (int32_t) ((uint32_t) v72 + (uint32_t) v15);
+    int32_t v75 = (int32_t) ((uint32_t) v73 + (uint32_t) v9);
+    uint64_t temp_272 = v29.get_noc_addr(v75, v7);
+    noc_async_write(v74, temp_272, v27);
+    int32_t v76 = (int32_t) ((uint32_t) v72 + (uint32_t) v16);
+    uint64_t temp_284 = v29.get_noc_addr((int32_t) ((uint32_t) v73 + (uint32_t) v42), v7);
+    noc_async_write(v76, temp_284, v27);
+    int32_t v77 = (int32_t) ((uint32_t) v72 + (uint32_t) v17);
+    uint64_t temp_296 = v29.get_noc_addr((int32_t) ((uint32_t) v75 + (uint32_t) v42), v7);
+    noc_async_write(v77, temp_296, v27);
     {
     DeviceZoneScopedN("noc_async_write_barrier");
     noc_async_write_barrier();
