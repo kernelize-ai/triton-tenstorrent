@@ -14,6 +14,7 @@
 #include "llvm/TargetParser/Host.h"
 
 #include "ttmlir/Conversion/TTKernelToEmitC/TTKernelToEmitC.h"
+#include "ttmlir/Dialect/D2M/Transforms/Passes.h"
 #include "ttmlir/Dialect/TTCore/IR/TTCoreOpsTypes.h"
 #include "ttmlir/Dialect/TTCore/Transforms/Passes.h"
 #include "ttmlir/Dialect/TTKernel/IR/TTKernel.h"
@@ -125,6 +126,79 @@ void init_triton_npu_passes_tenstorrent(py::module &&m) {
       });
 }
 
+void init_tenstorrent_d2m_passes(py::module &&m) {
+  using namespace mlir::tt;
+
+  m.def("add_elementwise_fusion", [](mlir::PassManager &pm) {
+    d2m::D2MElementwiseFusionOptions elementwiseFusionOptions;
+    elementwiseFusionOptions.maxDstPhysicalSizeTiles = 0; // unset
+    pm.addPass(d2m::createD2MElementwiseFusion(elementwiseFusionOptions));
+  });
+  m.def("add_scratch_inputs", [](mlir::PassManager &pm) {
+    pm.addPass(d2m::createD2MAddScratchInputs());
+  });
+  m.def("add_allocate", [](mlir::PassManager &pm) {
+    d2m::D2MAllocateOptions allocateOptions; // defaults
+    pm.addPass(d2m::createD2MAllocate(allocateOptions));
+  });
+  m.def("add_lower_multicast_loads", [](mlir::PassManager &pm) {
+    pm.addPass(d2m::createD2MLowerMulticastLoads());
+  });
+  m.def("add_lower_to_explicit_form", [](mlir::PassManager &pm) {
+    pm.addPass(d2m::createD2MLowerToExplicitForm());
+  });
+  m.def("add_decompose_masking", [](mlir::PassManager &pm) {
+    pm.addPass(d2m::createD2MDecomposeMasking());
+  });
+  m.def("add_decompose_arange", [](mlir::PassManager &pm) {
+    pm.addPass(d2m::createD2MDecomposeArange());
+  });
+  m.def("add_generic_tile_compute_loops", [](mlir::PassManager &pm) {
+    d2m::D2MGenericTileComputeLoopsOptions tileComputeLoopsOptions;
+    {
+      tileComputeLoopsOptions.maxDstPhysicalSizeTiles = 0; // unset
+    }
+    pm.addPass(d2m::createD2MGenericTileComputeLoops(tileComputeLoopsOptions));
+  });
+  m.def("add_linalg_to_affine", [](mlir::PassManager &pm) {
+    d2m::D2MLinalgToAffineOptions linalgToAffineOptions;
+    {
+      linalgToAffineOptions.useTileMatmul = true;
+      linalgToAffineOptions.markRootLoops = true;
+    }
+    pm.addPass(d2m::createD2MLinalgToAffine(linalgToAffineOptions));
+  });
+  m.def("add_op_scheduler", [](mlir::PassManager &pm) {
+    d2m::D2MOpSchedulerOptions opSchedulerOptions;
+    {
+      opSchedulerOptions.enableOpScheduler = true;
+    }
+    pm.addPass(d2m::createD2MOpScheduler(opSchedulerOptions));
+  });
+  m.def("add_insert_spill_and_scratch", [](mlir::PassManager &pm) {
+    pm.addPass(d2m::createD2MInsertSpillAndScratch());
+  });
+  m.def("add_lower_scratch_allocate", [](mlir::PassManager &pm) {
+    pm.addPass(d2m::createD2MLowerScratchAllocate());
+  });
+  m.def("add_insert_dst_register_access", [](mlir::PassManager &pm) {
+    d2m::D2MInsertDstRegisterAccessOptions insertDstRegisterAccessOptions;
+    {
+      insertDstRegisterAccessOptions.useTileMatmul = true;
+      insertDstRegisterAccessOptions.maxDstPhysicalSizeTiles = 0; // unset
+      insertDstRegisterAccessOptions.enableL1Acc =
+          false; // default from tt-mlir
+    }
+    pm.addPass(
+        d2m::createD2MInsertDstRegisterAccess(insertDstRegisterAccessOptions));
+  });
+  m.def("add_sfpu_tile_loop_fission", [](mlir::PassManager &pm) {
+    pm.addPass(d2m::createD2MSFPUTileLoopFission());
+  });
+
+  // TODO: affine section
+}
+
 void init_triton_npu_passes_common(py::module &&m) {
   m.def("add_arith_int_range_opts", [](mlir::PassManager &pm) {
     pm.addPass(mlir::arith::createArithIntRangeOpts());
@@ -151,6 +225,7 @@ void init_triton_cpu(py::module &&m) {
   init_triton_cpu_passes(passes.def_submodule("ttcpuir"));
 
   init_triton_npu_passes_tenstorrent(passes.def_submodule("tenstorrent"));
+  init_tenstorrent_d2m_passes(passes.def_submodule("d2m"));
   init_triton_npu_passes_common(passes.def_submodule("common"));
 
   m.def(
