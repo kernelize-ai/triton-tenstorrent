@@ -770,7 +770,7 @@ module attributes {"ttg.num-ctas" = 1 : i32, "ttg.num-warps" = 1 : i32, "ttg.thr
 
       // COM: wait for receivers to be ready
       // CHECK: %[[SEND_L1:.*]] = ttkernel.reinterpret_cast<volatile tt_l1_ptr uint32_t*>(%[[SEM_SEND]])
-      // CHECK: ttkernel.noc_semaphore_wait(%[[SEND_L1]], %{{.*}})
+      // CHECK: ttkernel.experimental::semaphore_wait(%[[SEND_L1]], %{{.*}})
 
       // COM: multicast
       // CHECK: %[[MCAST_ADDR:.*]] = ttkernel.experimental::get_noc_multicast_addr
@@ -792,7 +792,7 @@ module attributes {"ttg.num-ctas" = 1 : i32, "ttg.num-warps" = 1 : i32, "ttg.thr
 
       // COM: wait for the sender to indicate data is available
       // CHECK: %[[RECV_L1B:.*]] = ttkernel.reinterpret_cast<volatile tt_l1_ptr uint32_t*>(%[[SEM_RECV]])
-      // CHECK: ttkernel.noc_semaphore_wait(%[[RECV_L1B]], %{{.*}})
+      // CHECK: ttkernel.experimental::semaphore_wait(%[[RECV_L1B]], %{{.*}})
       // CHECK: ttkernel.noc_semaphore_set(%[[RECV_L1B]], %{{.*}})
       // CHECK: }
 
