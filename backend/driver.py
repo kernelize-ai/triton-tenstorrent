@@ -79,6 +79,7 @@ class TTUtils(object):
             "warpSize": 1
         }
 
+
 class TTLauncher(object):
 
     def __init__(self, src, metadata):
@@ -115,11 +116,14 @@ class TTLauncher(object):
         cb_depth = 8
         sig_types = list(self.signature.values())
         idx = 0
+
         def add_arg(arg):
             nonlocal idx
             self.command.set_arg(idx, arg)
             idx += 1
+
         cb_idx = 0
+
         def add_const(arg):
             nonlocal cb_idx
             self.command.set_const(cb_idx, cb_depth, "CB", nexus.get_data_type(arg))
@@ -162,6 +166,7 @@ class TTLauncher(object):
         self.schedule.run()
         if launch_exit_hook is not None:
             launch_exit_hook(launch_metadata)
+
 
 class TTDeviceInterface:
 
@@ -216,6 +221,7 @@ class TTDeviceInterface:
         if self.use_hooks:
             return TTDeviceInterface.HooksTimeAccessor(self)
         return TTDeviceInterface.TimerEvent()
+
 
 class TTDriver(DriverBase):
 
