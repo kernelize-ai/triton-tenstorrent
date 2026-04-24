@@ -238,17 +238,23 @@ class TTDriver(DriverBase):
 
     def __init__(self):
         import torch
-        import torch_nexus
-        self.device = torch.nexus.set_runtime("tt-metal")
-        #self.stream = torch.nexus.get_stream()
-        self.torch_device = torch.nexus
+        try:
+            import torch_nexus
+            torch.nexus.set_runtime("tt-metal")
+            self.device = torch.nexus.get_device()
+            #self.stream = torch.nexus.get_stream()
+            self.torch_device = torch.nexus
+            self.get_device = self.torch_device.get_device
+            self.set_current_device = self.torch_device.set_device
+            self.get_current_device = self.torch_device.current_device
+            self.get_current_stream = lambda idx: torch.cpu.Stream()
+        except Exception as e:
+            # TODO: Fix the off-line compiler
+            self.device = None
+            self.torch_device = None
         #self.get_current_stream = 0
         self.utils = TTUtils(self)
         self.launcher_cls = TTLauncher
-        self.get_device = self.torch_device.get_device
-        self.set_current_device = self.torch_device.set_device
-        self.get_current_device = self.torch_device.current_device
-        self.get_current_stream = lambda idx: torch.cpu.Stream()
 
     def get_device_interface(self):
         return TTDeviceInterface()
