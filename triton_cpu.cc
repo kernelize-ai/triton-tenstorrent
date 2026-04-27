@@ -134,9 +134,11 @@ void init_tenstorrent_d2m_passes(py::module &&m) {
     elementwiseFusionOptions.maxDstPhysicalSizeTiles = 0; // unset
     pm.addPass(d2m::createD2MElementwiseFusion(elementwiseFusionOptions));
   });
+#if 0
   m.def("add_scratch_inputs", [](mlir::PassManager &pm) {
     pm.addPass(d2m::createD2MAddScratchInputs());
   });
+#endif
   m.def("add_allocate", [](mlir::PassManager &pm) {
     d2m::D2MAllocateOptions allocateOptions; // defaults
     pm.addPass(d2m::createD2MAllocate(allocateOptions));
@@ -163,7 +165,7 @@ void init_tenstorrent_d2m_passes(py::module &&m) {
   m.def("add_linalg_to_affine", [](mlir::PassManager &pm) {
     d2m::D2MLinalgToAffineOptions linalgToAffineOptions;
     {
-      linalgToAffineOptions.useTileMatmul = true;
+      // linalgToAffineOptions.useTileMatmul = true;
       linalgToAffineOptions.markRootLoops = true;
     }
     pm.addPass(d2m::createD2MLinalgToAffine(linalgToAffineOptions));
@@ -184,7 +186,7 @@ void init_tenstorrent_d2m_passes(py::module &&m) {
   m.def("add_insert_dst_register_access", [](mlir::PassManager &pm) {
     d2m::D2MInsertDstRegisterAccessOptions insertDstRegisterAccessOptions;
     {
-      insertDstRegisterAccessOptions.useTileMatmul = true;
+      // insertDstRegisterAccessOptions.useTileMatmul = true;
       insertDstRegisterAccessOptions.maxDstPhysicalSizeTiles = 0; // unset
       insertDstRegisterAccessOptions.enableL1Acc =
           false; // default from tt-mlir
