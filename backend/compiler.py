@@ -234,7 +234,7 @@ class CPUBackend(BaseBackend):
         cpu.passes.d2m.add_elementwise_fusion(pm)
         passes.common.add_canonicalizer(pm)
 
-        cpu.passes.d2m.add_scratch_inputs(pm)
+        # cpu.passes.d2m.add_scratch_inputs(pm)
         cpu.passes.d2m.add_allocate(pm)
         cpu.passes.d2m.add_lower_multicast_loads(pm)
 
