@@ -163,7 +163,7 @@ static mlir::Attribute convertKernelArg(Builder &builder,
     return builder.getAttr<ttnn::KernelArgCBBufferIndexAttr>(
         arg.getOperandIndex());
   }
-  case ttkernel::ArgType::Semaphore: {
+  case ttkernel::ArgType::LocalSemaphore: {
     return builder.getAttr<ttnn::KernelArgSemaphoreAtAttr>(
         arg.getOperandIndex());
   }
@@ -274,7 +274,7 @@ createSemaphoreDescriptors(Builder &builder, Kernels &kernels,
     }
 
     for (auto ctArg : kernelSpec.getCtArgs()) {
-      if (ctArg.getArgType() == ttkernel::ArgType::Semaphore) {
+      if (ctArg.getArgType() == ttkernel::ArgType::LocalSemaphore) {
         seenSemaphoreIndices.insert(ctArg.getOperandIndex());
       }
     }
@@ -477,7 +477,8 @@ void createMainFunc(MLIRContext *context, OpBuilder &builder,
   ios.push_back(entryBlock->getArgument(2)); // bias tensor argument
 #endif
 
-  ttnn::GenericOp::create(builder, builder.getUnknownLoc(), ios, program,
+  ttnn::GenericOp::create(builder, builder.getUnknownLoc(), ios,
+                          /*additional_args=*/ValueRange{}, program,
                           ttnn::MemoryConfigAttr());
 
   for (auto [idx, val] : llvm::enumerate(ios)) {
