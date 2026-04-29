@@ -87,6 +87,29 @@ createCBDescriptors(MLIRContext *ctx, func::FuncOp func,
   return cbDescriptors;
 }
 
+static constexpr int32_t M = 64;
+static constexpr int32_t N = 2560;
+static constexpr int32_t K = 9728;
+
+static constexpr int32_t BM = 64;
+static constexpr int32_t BN = 256;
+
+static constexpr uint32_t grid_m() {
+  constexpr uint32_t Mt = M / 32;
+  constexpr uint32_t BMt = BM / 32;
+  return (Mt + BMt - 1) / BMt; // ceil_div
+}
+
+static constexpr uint32_t grid_n() {
+  constexpr uint32_t Nt = N / 32;
+  constexpr uint32_t BNt = BN / 32;
+  return (Nt + BNt - 1) / BNt; // ceil_div
+}
+
+static constexpr int32_t stride_AM = K;
+static constexpr int32_t stride_BK = N;
+static constexpr int32_t stride_CM = N;
+
 static SmallVector<ttnn::CoreRuntimeArgsAttr>
 populateBlockStartEndArgs(Builder &b,
                           const ttnn::CoreRangeSetAttr &coreRangeSet,
@@ -104,6 +127,9 @@ populateBlockStartEndArgs(Builder &b,
   Attribute multicastGroupEnd = ttnn::KernelArgNamedArgAttr::get(
       ctx, StringAttr::get(ctx, "multicast_group_end"),
       packMulticastCoord(7, 4));
+  Attribute numOutputBlocksTotal = ttnn::KernelArgNamedArgAttr::get(
+      ctx, StringAttr::get(ctx, "num_output_blocks_total"),
+      grid_m() * grid_n());
 
   SmallVector<ttnn::CoreRuntimeArgsAttr> perCore;
   for (auto coreRange : coreRanges) {
@@ -129,7 +155,8 @@ populateBlockStartEndArgs(Builder &b,
         auto rt = ttnn::CoreRuntimeArgsAttr::get(
             ctx, coord,
             ArrayRef<mlir::Attribute>{blockStartAttr, blockEndAttr,
-                                      multicastGroupStart, multicastGroupEnd});
+                                      numOutputBlocksTotal, multicastGroupStart,
+                                      multicastGroupEnd});
         perCore.push_back(rt);
       }
     }
@@ -297,13 +324,6 @@ createSemaphoreDescriptors(Builder &builder, Kernels &kernels,
 
   return semaphoreDescriptors;
 }
-
-static constexpr int32_t M = 64;
-static constexpr int32_t N = 2560;
-static constexpr int32_t K = 9728;
-static constexpr int32_t stride_AM = K;
-static constexpr int32_t stride_BK = N;
-static constexpr int32_t stride_CM = N;
 
 // TODO: take the args map as a parameter
 // 0: A ptr
@@ -519,9 +539,9 @@ struct CreateTTNNGenericOp
                                       getCoreCoord(x1, y1));
     };
 
-    // All cores: {[(x=0,y=0) - (x=7,y=6)]}
+    // TODO: expand to entire grid?
     ttnn::CoreRangeSetAttr allCores =
-        ttnn::CoreRangeSetAttr::get(context, {getCoreRange(0, 0, 7, 6)});
+        ttnn::CoreRangeSetAttr::get(context, {getCoreRange(0, 0, 7, 4)});
 
     unsigned gridId = 0;
     auto populateBlockStartEndArgsForSet =
