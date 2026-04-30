@@ -25,6 +25,10 @@ void populateElementwiseOpConversionPattern(TypeConverter &typeConverter,
                                             RewritePatternSet &patterns,
                                             PatternBenefit benefit);
 
+void populateIntrinsicOpConversionPattern(TypeConverter &typeConverter,
+                                          RewritePatternSet &patterns,
+                                          PatternBenefit benefit);
+
 void populateMakeRangeOpConversionPattern(TypeConverter &typeConverter,
                                           RewritePatternSet &patterns,
                                           PatternBenefit benefit);
