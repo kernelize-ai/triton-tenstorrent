@@ -94,9 +94,9 @@ struct ConvertTritonFunc : public OpConversionPattern<triton::FuncOp> {
         loc,
         /*results=*/TypeRange{},
         /*inputs=*/ValueRange{},
-        /*outputs=*/ValueRange{tensorArgs},
-        /*additionalArgs=*/newFuncArgs, // TODO: we should probably split
-                                        // tensors out to inputs?
+        /*outputs=*/ValueRange{tensorArgs[0]}, // TODO: d2m.generic verifier
+                                               // requires one output
+        /*additionalArgs=*/newFuncArgs,
         /*grid=*/grid,
         /*block_factors=*/emptyAttr,
         /*indexing_maps=*/emptyAttr,
