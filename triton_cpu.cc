@@ -5,10 +5,14 @@
 #include "npu/include/TritonNPUToD2M/Passes.h"
 #include "npu/include/TritonNPUToTenstorrent/Passes.h"
 
+#include "mlir/Conversion/AffineToStandard/AffineToStandard.h"
+#include "mlir/Dialect/Affine/Passes.h"
 #include "mlir/Dialect/Arith/Transforms/Passes.h"
 #include "mlir/Dialect/EmitC/Transforms/Passes.h"
+#include "mlir/Dialect/MemRef/Transforms/Passes.h"
 #include "mlir/Pass/PassManager.h"
 #include "mlir/Target/Cpp/CppEmitter.h"
+#include "mlir/Transforms/Passes.h"
 #include "llvm/ADT/ScopeExit.h"
 #include "llvm/IR/Module.h"
 #include "llvm/TargetParser/Host.h"
@@ -197,8 +201,19 @@ void init_tenstorrent_d2m_passes(py::module &&m) {
   m.def("add_sfpu_tile_loop_fission", [](mlir::PassManager &pm) {
     pm.addPass(d2m::createD2MSFPUTileLoopFission());
   });
+  m.def("add_linearize_memref", [](mlir::PassManager &pm) {
+    pm.addPass(d2m::createD2MGenericLinearizeMemref());
+  });
 
-  // TODO: affine section
+  // Frontend of DMA lowering pipeline; insert compute-side CB
+  // sync ops and split the unified thread into separate compute
+  // and datamovement threads.
+  m.def("add_hoist_cb_allocs", [](mlir::PassManager &pm) {
+    pm.addPass(d2m::createD2MHoistCBAllocs());
+  });
+  m.def("add_split_unified_thread", [](mlir::PassManager &pm) {
+    pm.addPass(d2m::createD2MSplitUnifiedThread());
+  });
 }
 
 void init_triton_npu_passes_common(py::module &&m) {
@@ -207,6 +222,16 @@ void init_triton_npu_passes_common(py::module &&m) {
   });
   m.def("add_arith_expand", [](mlir::PassManager &pm) {
     pm.addPass(mlir::arith::createArithExpandOpsPass());
+  });
+  m.def("add_affine_licm", [](mlir::PassManager &pm) {
+    mlir::OpPassManager &funcPm = pm.nest<mlir::func::FuncOp>();
+    funcPm.addPass(mlir::affine::createAffineLoopInvariantCodeMotionPass());
+  });
+  m.def("add_lower_affine", [](mlir::PassManager &pm) {
+    pm.addPass(mlir::createLowerAffinePass());
+  });
+  m.def("add_fold_memref_alias_ops", [](mlir::PassManager &pm) {
+    pm.addPass(mlir::memref::createFoldMemRefAliasOpsPass());
   });
 }
 

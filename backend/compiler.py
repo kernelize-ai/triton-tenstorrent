@@ -235,7 +235,7 @@ class CPUBackend(BaseBackend):
         passes.common.add_canonicalizer(pm)
 
         # cpu.passes.d2m.add_scratch_inputs(pm)
-        cpu.passes.d2m.add_allocate(pm)
+        # cpu.passes.d2m.add_allocate(pm) # failing with element mismatch as the accumulator alloc is being forced to fp16
         cpu.passes.d2m.add_lower_multicast_loads(pm)
 
         cpu.passes.d2m.add_lower_to_explicit_form(pm)
@@ -254,6 +254,19 @@ class CPUBackend(BaseBackend):
 
         cpu.passes.d2m.add_insert_dst_register_access(pm)
         cpu.passes.d2m.add_sfpu_tile_loop_fission(pm)
+
+        cpu.passes.common.add_affine_licm(pm)
+
+        cpu.passes.common.add_lower_affine(pm)
+        cpu.passes.common.add_fold_memref_alias_ops(pm)
+        cpu.passes.common.add_lower_affine(pm)
+        cpu.passes.d2m.add_linearize_memref(pm)
+        cpu.passes.common.add_lower_affine(pm)
+
+        cpu.passes.d2m.add_hoist_cb_allocs(pm)
+        cpu.passes.d2m.add_split_unified_thread(pm)
+
+        # TODO: backend of DMA lowering pipeline
 
         passes.common.add_canonicalizer(pm)
 
