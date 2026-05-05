@@ -2,6 +2,7 @@
 #include "cpu/include/Dialect/TritonCPU/Transforms/Passes.h"
 #include "cpu/include/TritonCPUToLLVM/Passes.h"
 #include "npu/include/Dialect/TritonTenstorrent/Transforms/Passes.h"
+#include "npu/include/TritonNPUToD2M/Passes.h"
 #include "npu/include/TritonNPUToTenstorrent/Passes.h"
 
 #include "mlir/Dialect/Arith/Transforms/Passes.h"
@@ -85,6 +86,9 @@ void init_triton_npu_passes_tenstorrent(py::module &&m) {
   });
   m.def("add_to_ttkernel_dialect", [](mlir::PassManager &pm) {
     pm.addPass(mlir::triton::npu::createConvertTritonNPUToTTKernel());
+  });
+  m.def("add_to_d2m_dialect", [](mlir::PassManager &pm) {
+    pm.addPass(mlir::triton::npu::createConvertTritonNPUToD2M());
   });
 
   m.def("add_drop_function",

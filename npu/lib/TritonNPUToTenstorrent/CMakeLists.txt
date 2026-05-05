@@ -1,8 +1,11 @@
+add_subdirectory(D2M)
+
 add_triton_library(TritonNPUToTenstorrent
     ComputeOpToTTKernel.cpp
     DotOpToTTKernel.cpp
     DropFunctionPass.cpp
     ElementwiseOpsToTTKernel.cpp
+    IntrinsicOpToTTKernel.cpp
     MakeRangeOpToTTKernel.cpp
     MemoryOpToTTKernel.cpp
     PointerInfoAnalysis.cpp
