@@ -64,7 +64,7 @@ struct ConvertTritonNPUToD2MPass
       shape.append(shardShape.begin(), shardShape.end());
       auto memRefType = MemRefType::get(
           shape, tileType,
-          ttcore::ViewLayoutAttr::get(t.getContext(), shape.size()),
+          ttcore::ShardLayoutAttr::get(shardShape, tileType, /*buffers=*/1),
           ttcore::MemorySpaceAttr::get(t.getContext(),
                                        ttcore::MemorySpace::DeviceDRAM));
       out.push_back(memRefType);
