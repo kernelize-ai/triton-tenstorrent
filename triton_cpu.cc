@@ -17,6 +17,8 @@
 #include "llvm/IR/Module.h"
 #include "llvm/TargetParser/Host.h"
 
+#include "ttmlir/Conversion/D2MToTTKernel/D2MToTTKernel.h"
+#include "ttmlir/Conversion/D2MToTTMetal/D2MToTTMetal.h"
 #include "ttmlir/Conversion/TTKernelToEmitC/TTKernelToEmitC.h"
 #include "ttmlir/Dialect/D2M/Transforms/Passes.h"
 #include "ttmlir/Dialect/TTCore/IR/TTCoreOpsTypes.h"
@@ -128,6 +130,11 @@ void init_triton_npu_passes_tenstorrent(py::module &&m) {
         pm.addPass(mlir::tt::ttcore::createTTCoreRegisterDevicePass(
             registerDeviceOptions));
       });
+
+  // ttkernel
+  m.def("add_ttkernel_hoist_inits", [](mlir::PassManager &pm) {
+    pm.addPass(mlir::tt::ttkernel::createTTKernelHoistInits());
+  });
 }
 
 void init_tenstorrent_d2m_passes(py::module &&m) {
@@ -246,6 +253,17 @@ void init_tenstorrent_d2m_passes(py::module &&m) {
 
   m.def("add_d2m_generic_regions_to_funcs", [](mlir::PassManager &pm) {
     pm.addPass(d2m::createD2MGenericRegionsToFuncs());
+  });
+
+  m.def("add_convert_d2m_to_ttkernel", [](mlir::PassManager &pm) {
+    d2m::ConvertD2MToTTKernelOptions D2MToTTKernelOptions;
+    pm.addPass(createConvertD2MToTTKernelPass(D2MToTTKernelOptions));
+  });
+
+  m.def("add_convert_d2m_to_ttmetal", [](mlir::PassManager &pm) {
+    d2m::ConvertD2MToTTMetalOptions d2mToTTMetalOptions;
+    // { d2mToTTMetalOptions.mathFidelity = tt::ttmetal::MathFidelity::High; }
+    pm.addPass(createConvertD2MToTTMetalPass(d2mToTTMetalOptions));
   });
 }
 

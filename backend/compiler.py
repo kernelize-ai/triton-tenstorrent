@@ -278,10 +278,31 @@ class CPUBackend(BaseBackend):
         passes.common.add_canonicalizer(pm)
         cpu.passes.d2m.add_d2m_generic_regions_to_funcs(pm)
 
-        # tmp final canonicalizer so we see output in MLIR dumps
-        passes.common.add_canonicalizer(pm)
-
         pm.run(mod, "make_d2m")
+        return mod
+
+    @staticmethod
+    def make_ttkernel(mod, metadata, options):
+        pm = ir.pass_manager(mod.context)
+        pm.enable_debug()
+
+        cpu.passes.d2m.add_convert_d2m_to_ttkernel(pm)
+        passes.common.add_canonicalizer(pm)
+        cpu.passes.tenstorrent.add_ttkernel_control_dst_selection(pm)
+
+        passes.common.add_canonicalizer(pm)
+        passes.common.add_licm(pm)
+        passes.common.add_sccp(pm)
+        passes.common.add_cse(pm)
+
+        cpu.passes.common.add_arith_int_range_opts(pm)
+        passes.common.add_licm(pm)
+
+        cpu.passes.d2m.add_convert_d2m_to_ttmetal(pm)
+
+        cpu.passes.tenstorrent.add_ttkernel_hoist_inits(pm)
+
+        pm.run(mod, "make_ttkernel")
         return mod
 
     @staticmethod
@@ -314,23 +335,27 @@ class CPUBackend(BaseBackend):
         return mod
 
     @staticmethod
-    def make_emitc(mod, metadata, options):
+    def make_emitc(mod, metadata, options, d2m=False):
         pm = ir.pass_manager(mod.context)
         pm.enable_debug()
 
         # tt-mlir continued
         cpu.passes.tenstorrent.add_ttkernel_device_zone_scopes(pm)
-        passes.common.add_canonicalizer(pm)
-        passes.common.add_licm(pm)
-        passes.common.add_sccp(pm)
-        passes.common.add_cse(pm)
+        if not d2m:
+            passes.common.add_canonicalizer(pm)
+            passes.common.add_licm(pm)
+            passes.common.add_sccp(pm)
+            passes.common.add_cse(pm)
 
-        cpu.passes.common.add_arith_int_range_opts(pm)
+        if not d2m:
+            cpu.passes.common.add_arith_int_range_opts(pm)
         cpu.passes.common.add_arith_expand(pm)
-        sys_desc_path = os.getenv("TT_SYSTEM_DESC_PATH", "")
-        cpu.passes.tenstorrent.add_ttcore_register_device_pass(pm, sys_desc_path)
+        if not d2m:
+            sys_desc_path = os.getenv("TT_SYSTEM_DESC_PATH", "")
+            cpu.passes.tenstorrent.add_ttcore_register_device_pass(pm, sys_desc_path)
         cpu.passes.tenstorrent.add_ttkernel_to_emitc(pm)
         passes.common.add_canonicalizer(pm)
+        cpu.passes.tenstorrent.add_form_expressions_pass(pm)
 
         pm.run(mod, "make_emit_c")
         return mod
@@ -340,7 +365,6 @@ class CPUBackend(BaseBackend):
         pm = ir.pass_manager(mod.context)
         pm.enable_debug()
 
-        cpu.passes.tenstorrent.add_form_expressions_pass(pm)
         pm.run(mod, "make_ttmlir_cpp_file")
 
         # find function names
@@ -419,6 +443,8 @@ class CPUBackend(BaseBackend):
                 stages['so'] = lambda src, metadata: self.make_tenstorrent_binary(src, metadata, options)
             elif options.ttmlir_target == "d2m":
                 stages["d2m"] = lambda src, metadata: self.make_d2m(src, metadata, options)
+                stages["ttkernel"] = lambda src, metadata: self.make_ttkernel(src, metadata, options)
+                stages["emitc"] = lambda src, metadata: self.make_emitc(src, metadata, options, d2m=True)
             else:
                 raise ValueError(f"Unsupported TTMLIR target: {options.ttmlir_target}")
 
