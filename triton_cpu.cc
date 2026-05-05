@@ -133,6 +133,9 @@ void init_triton_npu_passes_tenstorrent(py::module &&m) {
 void init_tenstorrent_d2m_passes(py::module &&m) {
   using namespace mlir::tt;
 
+  // essentially a copy of
+  // TTMetalPipelines::createTTIrToTTMetalMiddleendPipeline
+
   m.def("add_elementwise_fusion", [](mlir::PassManager &pm) {
     d2m::D2MElementwiseFusionOptions elementwiseFusionOptions;
     elementwiseFusionOptions.maxDstPhysicalSizeTiles = 0; // unset
@@ -213,6 +216,36 @@ void init_tenstorrent_d2m_passes(py::module &&m) {
   });
   m.def("add_split_unified_thread", [](mlir::PassManager &pm) {
     pm.addPass(d2m::createD2MSplitUnifiedThread());
+  });
+
+  // Backend of DMA lowering pipeline. generic ops are now
+  // in split compute-dma form. All remote loads and stores
+  // are lowered to concrete dma ops (dma_read, dma_write,
+  // dma_wait, etc.) implementable by D2MToTTKernel lowering
+  // pass.
+  m.def("add_preallocate_mcast_semaphores", [](mlir::PassManager &pm) {
+    pm.addPass(d2m::createD2MPreallocateMcastSemaphores());
+  });
+  m.def("add_schedule_dma",
+        [](mlir::PassManager &pm) { pm.addPass(d2m::createD2MScheduleDMA()); });
+  m.def("add_lower_load_store_ops_to_dma", [](mlir::PassManager &pm) {
+    pm.addPass(d2m::createD2MLowerLoadStoreOpsToDMA());
+  });
+  m.def("add_optimize_dma",
+        [](mlir::PassManager &pm) { pm.addPass(d2m::createD2MOptimizeDMA()); });
+  m.def("add_expand_dma_read_composite_view", [](mlir::PassManager &pm) {
+    pm.addPass(d2m::createD2MExpandDMAReadCompositeView());
+  });
+  m.def("add_lower_dma_to_fully_indexed_form", [](mlir::PassManager &pm) {
+    pm.addPass(d2m::createD2MLowerDMAToFullyIndexedForm());
+  });
+
+  m.def("add_normalize_thread_args", [](mlir::PassManager &pm) {
+    pm.addPass(d2m::createD2MNormalizeThreadArgs());
+  });
+
+  m.def("add_d2m_generic_regions_to_funcs", [](mlir::PassManager &pm) {
+    pm.addPass(d2m::createD2MGenericRegionsToFuncs());
   });
 }
 

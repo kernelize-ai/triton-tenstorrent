@@ -266,8 +266,19 @@ class CPUBackend(BaseBackend):
         cpu.passes.d2m.add_hoist_cb_allocs(pm)
         cpu.passes.d2m.add_split_unified_thread(pm)
 
-        # TODO: backend of DMA lowering pipeline
+        cpu.passes.d2m.add_preallocate_mcast_semaphores(pm)
+        cpu.passes.d2m.add_schedule_dma(pm)
+        passes.common.add_canonicalizer(pm)
+        cpu.passes.d2m.add_lower_load_store_ops_to_dma(pm)
+        cpu.passes.d2m.add_optimize_dma(pm)
+        cpu.passes.d2m.add_expand_dma_read_composite_view(pm)
+        cpu.passes.d2m.add_lower_dma_to_fully_indexed_form(pm)
 
+        cpu.passes.d2m.add_normalize_thread_args(pm)
+        passes.common.add_canonicalizer(pm)
+        cpu.passes.d2m.add_d2m_generic_regions_to_funcs(pm)
+
+        # tmp final canonicalizer so we see output in MLIR dumps
         passes.common.add_canonicalizer(pm)
 
         pm.run(mod, "make_d2m")
