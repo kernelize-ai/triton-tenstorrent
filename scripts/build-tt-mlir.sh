@@ -38,6 +38,7 @@ LLD_DIR="$LLVM_LIBRARY_DIR/cmake/lld"
 mkdir -p "$TTMLIR_TOOLCHAIN_DIR/bin"
 [ ! -f "$TTMLIR_TOOLCHAIN_DIR/bin/llvm-ar" ] && ln -s "$LLVM_BUILD_DIR/bin/llvm-ar" "$TTMLIR_TOOLCHAIN_DIR/bin/llvm-ar"
 [ ! -f "$TTMLIR_TOOLCHAIN_DIR/bin/llvm-ranlib" ] && ln -s "$LLVM_BUILD_DIR/bin/llvm-ranlib" "$TTMLIR_TOOLCHAIN_DIR/bin/llvm-ranlib"
+[ ! -f "$TTMLIR_TOOLCHAIN_DIR/bin/llvm-tblgen" ] && ln -s "$LLVM_BUILD_DIR/bin/llvm-tblgen" "$TTMLIR_TOOLCHAIN_DIR/bin/llvm-tblgen"
 
 if [[ -z "${NO_TTMLIR_RUNTIME:-}" ]]; then
     echo "Building tt-mlir with runtime"
