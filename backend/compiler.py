@@ -229,6 +229,7 @@ class CPUBackend(BaseBackend):
         cpu.passes.tenstorrent.add_ttcore_register_device_pass(pm, sys_desc_path)
 
         cpu.passes.tenstorrent.add_to_d2m_dialect(pm)
+        cpu.passes.tenstorrent.add_hoist_cb_allocs(pm)
 
         # D2M pipeline from createTTIRToTTMetalMiddleendPipeline
         cpu.passes.d2m.add_elementwise_fusion(pm)

@@ -19,4 +19,14 @@ def ConvertTritonNPUToD2M : Pass<"convert-triton-npu-to-d2m", "mlir::ModuleOp"> 
                             ];
 }
 
+def HoistCBAllocs : Pass<"hoist-cb-allocs", "mlir::ModuleOp"> {
+    let summary = "Hoist CB allocs from D2M generic op regions to the function level";
+
+    let description = [{
+        Triton loads/stores and some intermediates are converted from registers to CB buffers during D2M lowering. The CB buffers must be initialized/allocated per D2M generic op outside the op region. This pass identifies such buffers and hoists their allocs to the function level, and replaces the original allocs with arguments forwarded through the D2M generic op via additionalArgs.
+    }];
+
+    let dependentDialects = ["mlir::d2m::D2MDialect"];
+}
+
 #endif
