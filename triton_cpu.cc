@@ -198,15 +198,19 @@ void init_tenstorrent_d2m_passes(py::module &&m) {
     pm.addPass(d2m::createD2MLowerScratchAllocate());
   });
   m.def("add_insert_dst_register_access", [](mlir::PassManager &pm) {
-    d2m::D2MInsertDstRegisterAccessOptions insertDstRegisterAccessOptions;
+    d2m::D2MInsertDstRegisterAccessUnscheduledOptions unschedDstOpts;
     {
-      // insertDstRegisterAccessOptions.useTileMatmul = true;
-      insertDstRegisterAccessOptions.maxDstPhysicalSizeTiles = 0; // unset
-      insertDstRegisterAccessOptions.enableL1Acc =
-          false; // default from tt-mlir
+      unschedDstOpts.maxDstPhysicalSizeTiles = 0; // unset
+      unschedDstOpts.enableL1Acc = false;         // default from tt-mlir
     }
     pm.addPass(
-        d2m::createD2MInsertDstRegisterAccess(insertDstRegisterAccessOptions));
+        d2m::createD2MInsertDstRegisterAccessUnscheduled(unschedDstOpts));
+    d2m::D2MInsertDstRegisterAccessScheduledOptions schedDstOpts;
+    {
+      schedDstOpts.maxDstPhysicalSizeTiles = 0; // unset
+      schedDstOpts.enableL1Acc = false;         // default from tt-mlir
+    }
+    pm.addPass(d2m::createD2MInsertDstRegisterAccessScheduled(schedDstOpts));
   });
   m.def("add_sfpu_tile_loop_fission", [](mlir::PassManager &pm) {
     pm.addPass(d2m::createD2MSFPUTileLoopFission());
