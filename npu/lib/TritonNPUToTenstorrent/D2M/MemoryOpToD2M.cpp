@@ -76,10 +76,10 @@ struct ConvertTensorDescLoadOp
           rewriter, loc, rewriter.getIndexType(), idx));
 
     // step 3: create the remote load
-    auto remoteLoad = d2m::RemoteLoadOp::create(
-        rewriter, loc, resultType, allocOp.getResult(), descPtr, indices);
+    d2m::RemoteLoadOp::create(rewriter, loc, {}, allocOp.getResult(), descPtr,
+                              indices);
 
-    rewriter.replaceOp(op, remoteLoad);
+    rewriter.replaceOp(op, allocOp.getResult());
 
     return success();
   }
@@ -107,11 +107,9 @@ struct ConvertTensorDescStoreOp
     Value src = adaptor.getSrc()[0];
 
     // local buffer variant of remote store
-    auto remoteStore = d2m::RemoteStoreOp::create(
-        rewriter, loc, /*resultType=*/descPtr.getType(), descPtr, indices, src);
+    d2m::RemoteStoreOp::create(rewriter, loc, /*resultType=*/{}, descPtr,
+                               indices, src);
 
-    // remote store produces a result where descriptor store does not, so we
-    // erase the descriptor store instead of replacing it
     rewriter.eraseOp(op);
     return success();
   }
