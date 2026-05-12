@@ -235,7 +235,7 @@ class CPUBackend(BaseBackend):
         passes.common.add_canonicalizer(pm)
 
         # cpu.passes.d2m.add_scratch_inputs(pm)
-        # cpu.passes.d2m.add_allocate(pm) # failing with element mismatch as the accumulator alloc is being forced to fp16
+        # cpu.passes.d2m.add_allocate(pm) # disable the allocator, rely on triton lowering to allocate in L1
         cpu.passes.d2m.add_lower_multicast_loads(pm)
 
         cpu.passes.d2m.add_lower_to_explicit_form(pm)
