@@ -35,6 +35,56 @@ namespace npu {
 #define DBGS() (llvm::dbgs() << "[" DEBUG_TYPE "]: ")
 #define LDBG(X) LLVM_DEBUG(DBGS() << X << "\n")
 
+namespace {
+
+static LogicalResult insertOwnedAllocDeallocs(func::FuncOp func) {
+  bool failed = false;
+  func.walk([&failed](memref::AllocOp allocOp) {
+    Value allocResult = allocOp.getResult();
+
+    if (llvm::any_of(allocResult.getUsers(),
+                     [](Operation *u) { return isa<memref::DeallocOp>(u); }))
+      return;
+
+    Block *crtBlock = allocOp->getBlock();
+    Operation *anchor = allocOp.getOperation();
+    bool escaped = false;
+
+    for (Operation *user : allocResult.getUsers()) {
+      // Climb out of any nested regions until we land in crtBlock.
+      Operation *crtAnchor = user;
+      while (crtAnchor && crtAnchor->getBlock() != crtBlock) {
+        crtAnchor = crtAnchor->getParentOp();
+      }
+      // No ancestor in crtBlock: the alloc's value escapes.
+      if (!crtAnchor) {
+        escaped = true;
+        break;
+      }
+
+      // Keep the latest anchor seen so far (both ops live in crtBlock).
+      if (anchor->isBeforeInBlock(crtAnchor)) {
+        anchor = crtAnchor;
+      }
+    }
+
+    if (escaped) {
+      allocOp.emitError("alloc op lifetime must stay within the current block");
+      failed = true;
+      return;
+    }
+
+    assert(anchor && "anchor should not be null");
+
+    OpBuilder builder(allocOp.getContext());
+    builder.setInsertionPointAfter(anchor);
+    memref::DeallocOp::create(builder, allocOp.getLoc(), allocResult);
+  });
+  return failed ? failure() : success();
+}
+
+} // namespace
+
 struct ConvertTritonNPUToD2MPass
     : public impl::ConvertTritonNPUToD2MBase<ConvertTritonNPUToD2MPass> {
   void runOnOperation() override {
@@ -166,6 +216,12 @@ struct ConvertTritonNPUToD2MPass
 
     if (failed(applyPartialConversion(mod, target, std::move(patterns))))
       return signalPassFailure();
+
+    // TODO: should we handle these as post-processes within the D2M lowering
+    // pass, or should we split this to a separate pass?
+    for (auto func : mod.getOps<func::FuncOp>())
+      if (failed(insertOwnedAllocDeallocs(func)))
+        return signalPassFailure();
   }
 };
 
