@@ -37,6 +37,93 @@ namespace npu {
 
 namespace {
 
+inline bool isCBAlloc(memref::AllocOp alloc) {
+  auto memRefType = cast<MemRefType>(alloc.getType());
+  return isa<ttcore::CBLayoutAttr>(memRefType.getLayout());
+}
+
+static LogicalResult hoistCBAllocs(func::FuncOp func) {
+  // collect generic ops up front then rewrite each generic in order
+  SmallVector<d2m::GenericOp> generics;
+  func.walk([&](d2m::GenericOp g) { generics.push_back(g); });
+
+  IRRewriter rewriter(func.getContext());
+  for (auto generic : generics) {
+    // 1. collect CB Allocs for hoisting
+    SmallVector<memref::AllocOp> cbAllocs;
+    generic->walk([&](memref::AllocOp alloc) {
+      if (isCBAlloc(alloc))
+        cbAllocs.push_back(alloc);
+    });
+    if (cbAllocs.empty())
+      continue;
+
+    // 2. Hoist each CB alloc in collection order
+    rewriter.setInsertionPoint(generic);
+    for (memref::AllocOp alloc : cbAllocs)
+      alloc->moveBefore(generic);
+
+    // 3. Rebuild the generic op, appending each CB alloc to additionalArgs.
+    SmallVector<Value> newAdditionalArgs(generic.getAdditionalArgs().begin(),
+                                         generic.getAdditionalArgs().end());
+    for (memref::AllocOp alloc : cbAllocs)
+      newAdditionalArgs.push_back(alloc.getResult());
+
+    assert(generic.getNumRegions() == 1 &&
+           "expected explicit form d2m generic to have a single unified thread "
+           "region");
+
+    auto newGeneric = d2m::GenericOp::create(
+        rewriter, generic.getLoc(), generic.getResultTypes(),
+        generic.getInputs(), generic.getOutputs(), newAdditionalArgs,
+        generic.getGrid(), generic.getBlockFactors(), generic.getIndexingMaps(),
+        generic.getIteratorTypes(), generic.getThreads(),
+        generic.getFabricConnectionConfigAttr(),
+        /*regionsCount=*/generic.getNumRegions());
+
+    // add body arguments for the newly added cb alloc operands
+    Region &originalRegion = generic.getRegion(0);
+    if (originalRegion.empty()) {
+      return failure();
+    }
+
+    Block *originalBlock = &originalRegion.front();
+    Block *newBlock = &newGeneric.getRegion(0).emplaceBlock();
+
+    // Only semaphore-typed block args carry over; CB allocs (additionalArgs)
+    // are operand-list declarations on the op, not block args. References to
+    // them inside the body resolve via outer-scope SSA (d2m.generic is not
+    // IsolatedFromAbove), and the cloned body inherits those references
+    // automatically without any mapping entry.
+    IRMapping mapping;
+    for (unsigned i = 0; i < originalBlock->getNumArguments(); ++i) {
+      BlockArgument arg = originalBlock->getArgument(i);
+      assert(mlir::isa<d2m::LocalSemaphoreType>(arg.getType()) &&
+             "region block arguments must be of local semaphore type");
+      mapping.map(arg, newBlock->addArgument(arg.getType(), generic.getLoc()));
+    }
+
+    // clone ops
+    rewriter.setInsertionPointToStart(newBlock);
+    for (Operation &op : originalBlock->without_terminator()) {
+      rewriter.clone(op, mapping);
+    }
+
+    // TODO: cloning the terminator separately matching the convention in
+    // D2MSplitUnifiedThreadRewriter, but since we are in unified thread mode I
+    // wonder if we clone the terminator in the above loop.
+    if (originalBlock->mightHaveTerminator()) {
+      Operation *term = originalBlock->getTerminator();
+      rewriter.setInsertionPointToEnd(newBlock);
+      rewriter.clone(*term, mapping);
+    }
+
+    rewriter.eraseOp(generic);
+  }
+
+  return success();
+}
+
 static LogicalResult insertOwnedAllocDeallocs(func::FuncOp func) {
   bool failed = false;
   func.walk([&failed](memref::AllocOp allocOp) {
@@ -217,11 +304,13 @@ struct ConvertTritonNPUToD2MPass
     if (failed(applyPartialConversion(mod, target, std::move(patterns))))
       return signalPassFailure();
 
-    // TODO: should we handle these as post-processes within the D2M lowering
-    // pass, or should we split this to a separate pass?
-    for (auto func : mod.getOps<func::FuncOp>())
+    // post lowering clean-up
+    for (auto func : mod.getOps<func::FuncOp>()) {
+      if (failed(hoistCBAllocs(func)))
+        return signalPassFailure();
       if (failed(insertOwnedAllocDeallocs(func)))
         return signalPassFailure();
+    }
   }
 };
 
