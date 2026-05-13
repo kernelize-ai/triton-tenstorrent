@@ -80,10 +80,7 @@ struct ConvertTritonFunc : public OpConversionPattern<triton::FuncOp> {
     rewriter.setInsertionPointToStart(newEntry);
 
     // Build the GenericOp in explicit data-movement form (all three of
-    // indexing_maps / block_factors / iterator_types are empty).  All
-    // converted function arguments are forwarded as additionalArgs so that
-    // the triton ops inside can capture them.  They will be lowered in later
-    // passes.
+    // indexing_maps / block_factors / iterator_types are empty).
     auto threadsAttr = rewriter.getArrayAttr(
         rewriter.getAttr<d2m::ThreadAttr>(d2m::ThreadType::Unified));
     // TODO: populate correct grid size
@@ -93,10 +90,10 @@ struct ConvertTritonFunc : public OpConversionPattern<triton::FuncOp> {
     auto genericOp = rewriter.create<d2m::GenericOp>(
         loc,
         /*results=*/TypeRange{},
-        /*inputs=*/ValueRange{},
+        /*inputs=*/tensorArgs,
         /*outputs=*/ValueRange{tensorArgs[0]}, // TODO: d2m.generic verifier
                                                // requires one output
-        /*additionalArgs=*/newFuncArgs,
+        /*additionalArgs=*/ValueRange{},
         /*grid=*/grid,
         /*block_factors=*/emptyAttr,
         /*indexing_maps=*/emptyAttr,
