@@ -143,10 +143,11 @@ void init_tenstorrent_d2m_passes(py::module &&m) {
   // essentially a copy of
   // TTMetalPipelines::createTTIrToTTMetalMiddleendPipeline
 
+  // TODO: rename to add_generic_fusion
   m.def("add_elementwise_fusion", [](mlir::PassManager &pm) {
-    d2m::D2MElementwiseFusionOptions elementwiseFusionOptions;
-    elementwiseFusionOptions.maxDstPhysicalSizeTiles = 0; // unset
-    pm.addPass(d2m::createD2MElementwiseFusion(elementwiseFusionOptions));
+    d2m::D2MGenericFusionOptions fusionOptions;
+    // elementwiseFusionOptions.maxDstPhysicalSizeTiles = 0; // unset
+    pm.addPass(d2m::createD2MGenericFusion(fusionOptions));
   });
 #if 0
   m.def("add_scratch_inputs", [](mlir::PassManager &pm) {
