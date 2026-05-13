@@ -94,8 +94,13 @@ struct ConvertTritonNPUToD2MPass
                         auto [dim, tileDim] = pair;
                         return dim / tileDim;
                       }));
+        // assume all L1 allocations are in CBs
+        auto cbLayout =
+            ttcore::CBLayoutAttr::get(tensorType.getContext(), shardShape,
+                                      ttcore::getElementSizeBytes(tileType),
+                                      /*buffers=*/shardShape.size());
         auto memRefType = MemRefType::get(
-            shardShape, tileType, MemRefLayoutAttrInterface{},
+            shardShape, tileType, cbLayout,
             ttcore::MemorySpaceAttr::get(tensorType.getContext(),
                                          ttcore::MemorySpace::DeviceL1));
         return memRefType;

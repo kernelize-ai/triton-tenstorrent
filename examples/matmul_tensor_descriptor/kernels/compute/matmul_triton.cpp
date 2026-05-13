@@ -1,11 +1,11 @@
 // matmul_kernel_tma__compute
 #include <cstdint>
-#include "api/compute/cb_api.h"
 #include "api/compute/common.h"
 #include "api/compute/compute_kernel_api.h"
 #include "api/compute/matmul.h"
 #include "api/compute/pack.h"
 #include "api/compute/reg_api.h"
+#include "experimental/circular_buffer.h"
 #include "tools/profiler/kernel_profiler.hpp"
 inline uint32_t float_to_bits(const float f) { uint32_t r; __builtin_memcpy(&r, &f, sizeof(r)); return r; }
 #ifndef INFINITY
@@ -22,6 +22,9 @@ void kernel_main() {
   int32_t v8 = 2;
   int32_t v9 = 3;
   int32_t v10 = get_common_arg_val<uint32_t>(32);
+  experimental::CircularBuffer cb_ctarg_2(get_compile_time_arg_val(2));
+  experimental::CircularBuffer cb_ctarg_1(get_compile_time_arg_val(1));
+  experimental::CircularBuffer cb_ctarg_0(get_compile_time_arg_val(0));
   mm_init(get_compile_time_arg_val(0), get_compile_time_arg_val(1), get_compile_time_arg_val(2), v5);
   int32_t v11 = get_arg_val<uint32_t>(v2);
   int32_t v12 = get_arg_val<uint32_t>(v1);
@@ -31,11 +34,11 @@ void kernel_main() {
     for (int32_t j14 = v5; j14 < ((int32_t) ((uint32_t) v10 + (uint32_t) 63) / 64); j14 += v6) {
       {
       DeviceZoneScopedN("cb_wait_front");
-      cb_wait_front(get_compile_time_arg_val(0), v7);
+      cb_ctarg_0.wait_front(v7);
       }
       {
       DeviceZoneScopedN("cb_wait_front");
-      cb_wait_front(get_compile_time_arg_val(1), v7);
+      cb_ctarg_1.wait_front(v7);
       }
       matmul_tiles(get_compile_time_arg_val(0), get_compile_time_arg_val(1), v5, v5, v1);
       matmul_tiles(get_compile_time_arg_val(0), get_compile_time_arg_val(1), v5, v8, v2);
@@ -45,10 +48,10 @@ void kernel_main() {
       matmul_tiles(get_compile_time_arg_val(0), get_compile_time_arg_val(1), v6, v9, v2);
       matmul_tiles(get_compile_time_arg_val(0), get_compile_time_arg_val(1), v9, v6, v3);
       matmul_tiles(get_compile_time_arg_val(0), get_compile_time_arg_val(1), v9, v9, v4);
-      cb_pop_front(get_compile_time_arg_val(0), v7);
-      cb_pop_front(get_compile_time_arg_val(1), v7);
+      cb_ctarg_0.pop_front(v7);
+      cb_ctarg_1.pop_front(v7);
     }
-    cb_reserve_back(get_compile_time_arg_val(2), v7);
+    cb_ctarg_2.reserve_back(v7);
     tile_regs_commit();
     {
     DeviceZoneScopedN("tile_regs_wait");
@@ -59,7 +62,7 @@ void kernel_main() {
     pack_tile<true>(v8, get_compile_time_arg_val(2), v8);
     pack_tile<true>(v9, get_compile_time_arg_val(2), v9);
     tile_regs_release();
-    cb_push_back(get_compile_time_arg_val(2), v7);
+    cb_ctarg_2.push_back(v7);
   }
   return;
 }
