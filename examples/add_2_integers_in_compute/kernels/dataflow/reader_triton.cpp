@@ -1,6 +1,7 @@
 // add_kernel__reader
 #include <cstdint>
 #include "api/dataflow/dataflow_api.h"
+#include "experimental/circular_buffer.h"
 #include "tools/profiler/kernel_profiler.hpp"
 void kernel_main() {
   size_t v1 = 0;
@@ -10,6 +11,7 @@ void kernel_main() {
   int32_t v5 = 0;
   int32_t v6 = get_common_arg_val<uint32_t>(v1);
   int32_t v7 = get_common_arg_val<uint32_t>(v2);
+  experimental::CircularBuffer cb_ctarg_1(get_compile_time_arg_val(1));
   DataFormat v8 = get_dataformat(get_compile_time_arg_val(1));
   int32_t v9 = get_tile_size(get_compile_time_arg_val(1));
   InterleavedAddrGenFast<true> v10;
@@ -17,6 +19,7 @@ void kernel_main() {
   v10.page_size = v9;
   v10.data_format = v8;
   InterleavedAddrGenFast<true> v11 = v10;
+  experimental::CircularBuffer cb_ctarg_0(get_compile_time_arg_val(0));
   DataFormat v12 = get_dataformat(get_compile_time_arg_val(0));
   int32_t v13 = get_tile_size(get_compile_time_arg_val(0));
   InterleavedAddrGenFast<true> v14;
@@ -28,24 +31,22 @@ void kernel_main() {
   int32_t v17 = get_arg_val<uint32_t>(v1);
   for (int32_t i18 = v17; i18 < v16; i18 += v3) {
     int32_t v19 = (int32_t) ((uint32_t) i18 * (uint32_t) 2048);
-    cb_reserve_back(get_compile_time_arg_val(0), v3);
-    int32_t v20 = get_write_ptr(get_compile_time_arg_val(0));
+    cb_ctarg_0.reserve_back(v3);
     uint64_t temp_83 = v15.get_noc_addr((int32_t) ((uint32_t) v19 / (uint32_t) v13), v5);
-    noc_async_read(temp_83, v20, v13);
+    noc_async_read(temp_83, cb_ctarg_0.get_write_ptr(), v13);
     {
     DeviceZoneScopedN("noc_async_read_barrier");
     noc_async_read_barrier();
     }
-    cb_push_back(get_compile_time_arg_val(0), v3);
-    cb_reserve_back(get_compile_time_arg_val(1), v3);
-    int32_t v21 = get_write_ptr(get_compile_time_arg_val(1));
+    cb_ctarg_0.push_back(v3);
+    cb_ctarg_1.reserve_back(v3);
     uint64_t temp_92 = v11.get_noc_addr((int32_t) ((uint32_t) v19 / (uint32_t) v9), v5);
-    noc_async_read(temp_92, v21, v9);
+    noc_async_read(temp_92, cb_ctarg_1.get_write_ptr(), v9);
     {
     DeviceZoneScopedN("noc_async_read_barrier");
     noc_async_read_barrier();
     }
-    cb_push_back(get_compile_time_arg_val(1), v3);
+    cb_ctarg_1.push_back(v3);
   }
   return;
 }
