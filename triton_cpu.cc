@@ -202,14 +202,14 @@ void init_tenstorrent_d2m_passes(py::module &&m) {
     d2m::D2MInsertDstRegisterAccessUnscheduledOptions unschedDstOpts;
     {
       unschedDstOpts.maxDstPhysicalSizeTiles = 0; // unset
-      unschedDstOpts.enableL1Acc = false;         // default from tt-mlir
+      unschedDstOpts.disableL1Acc = false;        // default from tt-mlir
     }
     pm.addPass(
         d2m::createD2MInsertDstRegisterAccessUnscheduled(unschedDstOpts));
     d2m::D2MInsertDstRegisterAccessScheduledOptions schedDstOpts;
     {
       schedDstOpts.maxDstPhysicalSizeTiles = 0; // unset
-      schedDstOpts.enableL1Acc = false;         // default from tt-mlir
+      schedDstOpts.disableL1Acc = false;        // default from tt-mlir
     }
     pm.addPass(d2m::createD2MInsertDstRegisterAccessScheduled(schedDstOpts));
   });

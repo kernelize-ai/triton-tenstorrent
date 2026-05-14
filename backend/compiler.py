@@ -295,12 +295,13 @@ class CPUBackend(BaseBackend):
         passes.common.add_sccp(pm)
         passes.common.add_cse(pm)
 
-        cpu.passes.common.add_arith_int_range_opts(pm)
-        passes.common.add_licm(pm)
-
-        cpu.passes.d2m.add_convert_d2m_to_ttmetal(pm)
-
         cpu.passes.tenstorrent.add_ttkernel_hoist_inits(pm)
+        # TODO: device zone scopes?
+
+        #cpu.passes.common.add_arith_int_range_opts(pm)
+        #passes.common.add_licm(pm)
+
+        #cpu.passes.d2m.add_convert_d2m_to_ttmetal(pm)
 
         pm.run(mod, "make_ttkernel")
         return mod
@@ -356,6 +357,10 @@ class CPUBackend(BaseBackend):
         cpu.passes.tenstorrent.add_ttkernel_to_emitc(pm)
         passes.common.add_canonicalizer(pm)
         cpu.passes.tenstorrent.add_form_expressions_pass(pm)
+
+        # TODO: memref.alloc needs address and alignment tags, I think
+        #if d2m:
+        #    cpu.passes.d2m.add_convert_d2m_to_ttmetal(pm)
 
         pm.run(mod, "make_emit_c")
         return mod
