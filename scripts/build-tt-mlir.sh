@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-export TTMLIR_TOOLCHAIN_DIR="/opt/ttmlir-toolchain/"
+export TTMLIR_TOOLCHAIN_DIR="${TTMLIR_TOOLCHAIN_DIR:-/opt/ttmlir-toolchain}"
 if [ ! -d "$TTMLIR_TOOLCHAIN_DIR" ]; then
     echo "TTMLIR toolchain directory `$TTMLIR_TOOLCHAIN_DIR` does not exist, create it before running this script."
     exit 1
