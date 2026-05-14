@@ -16,20 +16,23 @@ module attributes {"ttg.num-ctas" = 1 : i32, "ttg.num-warps" = 1 : i32, ttg.targ
       %b_desc: !tt.tensordesc<tensor<64x64xf16>>, %b_row: i32, %b_col: i32,
       %c_desc: !tt.tensordesc<tensor<64x64xf16>>, %c_row: i32, %c_col: i32)
       attributes {noinline = false} {
+    // all allocs hoisted
+    // CHECK-DAG: %[[ACC:.*]] = memref.alloc() : memref<2x2x!ttcore.tile<32x32, f32>, #ttcore.cb_layout<8192x4096, 2>, #l1>
+    // CHECK-DAG: %[[A:.*]] = memref.alloc()
+    // CHECK-SAME: memref<2x2x!ttcore.tile<32x32, f16>
+    // CHECK-DAG: %[[B:.*]] = memref.alloc()
+    // CHECK-SAME: memref<2x2x!ttcore.tile<32x32, f16>
+    // CHECK-DAG: memref.alloc() : memref<2x2x!ttcore.tile<32x32, f16>, #ttcore.cb_layout<4096x2048, 2>, #l1>
+
     // arith.constant → memref.alloc (accumulator in L1)
-    // CHECK: %[[ACC:.*]] = memref.alloc() : memref<2x2x!ttcore.tile<32x32, f32>, #ttcore.cb_layout<8192x4096, 2>, #l1>
     %acc = arith.constant dense<0.000000e+00> : tensor<64x64xf32, #tiled>
 
     // tt.descriptor_load → CB alloc + index_cast per dim + d2m.remote_load
-    // CHECK: %[[A:.*]] = memref.alloc()
-    // CHECK-SAME: memref<2x2x!ttcore.tile<32x32, f16>
     // CHECK: arith.index_cast {{.*}} : i32 to index
     // CHECK: arith.index_cast {{.*}} : i32 to index
     // CHECK: d2m.remote_load %[[A]]
     %a = tt.descriptor_load %a_desc[%a_row, %a_col] : !tt.tensordesc<tensor<64x64xf16>> -> tensor<64x64xf16, #dot_a>
 
-    // CHECK: %[[B:.*]] = memref.alloc()
-    // CHECK-SAME: memref<2x2x!ttcore.tile<32x32, f16>
     // CHECK: arith.index_cast {{.*}} : i32 to index
     // CHECK: arith.index_cast {{.*}} : i32 to index
     // CHECK: d2m.remote_load %[[B]]
@@ -45,7 +48,6 @@ module attributes {"ttg.num-ctas" = 1 : i32, "ttg.num-warps" = 1 : i32, ttg.targ
     %result = tt.dot %a, %b, %acc : tensor<64x64xf16, #dot_a> * tensor<64x64xf16, #dot_b> -> tensor<64x64xf32, #tiled>
 
     // arith.truncf → alloc + linalg.generic with d2m.tile_typecast
-    // CHECK: memref.alloc() : memref<2x2x!ttcore.tile<32x32, f16>, #ttcore.cb_layout<4096x2048, 2>, #l1>
     // CHECK: linalg.generic
     // CHECK-SAME: iterator_types = ["parallel", "parallel"]
     // CHECK: "d2m.tile_typecast"(%{{.*}}) : (!ttcore.tile<32x32, f32>) -> !ttcore.tile<32x32, f16>
