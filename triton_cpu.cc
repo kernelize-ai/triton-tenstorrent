@@ -25,7 +25,10 @@
 #include "ttmlir/Dialect/TTCore/Transforms/Passes.h"
 #include "ttmlir/Dialect/TTKernel/IR/TTKernel.h"
 #include "ttmlir/Dialect/TTKernel/Transforms/Passes.h"
+#include "ttmlir/FunctionTypes.h"
 #include "ttmlir/Target/TTKernel/TTKernelToCpp.h"
+#include "ttmlir/Target/TTMetal/TTMetalToFlatbuffer.h"
+#include "ttmlir/Conversion/D2MToTTNN/D2MToTTNN.h"
 
 #include <pybind11/pybind11.h>
 
@@ -270,6 +273,11 @@ void init_tenstorrent_d2m_passes(py::module &&m) {
     // { d2mToTTMetalOptions.mathFidelity = tt::ttmetal::MathFidelity::High; }
     pm.addPass(createConvertD2MToTTMetalPass(d2mToTTMetalOptions));
   });
+  m.def("add_convert_d2m_to_ttnn", [](mlir::PassManager &pm) {
+    d2m::ConvertD2MToTTNNOptions d2mToTTNNOptions;
+    // TODO configure options if needed (math fidelity) 
+    pm.addPass(createConvertD2MToTTNNPass(d2mToTTNNOptions));
+  });
 }
 
 void init_triton_npu_passes_common(py::module &&m) {
@@ -327,6 +335,23 @@ void init_triton_cpu(py::module &&m) {
                "failed to translate kernel func to C++");
         return py::str(cppCode);
       });
+
+  m.def("translate_to_flatbuffer", [](mlir::ModuleOp moduleOp) -> py::bytes {
+    // Verify that all functions have function type attributes.
+    if (failed(ttmlir::utils::verifyFunctionTypes(moduleOp))) {
+      assert(false && "verification of function type attributes failed");
+      return py::none();
+    }
+
+    auto data = mlir::tt::ttmetal::translateTTMetalToFlatbuffer(
+        moduleOp, /*goldenMap=*/{}, /*cache=*/{});
+    assert(data && "translation to flatbuffer failed");
+
+    // creates a copy. should we try to zero copy? 
+    return py::bytes(reinterpret_cast<const char *>(data.get()),
+                     flatbuffers::GetSizePrefixedBufferLength(
+                         static_cast<const uint8_t *>(data.get())));
+  });
 
   m.def("load_dialects",
         [](mlir::MLIRContext &context, const std::string &device) {

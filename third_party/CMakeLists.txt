@@ -2,6 +2,7 @@ find_program(CLANG_BIN  clang   REQUIRED)
 find_program(CLANGXX_BIN clang++ REQUIRED)
 
 set(TTMLIR_TOOLCHAIN_DIR "/opt/ttmlir-toolchain" CACHE PATH "Toolchain dir - don't change this without updating tt-mlir env script")
+include_directories("${TTMLIR_TOOLCHAIN_DIR}/include")
 if (DEFINED ENV{TRITON_VENV_DIR} AND NOT "$ENV{TRITON_VENV_DIR}" STREQUAL "")
   set(TRITON_VENV_DIR      "$ENV{TRITON_VENV_DIR}")
 else()

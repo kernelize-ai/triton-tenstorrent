@@ -134,7 +134,7 @@ void matmul_multi_core(
     // - Secondary group: handles fewer tiles per core
     // The secondary group is empty if the work can be evenly distributed across all cores. This
     // approach minimizes workload imbalance between cores for optimal performance.
-#define MULTICAST
+// #define MULTICAST
 #ifdef MULTICAST
     uint32_t num_cores = 40;
     CoreCoord start_core = {0, 0};
@@ -238,8 +238,14 @@ void matmul_multi_core(
     tt_metal::CreateCircularBuffer(
         program,
         all_cores,  // create on all cores
-        CircularBufferConfig(C_tiles_per_block * cb_buffer_depth * single_tile_size, {{CBIndex::c_16, cb_data_format}})
-            .set_page_size(CBIndex::c_16, single_tile_size));
+        CircularBufferConfig(C_tiles_per_block * cb_buffer_depth * single_tile_size, {{CBIndex::c_2, cb_data_format}})
+            .set_page_size(CBIndex::c_2, single_tile_size));
+
+    tt_metal::CreateCircularBuffer(
+        program,
+        all_cores,  // create on all cores
+        CircularBufferConfig(C_tiles_per_block * cb_buffer_depth * single_tile_size, {{CBIndex::c_3, cb_data_format}})
+            .set_page_size(CBIndex::c_3, single_tile_size));
 
     // Create Kernels (Reader, Writer, Compute)
     // - Reader kernel: Handles reading input data from DRAM into circular buffers
@@ -252,7 +258,7 @@ void matmul_multi_core(
     auto in0_mcast_receiver_semaphore_id = tt_metal::CreateSemaphore(program, all_cores, 0);
     std::vector<uint32_t> compile_args = {static_cast<uint32_t>(CBIndex::c_0),
                                         static_cast<uint32_t>(CBIndex::c_1),
-                                        static_cast<uint32_t>(CBIndex::c_16), in0_mcast_sender_semaphore_id, in0_mcast_receiver_semaphore_id};
+                                        static_cast<uint32_t>(CBIndex::c_2), static_cast<uint32_t>(CBIndex::c_3), in0_mcast_sender_semaphore_id, in0_mcast_receiver_semaphore_id};
     
     auto reader_id = tt_metal::CreateKernel(
         program,

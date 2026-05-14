@@ -24,6 +24,9 @@ set(TTMLIR_LIB_NAMES
     TTKernelTargetCpp
     TTMLIRTTKernelToEmitC
     MLIRTTMetalDialect
+    TTMetalTargetFlatbuffer
+    TTLLVMToDynamicLib
+    TTMLIRD2MToTTNN
     MLIRTTCoreDialect
     MLIRTTTransforms
     MLIRTTIRDialect
@@ -103,6 +106,7 @@ if(TRITON_BUILD_PYTHON_MODULE)
   target_include_directories(TritonCPU PUBLIC
       "${TENSTORRENT_MLIR}/include"
       "${TENSTORRENT_MLIR}/build/include"
+      "${TTMLIR_TOOLCHAIN_DIR}/include"
   )
 
   # copy ttmlir headers to the build directory so dependent targets in Triton can see them

@@ -358,10 +358,6 @@ class CPUBackend(BaseBackend):
         passes.common.add_canonicalizer(pm)
         cpu.passes.tenstorrent.add_form_expressions_pass(pm)
 
-        # TODO: memref.alloc needs address and alignment tags, I think
-        #if d2m:
-        #    cpu.passes.d2m.add_convert_d2m_to_ttmetal(pm)
-
         pm.run(mod, "make_emit_c")
         return mod
 
@@ -429,6 +425,16 @@ class CPUBackend(BaseBackend):
         return cpp_file
 
     @staticmethod
+    def make_ttnn_flatbuffer(mod, metadata, options):
+        pm = ir.pass_manager(mod.context)
+        pm.enable_debug()
+
+        pm.run(mod, "make_ttnn_flatbuffer")
+
+        flatbuffer = cpu.translate_to_flatbuffer(mod)
+        return flatbuffer
+
+    @staticmethod
     def make_asm(src, metadata, options):
         names = re.findall(r"define void @(?!(?:barrier)\b)([a-zA-Z_][a-zA-Z0-9_]*)", src)
         assert len(names) == 1
@@ -481,6 +487,7 @@ class CPUBackend(BaseBackend):
                 stages["d2m"] = lambda src, metadata: self.make_d2m(src, metadata, options)
                 stages["ttkernel"] = lambda src, metadata: self.make_ttkernel(src, metadata, options)
                 stages["emitc"] = lambda src, metadata: self.make_emitc(src, metadata, options, d2m=True)
+                #stages["ttnn"] = lambda src, metadata: self.make_ttnn_flatbuffer(src, metadata, options)
                 stages["cpp"] = lambda src, metadata: self.make_d2m_cpp_file(src, metadata, options)
             else:
                 raise ValueError(f"Unsupported TTMLIR target: {options.ttmlir_target}")
