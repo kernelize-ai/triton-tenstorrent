@@ -69,13 +69,15 @@ struct ConvertTritonFunc : public OpConversionPattern<triton::FuncOp> {
     SmallVector<Value> newFuncArgs(newEntry->args_begin(),
                                    newEntry->args_end());
 
-    SmallVector<Value> tensorArgs =
-        llvm::to_vector(llvm::make_filter_range(newFuncArgs, [](Value v) {
-          if (auto memRefType = dyn_cast<MemRefType>(v.getType())) {
-            return isa<tt::ttcore::TileType>(memRefType.getElementType());
-          }
-          return false;
-        }));
+    auto isTileMemref = [](Value v) {
+      auto memRefType = dyn_cast<MemRefType>(v.getType());
+      return memRefType &&
+             isa<tt::ttcore::TileType>(memRefType.getElementType());
+    };
+    SmallVector<Value> tensorArgs, scalarArgs;
+    std::partition_copy(newFuncArgs.begin(), newFuncArgs.end(),
+                        std::back_inserter(tensorArgs),
+                        std::back_inserter(scalarArgs), isTileMemref);
 
     rewriter.setInsertionPointToStart(newEntry);
 
@@ -93,7 +95,7 @@ struct ConvertTritonFunc : public OpConversionPattern<triton::FuncOp> {
         /*inputs=*/tensorArgs,
         /*outputs=*/ValueRange{tensorArgs[0]}, // TODO: d2m.generic verifier
                                                // requires one output
-        /*additionalArgs=*/ValueRange{},
+        /*additionalArgs=*/scalarArgs,
         /*grid=*/grid,
         /*block_factors=*/emptyAttr,
         /*indexing_maps=*/emptyAttr,
