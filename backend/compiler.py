@@ -235,7 +235,7 @@ class CPUBackend(BaseBackend):
         passes.common.add_canonicalizer(pm)
 
         # cpu.passes.d2m.add_scratch_inputs(pm)
-        # cpu.passes.d2m.add_allocate(pm) # disable the allocator, rely on triton lowering to allocate in L1
+        cpu.passes.d2m.add_allocate(pm)  # disable the allocator, rely on triton lowering to allocate in L1
         cpu.passes.d2m.add_lower_multicast_loads(pm)
 
         cpu.passes.d2m.add_lower_to_explicit_form(pm)
@@ -301,7 +301,7 @@ class CPUBackend(BaseBackend):
         #cpu.passes.common.add_arith_int_range_opts(pm)
         #passes.common.add_licm(pm)
 
-        #cpu.passes.d2m.add_convert_d2m_to_ttmetal(pm)
+        cpu.passes.d2m.add_convert_d2m_to_ttmetal(pm)
 
         pm.run(mod, "make_ttkernel")
         return mod
@@ -398,6 +398,37 @@ class CPUBackend(BaseBackend):
         return cpp_file
 
     @staticmethod
+    def make_d2m_cpp_file(mod, metadata, options):
+        pm = ir.pass_manager(mod.context)
+        pm.enable_debug()
+
+        pm.run(mod, "make_d2m_cpp_file")
+
+        # find function names
+        src = str(mod)
+        names = re.findall(r"func.func private @(?!(?:barrier)\b)([a-zA-Z_][a-zA-Z0-9_]*)", src)
+        assert len(names) == 3
+        compute_kernel = next((n for n in names if n.startswith("compute")), None)
+        datamovement_kernels = sorted(n for n in names if n.startswith("datamovement"))
+        assert compute_kernel is not None and len(datamovement_kernels) == 2
+
+        metadata["name"] = compute_kernel[:-9]  # remove __compute suffix
+        metadata["shared"] = 0  # TODO: store cb sizes in module attributes?
+        metadata["profile_scratch_size"] = 0
+        metadata["profile_scratch_align"] = 1
+
+        cpp_file = "#ifdef COMPUTE_KERNEL\n"
+        cpp_file += cpu.translate_to_cpp(mod, compute_kernel)
+        cpp_file += "\n#endif  // COMPUTE_KERNEL\n\n"
+        cpp_file += "\n#ifdef READER_KERNEL\n"
+        cpp_file += cpu.translate_to_cpp(mod, datamovement_kernels[0])
+        cpp_file += "\n#endif  // READER_KERNEL\n\n"
+        cpp_file += "\n#ifdef WRITER_KERNEL\n"
+        cpp_file += cpu.translate_to_cpp(mod, datamovement_kernels[1])
+        cpp_file += "\n#endif  // WRITER_KERNEL\n"
+        return cpp_file
+
+    @staticmethod
     def make_asm(src, metadata, options):
         names = re.findall(r"define void @(?!(?:barrier)\b)([a-zA-Z_][a-zA-Z0-9_]*)", src)
         assert len(names) == 1
@@ -450,6 +481,7 @@ class CPUBackend(BaseBackend):
                 stages["d2m"] = lambda src, metadata: self.make_d2m(src, metadata, options)
                 stages["ttkernel"] = lambda src, metadata: self.make_ttkernel(src, metadata, options)
                 stages["emitc"] = lambda src, metadata: self.make_emitc(src, metadata, options, d2m=True)
+                stages["cpp"] = lambda src, metadata: self.make_d2m_cpp_file(src, metadata, options)
             else:
                 raise ValueError(f"Unsupported TTMLIR target: {options.ttmlir_target}")
 
