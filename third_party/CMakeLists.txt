@@ -1,11 +1,14 @@
 find_program(CLANG_BIN  clang   REQUIRED)
 find_program(CLANGXX_BIN clang++ REQUIRED)
 
-set(TTMLIR_TOOLCHAIN_DIR "/opt/ttmlir-toolchain" CACHE PATH "Toolchain dir - don't change this without updating tt-mlir env script")
-if (DEFINED ENV{TRITON_VENV_DIR} AND NOT "$ENV{TRITON_VENV_DIR}" STREQUAL "")
-  set(TRITON_VENV_DIR      "$ENV{TRITON_VENV_DIR}")
-else()
-  set(TRITON_VENV_DIR      "$ENV{HOME}/.venv")
+set(TTMLIR_TOOLCHAIN_DIR "$ENV{TTMLIR_TOOLCHAIN_DIR}" CACHE PATH "tt-mlir toolchain directory")
+if (TTMLIR_TOOLCHAIN_DIR STREQUAL "")
+  set(TTMLIR_TOOLCHAIN_DIR "/opt/ttmlir-toolchain" CACHE PATH "tt-mlir toolchain directory" FORCE)
+endif()
+
+set(TRITON_VENV_DIR "$ENV{TRITON_VENV_DIR}" CACHE PATH "Triton virtual environment directory")
+if (TRITON_VENV_DIR STREQUAL "")
+  set(TRITON_VENV_DIR "$ENV{HOME}/.venv" CACHE PATH "Triton virtual environment directory" FORCE)
 endif()
 
 # detect environment specific variables using python
@@ -25,8 +28,7 @@ if(NOT _llvm_rc EQUAL 0 OR _llvm_dir STREQUAL "")
   message(FATAL_ERROR "Failed to detect LLVM dir via Python:\n${_llvm_err}")
 endif()
 set(LLVM_SYM_NAME "${_llvm_dir}" CACHE PATH "LLVM build dir" FORCE)
-
-set(LLVM_BUILD_DIR       "$ENV{HOME}/.triton/llvm/${LLVM_SYM_NAME}" CACHE PATH "LLVM build dir")
+set(LLVM_BUILD_DIR "$ENV{HOME}/.triton/llvm/${LLVM_SYM_NAME}" CACHE PATH "LLVM build dir")
 
 execute_process(
       COMMAND "${Python3_EXECUTABLE}" -c "import sys; print(f'python{sys.version_info.major}.{sys.version_info.minor}')"
