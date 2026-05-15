@@ -225,10 +225,80 @@ class CPUBackend(BaseBackend):
         passes.common.add_cse(pm)
         passes.common.add_canonicalizer(pm)
 
+        sys_desc_path = os.getenv("TT_SYSTEM_DESC_PATH", "")
+        cpu.passes.tenstorrent.add_ttcore_register_device_pass(pm, sys_desc_path)
+
         cpu.passes.tenstorrent.add_to_d2m_dialect(pm)
+
+        # D2M pipeline from createTTIRToTTMetalMiddleendPipeline
+        cpu.passes.d2m.add_generic_fusion(pm)
         passes.common.add_canonicalizer(pm)
 
+        cpu.passes.d2m.add_allocate(pm)
+        cpu.passes.d2m.add_lower_multicast_loads(pm)
+
+        cpu.passes.d2m.add_lower_to_explicit_form(pm)
+        passes.common.add_canonicalizer(pm)
+        cpu.passes.d2m.add_decompose_masking(pm)
+        cpu.passes.d2m.add_decompose_arange(pm)
+
+        cpu.passes.d2m.add_generic_tile_compute_loops(pm)
+        cpu.passes.d2m.add_linalg_to_affine(pm)
+        cpu.passes.d2m.add_op_scheduler(pm)
+
+        cpu.passes.d2m.add_insert_spill_and_scratch(pm)
+        passes.common.add_canonicalizer(pm)
+        cpu.passes.d2m.add_lower_scratch_allocate(pm)
+        passes.common.add_canonicalizer(pm)
+
+        cpu.passes.d2m.add_insert_dst_register_access(pm)
+        cpu.passes.d2m.add_sfpu_tile_loop_fission(pm)
+
+        cpu.passes.common.add_affine_licm(pm)
+
+        cpu.passes.common.add_lower_affine(pm)
+        cpu.passes.common.add_fold_memref_alias_ops(pm)
+        cpu.passes.common.add_lower_affine(pm)
+        cpu.passes.d2m.add_linearize_memref(pm)
+        cpu.passes.common.add_lower_affine(pm)
+
+        cpu.passes.d2m.add_hoist_cb_allocs(pm)
+        cpu.passes.d2m.add_split_unified_thread(pm)
+
+        cpu.passes.d2m.add_preallocate_mcast_semaphores(pm)
+        cpu.passes.d2m.add_schedule_dma(pm)
+        passes.common.add_canonicalizer(pm)
+        cpu.passes.d2m.add_lower_load_store_ops_to_dma(pm)
+        cpu.passes.d2m.add_optimize_dma(pm)
+        cpu.passes.d2m.add_expand_dma_read_composite_view(pm)
+        cpu.passes.d2m.add_lower_dma_to_fully_indexed_form(pm)
+
+        cpu.passes.d2m.add_normalize_thread_args(pm)
+        passes.common.add_canonicalizer(pm)
+        cpu.passes.d2m.add_d2m_generic_regions_to_funcs(pm)
+
         pm.run(mod, "make_d2m")
+        return mod
+
+    @staticmethod
+    def make_ttkernel(mod, metadata, options):
+        pm = ir.pass_manager(mod.context)
+        pm.enable_debug()
+
+        cpu.passes.d2m.add_convert_d2m_to_ttkernel(pm)
+        passes.common.add_canonicalizer(pm)
+        cpu.passes.tenstorrent.add_ttkernel_control_dst_selection(pm)
+
+        passes.common.add_canonicalizer(pm)
+        passes.common.add_licm(pm)
+        passes.common.add_sccp(pm)
+        passes.common.add_cse(pm)
+
+        cpu.passes.tenstorrent.add_ttkernel_hoist_inits(pm)
+
+        cpu.passes.d2m.add_convert_d2m_to_ttmetal(pm)
+
+        pm.run(mod, "make_ttkernel")
         return mod
 
     @staticmethod
@@ -261,23 +331,30 @@ class CPUBackend(BaseBackend):
         return mod
 
     @staticmethod
-    def make_emitc(mod, metadata, options):
+    def make_emitc(mod, metadata, options, d2m=False):
         pm = ir.pass_manager(mod.context)
         pm.enable_debug()
 
         # tt-mlir continued
         cpu.passes.tenstorrent.add_ttkernel_device_zone_scopes(pm)
-        passes.common.add_canonicalizer(pm)
-        passes.common.add_licm(pm)
-        passes.common.add_sccp(pm)
-        passes.common.add_cse(pm)
+        if not d2m:
+            passes.common.add_canonicalizer(pm)
+            passes.common.add_licm(pm)
+            passes.common.add_sccp(pm)
+            passes.common.add_cse(pm)
 
-        cpu.passes.common.add_arith_int_range_opts(pm)
+        if not d2m:
+            cpu.passes.common.add_arith_int_range_opts(pm)
         cpu.passes.common.add_arith_expand(pm)
-        sys_desc_path = os.getenv("TT_SYSTEM_DESC_PATH", "")
-        cpu.passes.tenstorrent.add_ttcore_register_device_pass(pm, sys_desc_path)
+        if not d2m:
+            sys_desc_path = os.getenv("TT_SYSTEM_DESC_PATH", "")
+            cpu.passes.tenstorrent.add_ttcore_register_device_pass(pm, sys_desc_path)
         cpu.passes.tenstorrent.add_ttkernel_to_emitc(pm)
         passes.common.add_canonicalizer(pm)
+        cpu.passes.tenstorrent.add_form_expressions_pass(pm)
+
+        # TODO: consider ttnn/flatbuffer instead
+        cpu.passes.d2m.add_convert_d2m_to_ttmetal(pm)
 
         pm.run(mod, "make_emit_c")
         return mod
@@ -287,7 +364,6 @@ class CPUBackend(BaseBackend):
         pm = ir.pass_manager(mod.context)
         pm.enable_debug()
 
-        cpu.passes.tenstorrent.add_form_expressions_pass(pm)
         pm.run(mod, "make_ttmlir_cpp_file")
 
         # find function names
@@ -312,6 +388,37 @@ class CPUBackend(BaseBackend):
         cpp_file += "\n#endif  // READER_KERNEL\n\n"
         cpp_file += "\n#ifdef WRITER_KERNEL\n"
         cpp_file += cpu.translate_to_cpp(mod, writer_kernel)
+        cpp_file += "\n#endif  // WRITER_KERNEL\n"
+        return cpp_file
+
+    @staticmethod
+    def make_d2m_cpp_file(mod, metadata, options):
+        pm = ir.pass_manager(mod.context)
+        pm.enable_debug()
+
+        pm.run(mod, "make_d2m_cpp_file")
+
+        # find function names
+        src = str(mod)
+        names = re.findall(r"func.func private @(?!(?:barrier)\b)([a-zA-Z_][a-zA-Z0-9_]*)", src)
+        assert len(names) == 3
+        compute_kernel = next((n for n in names if n.startswith("compute")), None)
+        datamovement_kernels = sorted(n for n in names if n.startswith("datamovement"))
+        assert compute_kernel is not None and len(datamovement_kernels) == 2
+
+        metadata["name"] = compute_kernel[:-9]  # remove __compute suffix
+        metadata["shared"] = 0  # TODO: store cb sizes in module attributes?
+        metadata["profile_scratch_size"] = 0
+        metadata["profile_scratch_align"] = 1
+
+        cpp_file = "#ifdef COMPUTE_KERNEL\n"
+        cpp_file += cpu.translate_to_cpp(mod, compute_kernel)
+        cpp_file += "\n#endif  // COMPUTE_KERNEL\n\n"
+        cpp_file += "\n#ifdef READER_KERNEL\n"
+        cpp_file += cpu.translate_to_cpp(mod, datamovement_kernels[0])
+        cpp_file += "\n#endif  // READER_KERNEL\n\n"
+        cpp_file += "\n#ifdef WRITER_KERNEL\n"
+        cpp_file += cpu.translate_to_cpp(mod, datamovement_kernels[1])
         cpp_file += "\n#endif  // WRITER_KERNEL\n"
         return cpp_file
 
@@ -366,6 +473,9 @@ class CPUBackend(BaseBackend):
                 stages['so'] = lambda src, metadata: self.make_tenstorrent_binary(src, metadata, options)
             elif options.ttmlir_target == "d2m":
                 stages["d2m"] = lambda src, metadata: self.make_d2m(src, metadata, options)
+                stages["ttkernel"] = lambda src, metadata: self.make_ttkernel(src, metadata, options)
+                stages["emitc"] = lambda src, metadata: self.make_emitc(src, metadata, options, d2m=True)
+                stages["cpp"] = lambda src, metadata: self.make_d2m_cpp_file(src, metadata, options)
             else:
                 raise ValueError(f"Unsupported TTMLIR target: {options.ttmlir_target}")
 

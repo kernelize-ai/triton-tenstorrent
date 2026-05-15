@@ -5,15 +5,22 @@
 #include "npu/include/TritonNPUToD2M/Passes.h"
 #include "npu/include/TritonNPUToTenstorrent/Passes.h"
 
+#include "mlir/Conversion/AffineToStandard/AffineToStandard.h"
+#include "mlir/Dialect/Affine/Passes.h"
 #include "mlir/Dialect/Arith/Transforms/Passes.h"
 #include "mlir/Dialect/EmitC/Transforms/Passes.h"
+#include "mlir/Dialect/MemRef/Transforms/Passes.h"
 #include "mlir/Pass/PassManager.h"
 #include "mlir/Target/Cpp/CppEmitter.h"
+#include "mlir/Transforms/Passes.h"
 #include "llvm/ADT/ScopeExit.h"
 #include "llvm/IR/Module.h"
 #include "llvm/TargetParser/Host.h"
 
+#include "ttmlir/Conversion/D2MToTTKernel/D2MToTTKernel.h"
+#include "ttmlir/Conversion/D2MToTTMetal/D2MToTTMetal.h"
 #include "ttmlir/Conversion/TTKernelToEmitC/TTKernelToEmitC.h"
+#include "ttmlir/Dialect/D2M/Transforms/Passes.h"
 #include "ttmlir/Dialect/TTCore/IR/TTCoreOpsTypes.h"
 #include "ttmlir/Dialect/TTCore/Transforms/Passes.h"
 #include "ttmlir/Dialect/TTKernel/IR/TTKernel.h"
@@ -123,6 +130,138 @@ void init_triton_npu_passes_tenstorrent(py::module &&m) {
         pm.addPass(mlir::tt::ttcore::createTTCoreRegisterDevicePass(
             registerDeviceOptions));
       });
+
+  // ttkernel
+  m.def("add_ttkernel_hoist_inits", [](mlir::PassManager &pm) {
+    pm.addPass(mlir::tt::ttkernel::createTTKernelHoistInits());
+  });
+}
+
+void init_tenstorrent_d2m_passes(py::module &&m) {
+  using namespace mlir::tt;
+
+  // essentially a copy of
+  // D2MPipelines::createD2MFrontendPipeline starting from the middle
+
+  m.def("add_generic_fusion", [](mlir::PassManager &pm) {
+    d2m::D2MGenericFusionOptions fusionOptions;
+    pm.addPass(d2m::createD2MGenericFusion(fusionOptions));
+  });
+  m.def("add_allocate", [](mlir::PassManager &pm) {
+    d2m::D2MAllocateOptions allocateOptions; // defaults
+    pm.addPass(d2m::createD2MAllocate(allocateOptions));
+  });
+  m.def("add_lower_multicast_loads", [](mlir::PassManager &pm) {
+    pm.addPass(d2m::createD2MLowerMulticastLoads());
+  });
+  m.def("add_lower_to_explicit_form", [](mlir::PassManager &pm) {
+    pm.addPass(d2m::createD2MLowerToExplicitForm());
+  });
+  m.def("add_decompose_masking", [](mlir::PassManager &pm) {
+    pm.addPass(d2m::createD2MDecomposeMasking());
+  });
+  m.def("add_decompose_arange", [](mlir::PassManager &pm) {
+    pm.addPass(d2m::createD2MDecomposeArange());
+  });
+  m.def("add_generic_tile_compute_loops", [](mlir::PassManager &pm) {
+    d2m::D2MGenericTileComputeLoopsOptions tileComputeLoopsOptions;
+    {
+      tileComputeLoopsOptions.maxDstPhysicalSizeTiles = 0; // unset
+    }
+    pm.addPass(d2m::createD2MGenericTileComputeLoops(tileComputeLoopsOptions));
+  });
+  m.def("add_linalg_to_affine", [](mlir::PassManager &pm) {
+    d2m::D2MLinalgToAffineOptions linalgToAffineOptions;
+    {
+      linalgToAffineOptions.markRootLoops = true;
+    }
+    pm.addPass(d2m::createD2MLinalgToAffine(linalgToAffineOptions));
+  });
+  m.def("add_op_scheduler", [](mlir::PassManager &pm) {
+    d2m::D2MOpSchedulerOptions opSchedulerOptions;
+    {
+      opSchedulerOptions.enableOpScheduler = true;
+    }
+    pm.addPass(d2m::createD2MOpScheduler(opSchedulerOptions));
+  });
+  m.def("add_insert_spill_and_scratch", [](mlir::PassManager &pm) {
+    pm.addPass(d2m::createD2MInsertSpillAndScratch());
+  });
+  m.def("add_lower_scratch_allocate", [](mlir::PassManager &pm) {
+    pm.addPass(d2m::createD2MLowerScratchAllocate());
+  });
+  m.def("add_insert_dst_register_access", [](mlir::PassManager &pm) {
+    d2m::D2MInsertDstRegisterAccessUnscheduledOptions unschedDstOpts;
+    {
+      unschedDstOpts.maxDstPhysicalSizeTiles = 0; // unset
+      unschedDstOpts.disableL1Acc = false;        // default from tt-mlir
+    }
+    pm.addPass(
+        d2m::createD2MInsertDstRegisterAccessUnscheduled(unschedDstOpts));
+    d2m::D2MInsertDstRegisterAccessScheduledOptions schedDstOpts;
+    {
+      schedDstOpts.maxDstPhysicalSizeTiles = 0; // unset
+      schedDstOpts.disableL1Acc = false;        // default from tt-mlir
+    }
+    pm.addPass(d2m::createD2MInsertDstRegisterAccessScheduled(schedDstOpts));
+  });
+  m.def("add_sfpu_tile_loop_fission", [](mlir::PassManager &pm) {
+    pm.addPass(d2m::createD2MSFPUTileLoopFission());
+  });
+  m.def("add_linearize_memref", [](mlir::PassManager &pm) {
+    pm.addPass(d2m::createD2MGenericLinearizeMemref());
+  });
+
+  // Frontend of DMA lowering pipeline; insert compute-side CB
+  // sync ops and split the unified thread into separate compute
+  // and datamovement threads.
+  m.def("add_hoist_cb_allocs", [](mlir::PassManager &pm) {
+    pm.addPass(d2m::createD2MHoistCBAllocs());
+  });
+  m.def("add_split_unified_thread", [](mlir::PassManager &pm) {
+    pm.addPass(d2m::createD2MSplitUnifiedThread());
+  });
+
+  // Backend of DMA lowering pipeline. generic ops are now
+  // in split compute-dma form. All remote loads and stores
+  // are lowered to concrete dma ops (dma_read, dma_write,
+  // dma_wait, etc.) implementable by D2MToTTKernel lowering
+  // pass.
+  m.def("add_preallocate_mcast_semaphores", [](mlir::PassManager &pm) {
+    pm.addPass(d2m::createD2MPreallocateMcastSemaphores());
+  });
+  m.def("add_schedule_dma",
+        [](mlir::PassManager &pm) { pm.addPass(d2m::createD2MScheduleDMA()); });
+  m.def("add_lower_load_store_ops_to_dma", [](mlir::PassManager &pm) {
+    pm.addPass(d2m::createD2MLowerLoadStoreOpsToDMA());
+  });
+  m.def("add_optimize_dma",
+        [](mlir::PassManager &pm) { pm.addPass(d2m::createD2MOptimizeDMA()); });
+  m.def("add_expand_dma_read_composite_view", [](mlir::PassManager &pm) {
+    pm.addPass(d2m::createD2MExpandDMAReadCompositeView());
+  });
+  m.def("add_lower_dma_to_fully_indexed_form", [](mlir::PassManager &pm) {
+    pm.addPass(d2m::createD2MLowerDMAToFullyIndexedForm());
+  });
+
+  m.def("add_normalize_thread_args", [](mlir::PassManager &pm) {
+    pm.addPass(d2m::createD2MNormalizeThreadArgs());
+  });
+
+  m.def("add_d2m_generic_regions_to_funcs", [](mlir::PassManager &pm) {
+    pm.addPass(d2m::createD2MGenericRegionsToFuncs());
+  });
+
+  m.def("add_convert_d2m_to_ttkernel", [](mlir::PassManager &pm) {
+    d2m::ConvertD2MToTTKernelOptions D2MToTTKernelOptions;
+    pm.addPass(createConvertD2MToTTKernelPass(D2MToTTKernelOptions));
+  });
+
+  m.def("add_convert_d2m_to_ttmetal", [](mlir::PassManager &pm) {
+    d2m::ConvertD2MToTTMetalOptions d2mToTTMetalOptions;
+    // { d2mToTTMetalOptions.mathFidelity = tt::ttmetal::MathFidelity::High; }
+    pm.addPass(createConvertD2MToTTMetalPass(d2mToTTMetalOptions));
+  });
 }
 
 void init_triton_npu_passes_common(py::module &&m) {
@@ -131,6 +270,16 @@ void init_triton_npu_passes_common(py::module &&m) {
   });
   m.def("add_arith_expand", [](mlir::PassManager &pm) {
     pm.addPass(mlir::arith::createArithExpandOpsPass());
+  });
+  m.def("add_affine_licm", [](mlir::PassManager &pm) {
+    mlir::OpPassManager &funcPm = pm.nest<mlir::func::FuncOp>();
+    funcPm.addPass(mlir::affine::createAffineLoopInvariantCodeMotionPass());
+  });
+  m.def("add_lower_affine", [](mlir::PassManager &pm) {
+    pm.addPass(mlir::createLowerAffinePass());
+  });
+  m.def("add_fold_memref_alias_ops", [](mlir::PassManager &pm) {
+    pm.addPass(mlir::memref::createFoldMemRefAliasOpsPass());
   });
 }
 
@@ -151,6 +300,7 @@ void init_triton_cpu(py::module &&m) {
   init_triton_cpu_passes(passes.def_submodule("ttcpuir"));
 
   init_triton_npu_passes_tenstorrent(passes.def_submodule("tenstorrent"));
+  init_tenstorrent_d2m_passes(passes.def_submodule("d2m"));
   init_triton_npu_passes_common(passes.def_submodule("common"));
 
   m.def(
