@@ -301,7 +301,7 @@ class CPUBackend(BaseBackend):
         #cpu.passes.common.add_arith_int_range_opts(pm)
         #passes.common.add_licm(pm)
 
-        cpu.passes.d2m.add_convert_d2m_to_ttmetal(pm)
+        cpu.passes.d2m.add_convert_d2m_to_ttnn(pm)
 
         pm.run(mod, "make_ttkernel")
         return mod
