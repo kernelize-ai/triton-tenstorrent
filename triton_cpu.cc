@@ -141,19 +141,12 @@ void init_tenstorrent_d2m_passes(py::module &&m) {
   using namespace mlir::tt;
 
   // essentially a copy of
-  // TTMetalPipelines::createTTIrToTTMetalMiddleendPipeline
+  // D2MPipelines::createD2MFrontendPipeline starting from the middle
 
-  // TODO: rename to add_generic_fusion
-  m.def("add_elementwise_fusion", [](mlir::PassManager &pm) {
+  m.def("add_generic_fusion", [](mlir::PassManager &pm) {
     d2m::D2MGenericFusionOptions fusionOptions;
-    // elementwiseFusionOptions.maxDstPhysicalSizeTiles = 0; // unset
     pm.addPass(d2m::createD2MGenericFusion(fusionOptions));
   });
-#if 0
-  m.def("add_scratch_inputs", [](mlir::PassManager &pm) {
-    pm.addPass(d2m::createD2MAddScratchInputs());
-  });
-#endif
   m.def("add_allocate", [](mlir::PassManager &pm) {
     d2m::D2MAllocateOptions allocateOptions; // defaults
     pm.addPass(d2m::createD2MAllocate(allocateOptions));
@@ -180,7 +173,6 @@ void init_tenstorrent_d2m_passes(py::module &&m) {
   m.def("add_linalg_to_affine", [](mlir::PassManager &pm) {
     d2m::D2MLinalgToAffineOptions linalgToAffineOptions;
     {
-      // linalgToAffineOptions.useTileMatmul = true;
       linalgToAffineOptions.markRootLoops = true;
     }
     pm.addPass(d2m::createD2MLinalgToAffine(linalgToAffineOptions));

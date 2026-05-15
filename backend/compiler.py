@@ -231,11 +231,10 @@ class CPUBackend(BaseBackend):
         cpu.passes.tenstorrent.add_to_d2m_dialect(pm)
 
         # D2M pipeline from createTTIRToTTMetalMiddleendPipeline
-        cpu.passes.d2m.add_elementwise_fusion(pm)
+        cpu.passes.d2m.add_generic_fusion(pm)
         passes.common.add_canonicalizer(pm)
 
-        # cpu.passes.d2m.add_scratch_inputs(pm)
-        cpu.passes.d2m.add_allocate(pm)  # disable the allocator, rely on triton lowering to allocate in L1
+        cpu.passes.d2m.add_allocate(pm)
         cpu.passes.d2m.add_lower_multicast_loads(pm)
 
         cpu.passes.d2m.add_lower_to_explicit_form(pm)
@@ -296,10 +295,6 @@ class CPUBackend(BaseBackend):
         passes.common.add_cse(pm)
 
         cpu.passes.tenstorrent.add_ttkernel_hoist_inits(pm)
-        # TODO: device zone scopes?
-
-        #cpu.passes.common.add_arith_int_range_opts(pm)
-        #passes.common.add_licm(pm)
 
         cpu.passes.d2m.add_convert_d2m_to_ttmetal(pm)
 
@@ -358,9 +353,8 @@ class CPUBackend(BaseBackend):
         passes.common.add_canonicalizer(pm)
         cpu.passes.tenstorrent.add_form_expressions_pass(pm)
 
-        # TODO: memref.alloc needs address and alignment tags, I think
-        #if d2m:
-        #    cpu.passes.d2m.add_convert_d2m_to_ttmetal(pm)
+        # TODO: consider ttnn/flatbuffer instead
+        cpu.passes.d2m.add_convert_d2m_to_ttmetal(pm)
 
         pm.run(mod, "make_emit_c")
         return mod
