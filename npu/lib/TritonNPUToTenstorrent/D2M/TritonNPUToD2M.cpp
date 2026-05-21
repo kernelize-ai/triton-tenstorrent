@@ -180,12 +180,14 @@ SmallVector<int64_t> calculateShardShape(RankedTensorType tensorType,
     auto cols = tileType.getShape()[1];
     return {tensorType.getShape()[0] / (rows * cols)};
   } else if (tensorType.getRank() == 2) {
-    return llvm::to_vector(
-        map_range((llvm::zip(tensorType.getShape(), tileType.getShape())),
-                  [](auto pair) -> int64_t {
-                    auto [dim, tileDim] = pair;
-                    return dim / tileDim;
-                  }));
+    return llvm::to_vector(map_range(
+        (llvm::zip(tensorType.getShape(), tileType.getShape())),
+        [](auto pair) -> int64_t {
+          auto [dim, tileDim] = pair;
+          assert(dim % tileDim == 0 &&
+                 "tensor dimension must be a multiple of tile dimension");
+          return dim / tileDim;
+        }));
   } else {
     llvm::report_fatal_error(Twine("unsupported tensor rank = ") +
                              std::to_string(tensorType.getRank()));
