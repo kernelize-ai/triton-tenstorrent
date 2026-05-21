@@ -176,9 +176,12 @@ static LogicalResult insertOwnedAllocDeallocs(func::FuncOp func) {
 SmallVector<int64_t> calculateShardShape(RankedTensorType tensorType,
                                          ttcore::TileType tileType) {
   if (tensorType.getRank() == 1) {
+    auto dim = tensorType.getShape()[0];
     auto rows = tileType.getShape()[0];
     auto cols = tileType.getShape()[1];
-    return {tensorType.getShape()[0] / (rows * cols)};
+    assert(dim % (rows * cols) == 0 &&
+           "tensor dimension must be a multiple of tile size");
+    return {dim / (rows * cols)};
   } else if (tensorType.getRank() == 2) {
     return llvm::to_vector(map_range(
         (llvm::zip(tensorType.getShape(), tileType.getShape())),
