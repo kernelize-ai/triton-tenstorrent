@@ -170,6 +170,28 @@ static LogicalResult insertOwnedAllocDeallocs(func::FuncOp func) {
   return failed ? failure() : success();
 }
 
+/// Calculate how a tensor is sharded across tiles. For 1D tensors, we stripe
+/// elements across both tile dimensions (rows * cols). For 2D tensors, we
+/// divide each tensor dimension by the corresponding tile dimension.
+SmallVector<int64_t> calculateShardShape(RankedTensorType tensorType,
+                                         ttcore::TileType tileType) {
+  if (tensorType.getRank() == 1) {
+    auto rows = tileType.getShape()[0];
+    auto cols = tileType.getShape()[1];
+    return {tensorType.getShape()[0] / (rows * cols)};
+  } else if (tensorType.getRank() == 2) {
+    return llvm::to_vector(
+        map_range((llvm::zip(tensorType.getShape(), tileType.getShape())),
+                  [](auto pair) -> int64_t {
+                    auto [dim, tileDim] = pair;
+                    return dim / tileDim;
+                  }));
+  } else {
+    llvm::report_fatal_error(Twine("unsupported tensor rank = ") +
+                             std::to_string(tensorType.getRank()));
+  }
+}
+
 } // namespace
 
 struct ConvertTritonNPUToD2MPass
@@ -190,14 +212,10 @@ struct ConvertTritonNPUToD2MPass
       auto tileType = ttcore::TileType::get(
           t.getContext(), ttcore::TileType::getDefaultShape(),
           ttcore::elementTypeToDataType(eType));
-      auto shardShape = llvm::to_vector(
-          map_range((llvm::zip(tensorType.getShape(), tileType.getShape())),
-                    [](auto pair) -> int64_t {
-                      auto [dim, tileDim] = pair;
-                      return dim / tileDim;
-                    }));
+      SmallVector<int64_t> shardShape =
+          calculateShardShape(tensorType, tileType);
 
-      SmallVector<int64_t> shape{1, 1};
+      SmallVector<int64_t> shape(tensorType.getRank(), 1);
       shape.append(shardShape.begin(), shardShape.end());
       auto memRefType = MemRefType::get(
           shape, tileType,
@@ -221,17 +239,14 @@ struct ConvertTritonNPUToD2MPass
       if (isa<npu::tt::TiledEncodingAttr>(tensorType.getEncoding()) ||
           isa<npu::tt::TiledDotOperandEncodingAttr>(tensorType.getEncoding()) ||
           isa<gpu::DotOperandEncodingAttr>(tensorType.getEncoding())) {
-        // convert to memref in L1
+        // Convert to memref in L1.
         auto tileType = ttcore::TileType::get(
             tensorType.getContext(), ttcore::TileType::getDefaultShape(),
             ttcore::elementTypeToDataType(eType));
-        auto shardShape = llvm::to_vector(
-            map_range((llvm::zip(tensorType.getShape(), tileType.getShape())),
-                      [](auto pair) -> int64_t {
-                        auto [dim, tileDim] = pair;
-                        return dim / tileDim;
-                      }));
-        // assume all L1 allocations are in CBs
+        SmallVector<int64_t> shardShape =
+            calculateShardShape(tensorType, tileType);
+
+        // Assume all L1 allocations are in CBs.
         auto cbLayout =
             ttcore::CBLayoutAttr::get(tensorType.getContext(), shardShape,
                                       ttcore::getElementSizeBytes(tileType),
