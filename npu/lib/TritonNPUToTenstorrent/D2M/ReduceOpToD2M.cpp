@@ -55,6 +55,35 @@ static std::optional<ReduceKind> classifyReduceOp(triton::ReduceOp op,
   return std::nullopt;
 }
 
+/// Emit a constant value to initialize the output tile of a reduction, based on
+/// the `ReduceKind`:
+/// - `SumFloat` and `SumInt`: zero
+/// - `MaxFloat`: negative infinity
+/// - `MaxInt`: minimum representable integer
+static Value initValue(OpBuilder &b, Location loc, ReduceKind reduceKind) {
+  switch (reduceKind) {
+  case ReduceKind::SumFloat:
+    return b.create<arith::ConstantOp>(loc, b.getZeroAttr(b.getF32Type()))
+        .getResult();
+  case ReduceKind::SumInt:
+    return b.create<arith::ConstantOp>(loc, b.getZeroAttr(b.getI32Type()))
+        .getResult();
+  case ReduceKind::MaxFloat:
+    return b
+        .create<arith::ConstantOp>(
+            loc, b.getFloatAttr(b.getF32Type(),
+                                -std::numeric_limits<float>::infinity()))
+        .getResult();
+  case ReduceKind::MaxInt:
+    return b
+        .create<arith::ConstantOp>(
+            loc, b.getIntegerAttr(b.getI32Type(),
+                                  std::numeric_limits<int32_t>::min()))
+        .getResult();
+  }
+  llvm_unreachable("invalid ReduceKind");
+}
+
 /// Emit operations to fill a D2M tile with the value `1.0`.
 static Value fillOnes(OpBuilder &b, Location loc, Type tileType) {
   assert(isa<FloatType>(cast<ttcore::TileType>(tileType).getElementType()) &&
@@ -169,6 +198,24 @@ struct ConvertReduceOp : public OpConversionPattern<triton::ReduceOp> {
                                          srcMemRefType.getMemorySpace());
     Value outMemRef =
         memref::AllocOp::create(rewriter, loc, outMemRefType).getResult();
+
+    // Initialize output buffer with the correct initial value: the minimum
+    // value for `max` and zero for `sum`.
+    auto outRank = static_cast<int64_t>(outShape.size());
+    linalg::GenericOp::create(
+        rewriter, loc,
+        /*resultTypes=*/TypeRange{},
+        /*inputs=*/ValueRange{},
+        /*outputs=*/ValueRange{outMemRef},
+        ArrayRef<AffineMap>{AffineMap::getMultiDimIdentityMap(outRank, ctx)},
+        SmallVector<utils::IteratorType>(outRank,
+                                         utils::IteratorType::parallel),
+        [&](OpBuilder &b, Location innerLoc, ValueRange /*args*/) {
+          Value init = initValue(b, innerLoc, *reduceKind);
+          Value initTile =
+              d2m::TileFillOp::create(b, innerLoc, tileType, init).getResult();
+          linalg::YieldOp::create(b, innerLoc, initTile);
+        });
 
     // Build indexing maps and iterator types.  For RC the grid iteration is
     // fully parallel (the within-tile reduction is encoded in reduceDim). For

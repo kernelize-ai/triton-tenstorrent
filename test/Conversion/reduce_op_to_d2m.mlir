@@ -26,6 +26,10 @@ module attributes {"ttg.num-ctas" = 1 : i32, "ttg.num-warps" = 1 : i32, ttg.targ
       tt.reduce.return %s : f16
     }) : (tensor<32x2048xf16, #tiled_1x64>) -> tensor<32xf16, #ttg.slice<{dim = 1, parent = #tiled_1x64}>>
     // CHECK: linalg.generic
+    // CHECK-SAME: outs(%[[DST]]
+    // CHECK: d2m.tile_fill
+    // CHECK: linalg.yield
+    // CHECK: linalg.generic
     // CHECK-SAME: iterator_types = ["parallel", "reduction"]
     // CHECK-SAME: ins(%[[SRC]]
     // CHECK-SAME: outs(%[[DST]]
@@ -53,6 +57,10 @@ module attributes {"ttg.num-ctas" = 1 : i32, "ttg.num-warps" = 1 : i32, ttg.targ
       %s = arith.addf %lhs, %rhs : f32
       tt.reduce.return %s : f32
     }) : (tensor<64x64xf32, #tiled_2x2>) -> tensor<64xf32, #ttg.slice<{dim = 1, parent = #tiled_2x2}>>
+    // CHECK: linalg.generic
+    // CHECK-SAME: outs(%[[DST]]
+    // CHECK: d2m.tile_fill
+    // CHECK: linalg.yield
     // CHECK: linalg.generic
     // CHECK-SAME: iterator_types = ["parallel", "reduction"]
     // CHECK-SAME: ins(%[[SRC]]
@@ -82,6 +90,10 @@ module attributes {"ttg.num-ctas" = 1 : i32, "ttg.num-warps" = 1 : i32, ttg.targ
       tt.reduce.return %m : f32
     }) : (tensor<128x128xf32, #tiled_4x4>) -> tensor<128xf32, #ttg.slice<{dim = 0, parent = #tiled_4x4}>>
     // CHECK: linalg.generic
+    // CHECK-SAME: outs(%[[DST]]
+    // CHECK: d2m.tile_fill
+    // CHECK: linalg.yield
+    // CHECK: linalg.generic
     // CHECK-SAME: iterator_types = ["reduction", "parallel"]
     // CHECK-SAME: ins(%[[SRC]]
     // CHECK-SAME: outs(%[[DST]]
@@ -108,6 +120,10 @@ module attributes {"ttg.num-ctas" = 1 : i32, "ttg.num-warps" = 1 : i32, ttg.targ
       %s = arith.addf %lhs, %rhs : bf16
       tt.reduce.return %s : bf16
     }) : (tensor<1024xbf16, #tiled_1d>) -> bf16
+    // CHECK: linalg.generic
+    // CHECK-SAME: outs(%[[DST]]
+    // CHECK: d2m.tile_fill
+    // CHECK: linalg.yield
     // CHECK: linalg.generic
     // CHECK-SAME: iterator_types = ["parallel"]
     // CHECK-SAME: ins(%[[SRC]]
