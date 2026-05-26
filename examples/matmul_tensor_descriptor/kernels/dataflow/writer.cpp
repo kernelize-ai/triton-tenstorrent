@@ -1,7 +1,7 @@
 // matmul_kernel_tma__writer
 #include <cstdint>
+#include "api/dataflow/circular_buffer.h"
 #include "api/dataflow/dataflow_api.h"
-#include "experimental/circular_buffer.h"
 #include "tools/profiler/kernel_profiler.hpp"
 
 // SPDX-FileCopyrightText: (c) 2025 Tenstorrent AI ULC
@@ -127,7 +127,7 @@ void kernel_main() {
   int32_t v23 = get_common_arg_val<uint32_t>(30);
   int32_t v24 = get_common_arg_val<uint32_t>(31);
   int32_t v25 = get_common_arg_val<uint32_t>(32);
-  experimental::CircularBuffer cb_ctarg_2(get_compile_time_arg_val(2));
+  CircularBuffer cb_ctarg_2(get_compile_time_arg_val(2));
   DataFormat v26 = get_dataformat(get_compile_time_arg_val(2));
   int32_t v27 = get_tile_size(get_compile_time_arg_val(2));
   InterleavedAddrGenFast<true> v28;
@@ -135,7 +135,7 @@ void kernel_main() {
   v28.page_size = v27;
   v28.data_format = v26;
   InterleavedAddrGenFast<true> v29 = v28;
-  experimental::CircularBuffer cb_ctarg_0(get_compile_time_arg_val(0));
+  CircularBuffer cb_ctarg_0(get_compile_time_arg_val(0));
   DataFormat v30 = get_dataformat(get_compile_time_arg_val(0));
   int32_t v31 = get_tile_size(get_compile_time_arg_val(0));
   int32_t v32 = get_arg_val<uint32_t>(v5);
@@ -181,7 +181,7 @@ void kernel_main() {
         DeviceZoneScopedN("noc_async_read_barrier");
         noc_async_read_barrier();
         }
-        volatile tt_l1_ptr uint32_t* v58 = reinterpret_cast<volatile tt_l1_ptr uint32_t*>(v48);
+        tt_l1_ptr uint32_t* v58 = reinterpret_cast<tt_l1_ptr uint32_t*>(v48);
         experimental::semaphore_wait(v58, v41);
         noc_semaphore_set(v58, v4);
         size_t v59 = experimental::convert_logical_y_to_translated(v40);
@@ -194,7 +194,7 @@ void kernel_main() {
         DeviceZoneScopedN("noc_async_write_barrier");
         noc_async_write_barrier();
         }
-        volatile tt_l1_ptr uint32_t* v64 = reinterpret_cast<volatile tt_l1_ptr uint32_t*>(v49);
+        tt_l1_ptr uint32_t* v64 = reinterpret_cast<tt_l1_ptr uint32_t*>(v49);
         noc_semaphore_set(v64, v5);
         int64_t v65 = experimental::get_noc_multicast_addr(v62, v61, v60, v59, v49);
         noc_semaphore_set_multicast(v49, v65, v41);
@@ -204,7 +204,7 @@ void kernel_main() {
         size_t v67 = experimental::convert_logical_x_to_translated(v37);
         int64_t v68 = get_noc_addr(v67, v66, v48);
         noc_semaphore_inc(v68, v5);
-        volatile tt_l1_ptr uint32_t* v69 = reinterpret_cast<volatile tt_l1_ptr uint32_t*>(v49);
+        tt_l1_ptr uint32_t* v69 = reinterpret_cast<tt_l1_ptr uint32_t*>(v49);
         experimental::semaphore_wait(v69, v5);
         noc_semaphore_set(v69, v4);
       }

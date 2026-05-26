@@ -1,7 +1,7 @@
 // matmul_kernel_tma__reader
 #include <cstdint>
+#include "api/dataflow/circular_buffer.h"
 #include "api/dataflow/dataflow_api.h"
-#include "experimental/circular_buffer.h"
 #include "tools/profiler/kernel_profiler.hpp"
 void kernel_main() {
   int32_t v1 = 63;
@@ -16,7 +16,7 @@ void kernel_main() {
   int32_t v10 = get_common_arg_val<uint32_t>(30);
   int32_t v11 = get_common_arg_val<uint32_t>(31);
   int32_t v12 = get_common_arg_val<uint32_t>(32);
-  experimental::CircularBuffer cb_ctarg_1(get_compile_time_arg_val(1));
+  CircularBuffer cb_ctarg_1(get_compile_time_arg_val(1));
   DataFormat v13 = get_dataformat(get_compile_time_arg_val(1));
   int32_t v14 = get_tile_size(get_compile_time_arg_val(1));
   int32_t v15 = get_arg_val<uint32_t>(1);
