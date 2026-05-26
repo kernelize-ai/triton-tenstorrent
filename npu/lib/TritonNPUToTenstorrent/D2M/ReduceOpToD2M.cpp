@@ -1,5 +1,7 @@
 #include "PatternTritonNPUToD2M.h"
 
+#include <optional>
+
 #include "llvm/Support/Debug.h"
 
 #include "triton/Dialect/Triton/IR/Dialect.h"
