@@ -318,6 +318,8 @@ struct ConvertTritonNPUToD2MPass
                                                     PatternBenefit(1));
     experimental::populateSPMDOpConversionPattern(typeConverter, patterns,
                                                   PatternBenefit(1));
+    experimental::populateReduceOpConversionPattern(typeConverter, patterns,
+                                                    PatternBenefit(1));
     mlir::scf::populateSCFStructuralTypeConversionsAndLegality(
         typeConverter, patterns, target);
 
