@@ -904,8 +904,10 @@ struct ConvertMulticastOp : public OpConversionPattern<npu::tt::MulticastOp> {
       Value l1BaseAddr = ttkernel::GetWritePtrOp::create(rewriter, loc, cb);
 
       // start with a wait and a set on the sender semaphore
-      auto l1SenderAddr =
-          ttkernel::CastToL1PtrOp::create(rewriter, loc, senderSemaphore);
+      auto l1SenderAddr = ttkernel::CastToL1PtrOp::create(
+          rewriter, loc,
+          ttkernel::L1AddrPtrType::get(rewriter.getContext(), 32),
+          senderSemaphore);
       // wait for all receiver cores to acknowledge ready
       ttkernel::SemaphoreWaitOp::create(rewriter, loc, l1SenderAddr, numDests);
       ttkernel::NocSemaphoreSetOp::create(
@@ -926,8 +928,10 @@ struct ConvertMulticastOp : public OpConversionPattern<npu::tt::MulticastOp> {
 
       // signal multicast completion using the receiver data ready semaphore
       // set the local value for the semaphore first
-      auto l1ReceiverAddr =
-          ttkernel::CastToL1PtrOp::create(rewriter, loc, receiverSemaphore);
+      auto l1ReceiverAddr = ttkernel::CastToL1PtrOp::create(
+          rewriter, loc,
+          ttkernel::L1AddrPtrType::get(rewriter.getContext(), 32),
+          receiverSemaphore);
       ttkernel::NocSemaphoreSetOp::create(
           rewriter, loc, l1ReceiverAddr,
           arith::createIndexConstant(loc, rewriter, 1));
@@ -960,8 +964,10 @@ struct ConvertMulticastOp : public OpConversionPattern<npu::tt::MulticastOp> {
           rewriter, loc, remoteNocAddr,
           arith::createIndexConstant(loc, rewriter, 1), nullptr);
       // cast the receiver semaphore to the L1 ptr
-      auto l1ReceiverAddr =
-          ttkernel::CastToL1PtrOp::create(rewriter, loc, receiverSemaphore);
+      auto l1ReceiverAddr = ttkernel::CastToL1PtrOp::create(
+          rewriter, loc,
+          ttkernel::L1AddrPtrType::get(rewriter.getContext(), 32),
+          receiverSemaphore);
       // wait for the sender to finish transmitting data
       ttkernel::SemaphoreWaitOp::create(
           rewriter, loc, l1ReceiverAddr,
