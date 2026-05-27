@@ -296,8 +296,6 @@ class CPUBackend(BaseBackend):
 
         cpu.passes.tenstorrent.add_ttkernel_hoist_inits(pm)
 
-        cpu.passes.d2m.add_convert_d2m_to_ttmetal(pm)
-
         pm.run(mod, "make_ttkernel")
         return mod
 
@@ -353,8 +351,8 @@ class CPUBackend(BaseBackend):
         passes.common.add_canonicalizer(pm)
         cpu.passes.tenstorrent.add_form_expressions_pass(pm)
 
-        # TODO: consider ttnn/flatbuffer instead
-        cpu.passes.d2m.add_convert_d2m_to_ttmetal(pm)
+        #cpu.passes.d2m.add_convert_d2m_to_ttmetal(pm)
+        cpu.passes.d2m.add_convert_d2m_to_ttnn(pm)
 
         pm.run(mod, "make_emit_c")
         return mod
