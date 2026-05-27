@@ -1,13 +1,13 @@
 // add_kernel__writer
 #include <cstdint>
+#include "api/dataflow/circular_buffer.h"
 #include "api/dataflow/dataflow_api.h"
-#include "experimental/circular_buffer.h"
 #include "tools/profiler/kernel_profiler.hpp"
 void kernel_main() {
   int32_t v1 = 1;
   bool v2 = true;
   int32_t v3 = get_common_arg_val<uint32_t>(2);
-  experimental::CircularBuffer cb_ctarg_2(get_compile_time_arg_val(2));
+  CircularBuffer cb_ctarg_2(get_compile_time_arg_val(2));
   DataFormat v4 = get_dataformat(get_compile_time_arg_val(2));
   int32_t v5 = get_tile_size(get_compile_time_arg_val(2));
   InterleavedAddrGenFast<true> v6;

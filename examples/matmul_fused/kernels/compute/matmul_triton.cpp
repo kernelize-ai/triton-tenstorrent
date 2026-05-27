@@ -7,7 +7,7 @@
 #include "api/compute/pack.h"
 #include "api/compute/reg_api.h"
 #include "api/compute/tile_move_copy.h"
-#include "experimental/circular_buffer.h"
+#include "api/dataflow/circular_buffer.h"
 #include "tools/profiler/kernel_profiler.hpp"
 inline uint32_t float_to_bits(const float f) { uint32_t r; __builtin_memcpy(&r, &f, sizeof(r)); return r; }
 #ifndef INFINITY
@@ -40,10 +40,10 @@ void kernel_main() {
   int32_t v24 = 7;
   int32_t v25 = 15;
   int32_t v26 = get_common_arg_val<uint32_t>(42);
-  experimental::CircularBuffer cb_ctarg_3(get_compile_time_arg_val(3));
-  experimental::CircularBuffer cb_ctarg_2(get_compile_time_arg_val(2));
-  experimental::CircularBuffer cb_ctarg_1(get_compile_time_arg_val(1));
-  experimental::CircularBuffer cb_ctarg_0(get_compile_time_arg_val(0));
+  CircularBuffer cb_ctarg_3(get_compile_time_arg_val(3));
+  CircularBuffer cb_ctarg_2(get_compile_time_arg_val(2));
+  CircularBuffer cb_ctarg_1(get_compile_time_arg_val(1));
+  CircularBuffer cb_ctarg_0(get_compile_time_arg_val(0));
   mm_init(get_compile_time_arg_val(0), get_compile_time_arg_val(1), get_compile_time_arg_val(3), v9);
   int32_t v27 = get_arg_val<uint32_t>(v2);
   int32_t v28 = get_arg_val<uint32_t>(v1);

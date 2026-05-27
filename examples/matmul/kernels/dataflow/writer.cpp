@@ -1,7 +1,7 @@
 // matmul_kernel__writer
 #include <cstdint>
+#include "api/dataflow/circular_buffer.h"
 #include "api/dataflow/dataflow_api.h"
-#include "experimental/circular_buffer.h"
 #include "tools/profiler/kernel_profiler.hpp"
 void kernel_main() {
   size_t v1 = 0;
@@ -17,7 +17,7 @@ void kernel_main() {
   int32_t v11 = get_common_arg_val<uint32_t>(3);
   int32_t v12 = get_common_arg_val<uint32_t>(4);
   int32_t v13 = get_common_arg_val<uint32_t>(5);
-  experimental::CircularBuffer cb_ctarg_2(get_compile_time_arg_val(2));
+  CircularBuffer cb_ctarg_2(get_compile_time_arg_val(2));
   DataFormat v14 = get_dataformat(get_compile_time_arg_val(2));
   int32_t v15 = get_tile_size(get_compile_time_arg_val(2));
   InterleavedAddrGenFast<true> v16;
@@ -25,7 +25,7 @@ void kernel_main() {
   v16.page_size = v15;
   v16.data_format = v14;
   InterleavedAddrGenFast<true> v17 = v16;
-  experimental::CircularBuffer cb_ctarg_0(get_compile_time_arg_val(0));
+  CircularBuffer cb_ctarg_0(get_compile_time_arg_val(0));
   DataFormat v18 = get_dataformat(get_compile_time_arg_val(0));
   int32_t v19 = get_tile_size(get_compile_time_arg_val(0));
   InterleavedAddrGenFast<true> v20;

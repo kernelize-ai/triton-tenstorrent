@@ -1,7 +1,7 @@
 // add_kernel__reader
 #include <cstdint>
+#include "api/dataflow/circular_buffer.h"
 #include "api/dataflow/dataflow_api.h"
-#include "experimental/circular_buffer.h"
 #include "tools/profiler/kernel_profiler.hpp"
 void kernel_main() {
   size_t v1 = 0;
@@ -11,7 +11,7 @@ void kernel_main() {
   int32_t v5 = 0;
   int32_t v6 = get_common_arg_val<uint32_t>(v1);
   int32_t v7 = get_common_arg_val<uint32_t>(v2);
-  experimental::CircularBuffer cb_ctarg_1(get_compile_time_arg_val(1));
+  CircularBuffer cb_ctarg_1(get_compile_time_arg_val(1));
   DataFormat v8 = get_dataformat(get_compile_time_arg_val(1));
   int32_t v9 = get_tile_size(get_compile_time_arg_val(1));
   InterleavedAddrGenFast<true> v10;
@@ -19,7 +19,7 @@ void kernel_main() {
   v10.page_size = v9;
   v10.data_format = v8;
   InterleavedAddrGenFast<true> v11 = v10;
-  experimental::CircularBuffer cb_ctarg_0(get_compile_time_arg_val(0));
+  CircularBuffer cb_ctarg_0(get_compile_time_arg_val(0));
   DataFormat v12 = get_dataformat(get_compile_time_arg_val(0));
   int32_t v13 = get_tile_size(get_compile_time_arg_val(0));
   InterleavedAddrGenFast<true> v14;
