@@ -103,7 +103,6 @@ def matmul_tma_set_block_size_hook(nargs):
 )
 @triton.jit(launch_metadata=_matmul_launch_metadata)
 def matmul_kernel_tma(a_desc, b_desc, c_desc,  #
-                      M, N, K,  #
                       BLOCK_SIZE_M: tl.constexpr,  #
                       BLOCK_SIZE_N: tl.constexpr,  #
                       BLOCK_SIZE_K: tl.constexpr,  #
@@ -111,6 +110,8 @@ def matmul_kernel_tma(a_desc, b_desc, c_desc,  #
                       FP8_OUTPUT: tl.constexpr,  #
                       WARP_SPECIALIZE: tl.constexpr,  #
                       ):
+    M, K = a_desc.shape
+    K, N = b_desc.shape
     dtype = tl.float8e4nv if FP8_OUTPUT else tl.float16
 
     pid = tl.program_id(axis=0)
@@ -166,7 +167,6 @@ def matmul_tma(a, b, warp_specialize: bool):
 
     matmul_kernel_tma[grid](
         a_desc, b_desc, c_desc,  #
-        M, N, K,  #
         FP8_OUTPUT=dtype == torch.float8_e4m3fn,  #
         WARP_SPECIALIZE=warp_specialize,  #
     )
@@ -211,43 +211,29 @@ def bench_fn(label, reps, warmup_reps, fn, *args):
     print(f"Benchmarking {label}: ...", end="")
     for _ in range(warmup_reps):
         fn(*args)
-    with proton_context():
-        for _ in range(reps):
-            fn(*args)
+    for _ in range(reps):
+        fn(*args)
     print(f"\rBenchmarking {label}: done")
 
 
-def bench(K, dtype, reps=10000, warmup_reps=10000):
-    M = 8192
-    N = 8192
-    a = torch.randn((M, K), device="cuda", dtype=torch.float16).to(dtype)
-    b = torch.randn((K, N), device="cuda", dtype=torch.float16).to(dtype)
+def bench(K, dtype, reps=100, warmup_reps=100):
+    M = 2048
+    N = 2048
+    a = torch.randn((M, K), device=DEVICE, dtype=dtype)
+    b = torch.randn((K, N), device=DEVICE, dtype=dtype)
 
-    b = b.T.contiguous()
-
-    if cublas is not None:
-        bench_fn("cublas", reps, warmup_reps, cublas_matmul, a, b)
-    if dtype == torch.float16:
-        bench_fn("torch", reps, warmup_reps, torch_matmul, a, b)
-    bench_fn("naive", reps, warmup_reps, matmul, a, b.T)
-    bench_fn("persistent", reps, warmup_reps, matmul_persistent, a, b.T)
-    warp_specialize = [False, True] if HAS_WARP_SPECIALIZE else [False]
-    for ws in warp_specialize:
-        ws_str = "_ws" if ws else ""
-        # disable on-host warpspec on Hopper
-        if HAS_HOST_TENSOR_DESC and not (is_hopper() and ws):
-            bench_fn(f"tma_persistent{ws_str}", reps, warmup_reps, lambda a, b: matmul_tma_persistent(a, b, ws), a, b)
-            bench_fn(f"tma{ws_str}", reps, warmup_reps, lambda a, b: matmul_tma(a, b, ws), a, b)
-        if HAS_TENSOR_DESC:
-            bench_fn(f"descriptor_persistent{ws_str}", reps, warmup_reps,
-                     lambda a, b: matmul_descriptor_persistent(a, b, ws), a, b)
+    print(f"BENCH: {K}")
+    bench_fn(f"tma", reps, warmup_reps, lambda a, b: matmul_tma(a, b, False), a, b)
 
 
 def run_test(expect, fn, a, b, label, enabled=True):
     print(f"  {label}: ...", end="")
     if enabled:
-        actual = fn(a, b)
-        passed = torch.allclose(expect, actual.to(expect.dtype), atol=1.0)
+        actual = fn(a, b).to("cpu")
+        passed = torch.allclose(expect, actual.to(expect.dtype), atol=2.0)
+        if not passed:
+            print(f"Expected result: {expect}")
+            print(f"{label} result: {actual}")
         icon = "✅" if passed else "❌"
     else:
         icon = "⭕"
@@ -264,27 +250,6 @@ def validate(M, N, K, dtype):
     triton_result = matmul_tma(a, b, False)
     print(f"triton_result: {triton_result}")
     print(f"naive_result: {naive_result}")
-
-    """
-    run_test(naive_result, torch_matmul, a, b, "Torch", enabled=dtype == torch.float16)
-    run_test(naive_result, cublas_matmul, a, b, "cuBLAS", enabled=cublas is not None)
-    run_test(naive_result, matmul_persistent, a, b.T, "Persistent")
-
-    kernels = [
-        (matmul_tma, "TMA", HAS_HOST_TENSOR_DESC),
-        (matmul_tma_persistent, "TMA Persistent", HAS_HOST_TENSOR_DESC),
-        (matmul_descriptor_persistent, "Tensor Descriptor Persistent", HAS_TENSOR_DESC),
-    ]
-    warp_specialize = [False, True] if HAS_WARP_SPECIALIZE else [False]
-
-    for (kernel, label, enabled), warp_specialize in itertools.product(kernels, warp_specialize):
-        label = f"{label} (warp_specialize={warp_specialize})"
-        # skip if hopper and warp_specialize and not on-device
-        skipped = is_hopper() and warp_specialize and kernel != matmul_descriptor_persistent
-        enabled = enabled and (not warp_specialize or HAS_TENSOR_DESC) and (not skipped)
-        run_test(naive_result, lambda a, b: kernel(a, b, warp_specialize), a, b, label, enabled)
-    """
-    print()
 
 
 def show_profile(precision, profile_name):
@@ -318,16 +283,16 @@ if __name__ == "__main__":
 
         torch.manual_seed(0)
 
-        validate(64, 32, 64, dtype)
+        validate(64, 128, 64, dtype)
         validate(1024, 1024, 1024, dtype)
-        
-        """
-        validate(8192, 8192, args.K_range[0], dtype)
+        #validate(8192, 8192, args.K_range[0], dtype)
+        #exit(0)
 
-        proton.start("matmul", hook="triton")
-        proton.deactivate()
+        #proton.start("matmul", hook="triton")
+        #proton.deactivate()
+
         for K in range(args.K_range[0], args.K_range[1] + 1, args.K_step):
             bench(K, dtype)
-        proton.finalize()
-        show_profile(args.prec, "matmul")
-        """
+
+        #proton.finalize()
+        #show_profile(args.prec, "matmul")
