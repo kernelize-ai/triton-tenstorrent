@@ -6,8 +6,6 @@ if [ ! -d "$TTMLIR_TOOLCHAIN_DIR" ]; then
     echo "TTMLIR toolchain directory `$TTMLIR_TOOLCHAIN_DIR` does not exist, create it before running this script."
     exit 1
 fi
-export TTMLIR_PYTHON_VERSION="${TTMLIR_PYTHON_VERSION:-python3.11}"
-
 : "${LLVM_BUILD_DIR:?LLVM_BUILD_DIR must be set to the triton LLVM build root directory (typically in ~/.triton/llvm/llvm-OSDISTRO-ARCH)}"
 
 REPO_ROOT="$(git rev-parse --show-toplevel)"
@@ -18,6 +16,11 @@ TRITON_VENV_DIR="${TRITON_VENV_DIR:-"$REPO_ROOT/.venv"}"
 # override TTMLIR venv with triton venv
 export TTMLIR_VENV_DIR="$TRITON_VENV_DIR"
 echo "Using tt-mlir venv dir: $TTMLIR_VENV_DIR"
+
+if [ ! -x "$TTMLIR_VENV_DIR/bin/python" ]; then
+    echo "No python interpreter found at $TTMLIR_VENV_DIR/bin/python; create the venv first."
+    exit 1
+fi
 
 echo "Changing to tt-mlir directory"
 cd "$REPO_ROOT/third_party/tt-mlir" || exit 1
@@ -54,7 +57,7 @@ if [[ -z "${NO_TTMLIR_RUNTIME:-}" ]]; then
         -DCMAKE_INSTALL_RPATH='$ORIGIN' \
         -DCMAKE_INSTALL_RPATH_USE_LINK_PATH=ON \
         -DTTMLIR_ENABLE_OPMODEL=OFF \
-        -DTTMLIR_ENABLE_BINDINGS_PYTHON=OFF \
+        -DTTMLIR_ENABLE_BINDINGS_PYTHON=ON \
         -DTTMLIR_ENABLE_RUNTIME=ON \
         -DTT_RUNTIME_ENABLE_PERF_TRACE=ON \
         -DTT_RUNTIME_ENABLE_TTNN=ON \
