@@ -124,52 +124,6 @@ static LogicalResult hoistCBAllocs(func::FuncOp func) {
   return success();
 }
 
-static LogicalResult insertOwnedAllocDeallocs(func::FuncOp func) {
-  bool failed = false;
-  func.walk([&failed](memref::AllocOp allocOp) {
-    Value allocResult = allocOp.getResult();
-
-    if (llvm::any_of(allocResult.getUsers(),
-                     [](Operation *u) { return isa<memref::DeallocOp>(u); }))
-      return;
-
-    Block *crtBlock = allocOp->getBlock();
-    Operation *anchor = allocOp.getOperation();
-    bool escaped = false;
-
-    for (Operation *user : allocResult.getUsers()) {
-      // Climb out of any nested regions until we land in crtBlock.
-      Operation *crtAnchor = user;
-      while (crtAnchor && crtAnchor->getBlock() != crtBlock) {
-        crtAnchor = crtAnchor->getParentOp();
-      }
-      // No ancestor in crtBlock: the alloc's value escapes.
-      if (!crtAnchor) {
-        escaped = true;
-        break;
-      }
-
-      // Keep the latest anchor seen so far (both ops live in crtBlock).
-      if (anchor->isBeforeInBlock(crtAnchor)) {
-        anchor = crtAnchor;
-      }
-    }
-
-    if (escaped) {
-      allocOp.emitError("alloc op lifetime must stay within the current block");
-      failed = true;
-      return;
-    }
-
-    assert(anchor && "anchor should not be null");
-
-    OpBuilder builder(allocOp.getContext());
-    builder.setInsertionPointAfter(anchor);
-    memref::DeallocOp::create(builder, allocOp.getLoc(), allocResult);
-  });
-  return failed ? failure() : success();
-}
-
 /// Calculate how a tensor is sharded across tiles. For 1D tensors, we stripe
 /// elements across both tile dimensions (rows * cols). For 2D tensors, we
 /// divide each tensor dimension by the corresponding tile dimension.
@@ -326,11 +280,9 @@ struct ConvertTritonNPUToD2MPass
     if (failed(applyPartialConversion(mod, target, std::move(patterns))))
       return signalPassFailure();
 
-    // post lowering clean-up
+    // don't rely on D2M::Allocate to hoist CB allocs out of the d2m.generic
     for (auto func : mod.getOps<func::FuncOp>()) {
       if (failed(hoistCBAllocs(func)))
-        return signalPassFailure();
-      if (failed(insertOwnedAllocDeallocs(func)))
         return signalPassFailure();
     }
   }
