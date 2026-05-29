@@ -393,6 +393,13 @@ class CPUBackend(BaseBackend):
 
     @staticmethod
     def make_flatbuffer(mod, metadata, options):
+        metadata["shared"] = 0
+
+        src = str(mod)
+        names = re.findall(r"func.func @(?!(?:barrier)\b)([a-zA-Z_][a-zA-Z0-9_]*)", src)
+        assert len(names) == 1
+        metadata["name"] = names[0]
+
         # TODO: out of passes namespace...
         fb = cpu.passes.tenstorrent.serialize_ttnn_to_flatbuffer(mod)
         return fb
