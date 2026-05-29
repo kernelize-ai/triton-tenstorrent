@@ -102,7 +102,7 @@ static LogicalResult hoistCBAllocs(func::FuncOp func) {
       BlockArgument arg = originalBlock->getArgument(i);
       assert(mlir::isa<d2m::LocalSemaphoreType>(arg.getType()) &&
              "region block arguments must be of local semaphore type");
-      mapping.map(arg, newBlock->addArgument(arg.getType(), generic.getLoc()));
+      mapping.map(arg, newBlock->addArgument(arg.getType(), arg.getLoc()));
     }
 
     // clone ops
