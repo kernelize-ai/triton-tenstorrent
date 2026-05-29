@@ -55,7 +55,7 @@ class CPUBackend(BaseBackend):
 
     def __init__(self, target: GPUTarget) -> None:
         super().__init__(target)
-        self.binary_ext = "cpp"
+        self.binary_ext = "flatbuffer"  # TODO: pick based on runtime/d2m path
         self.device = 'Tenstorrent'
 
     def parse_options(self, options):
@@ -287,7 +287,8 @@ class CPUBackend(BaseBackend):
         pm = ir.pass_manager(mod.context)
         pm.enable_debug()
 
-        cpu.passes.d2m.add_convert_d2m_to_ttkernel(pm)
+        # set TTNN mode to True
+        cpu.passes.d2m.add_convert_d2m_to_ttkernel(pm, True)
         passes.common.add_canonicalizer(pm)
         cpu.passes.tenstorrent.add_ttkernel_control_dst_selection(pm)
 
@@ -353,7 +354,6 @@ class CPUBackend(BaseBackend):
         passes.common.add_canonicalizer(pm)
         cpu.passes.tenstorrent.add_form_expressions_pass(pm)
 
-        #cpu.passes.d2m.add_convert_d2m_to_ttmetal(pm)
         cpu.passes.d2m.add_convert_d2m_to_ttnn(pm)
 
         pm.run(mod, "make_emit_c")
@@ -390,6 +390,12 @@ class CPUBackend(BaseBackend):
         cpp_file += cpu.translate_to_cpp(mod, writer_kernel)
         cpp_file += "\n#endif  // WRITER_KERNEL\n"
         return cpp_file
+
+    @staticmethod
+    def make_flatbuffer(mod, metadata, options):
+        # TODO: out of passes namespace...
+        fb = cpu.passes.tenstorrent.serialize_ttnn_to_flatbuffer(mod)
+        return fb
 
     @staticmethod
     def make_d2m_cpp_file(mod, metadata, options):
@@ -474,8 +480,8 @@ class CPUBackend(BaseBackend):
             elif options.ttmlir_target == "d2m":
                 stages["d2m"] = lambda src, metadata: self.make_d2m(src, metadata, options)
                 stages["ttkernel"] = lambda src, metadata: self.make_ttkernel(src, metadata, options)
-                stages["emitc"] = lambda src, metadata: self.make_emitc(src, metadata, options, d2m=True)
-                stages["cpp"] = lambda src, metadata: self.make_d2m_cpp_file(src, metadata, options)
+                stages["ttnn"] = lambda src, metadata: self.make_emitc(src, metadata, options, d2m=True)
+                stages["flatbuffer"] = lambda src, metadata: self.make_flatbuffer(src, metadata, options)
             else:
                 raise ValueError(f"Unsupported TTMLIR target: {options.ttmlir_target}")
 
