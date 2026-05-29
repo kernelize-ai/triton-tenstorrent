@@ -252,6 +252,33 @@ class CPUDeviceInterface:
         return CPUDeviceInterface.TimerEvent()
 
 
+class TTRTUtils(object):
+
+    def load_binary(self, name, kernel, shared_mem, device):
+        # TODO
+        import pdb
+        pdb.set_trace()
+        pass
+
+    def get_device_properties(self, *args):
+        core_count = 130  # ttrt query?
+        return {
+            "max_num_regs": core_count * 4, "max_shared_mem": 1024 * 1024 * 1024, "multiprocessor_count": core_count,
+            "warpSize": 1
+        }
+
+
+class TTRTLauncher(object):
+
+    def __init__(self, src, metadata):
+        # TODO
+        pass
+
+    def __call__(self, gridX, gridY, gridZ, stream, function, *args):
+        # TODO
+        pass
+
+
 class CPUDriver(DriverBase):
 
     @staticmethod
@@ -270,11 +297,17 @@ class CPUDriver(DriverBase):
         return self.runtime.get_device(device_id)
 
     def __init__(self):
-        self.runtime = None
-        self.utils = CpuUtils(self)
-        import torch
-        self.get_current_stream = lambda idx: torch.cpu.Stream()
-        self.launcher_cls = CPULauncher
+        if (use_ttrt := os.environ.get("TRITON_TTMLIR_TARGET", "")) == "d2m":
+            self.utils = TTRTUtils()
+            import torch
+            self.get_current_stream = lambda idx: torch.cpu.Stream()  # TODO: maybe ttrt/pjrt here?
+            self.launcher_cls = TTRTLauncher
+        else:
+            self.runtime = None
+            self.utils = CpuUtils(self)
+            import torch
+            self.get_current_stream = lambda idx: torch.cpu.Stream()
+            self.launcher_cls = CPULauncher
 
     def get_device_interface(self):
         return CPUDeviceInterface()
