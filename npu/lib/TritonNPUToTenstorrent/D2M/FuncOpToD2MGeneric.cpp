@@ -55,6 +55,7 @@ struct ConvertTritonFunc : public OpConversionPattern<triton::FuncOp> {
     DenseMap<unsigned, Type>
         tensorArgsMap; // maps new argument index to the original triton type
 
+    Type returnType;
     for (auto [argType, oldArg] :
          llvm::zip(tritonTy.getInputs(), oldEntry.getArguments())) {
       if (auto tensorTy = dyn_cast<RankedTensorType>(argType)) {
@@ -104,6 +105,9 @@ struct ConvertTritonFunc : public OpConversionPattern<triton::FuncOp> {
             makeDynamicTensorTy(blockTensorTy, ttnnLayout));
         argLocs.append(expandedTypes.size(), oldArg.getLoc());
 
+        if (tensorArgsMap.size() == 3)
+          returnType = convertedArgTypes.back();
+
         convertedArgTypes.append(expandedTypes.begin() + 1,
                                  expandedTypes.end());
         continue;
@@ -127,7 +131,7 @@ struct ConvertTritonFunc : public OpConversionPattern<triton::FuncOp> {
     argLocs.push_back(blockEndLoc);
 
     auto newFuncType =
-        rewriter.getFunctionType(convertedArgTypes, /*results=*/{});
+        rewriter.getFunctionType(convertedArgTypes, /*results=*/{returnType});
     auto newFunc =
         rewriter.create<func::FuncOp>(loc, funcOp.getName(), newFuncType);
     ttmlir::utils::setFunctionType(newFunc,
@@ -142,6 +146,7 @@ struct ConvertTritonFunc : public OpConversionPattern<triton::FuncOp> {
     SmallVector<Value> newFuncArgs(
         newEntry->getNumArguments()); // for remapping
     SmallVector<Value> tensorArgs, scalarArgs;
+    SmallVector<unsigned> tensorArgIndices;
     for (auto [i, arg] : llvm::enumerate(newEntry->getArguments())) {
       auto it = tensorArgsMap.find(i);
       if (it != tensorArgsMap.end()) {
@@ -164,6 +169,7 @@ struct ConvertTritonFunc : public OpConversionPattern<triton::FuncOp> {
         Value result = layoutCast.getResult();
         tensorArgs.push_back(result);
         newFuncArgs[i] = result;
+        tensorArgIndices.push_back(i);
         continue;
       }
       assert(!(isa<RankedTensorType>(arg.getType()) ||
@@ -183,8 +189,11 @@ struct ConvertTritonFunc : public OpConversionPattern<triton::FuncOp> {
     auto genericOp = rewriter.create<d2m::GenericOp>(
         loc,
         /*results=*/TypeRange{},
-        /*inputs=*/tensorArgs,
-        /*outputs=*/ValueRange{tensorArgs[0]}, // TODO: d2m.generic verifier
+        /*inputs=*/ValueRange{tensorArgs[0], tensorArgs[1]}, // TODO: proper
+                                                             // input/output
+                                                             // tagging, I'm
+                                                             // cheating here!
+        /*outputs=*/ValueRange{tensorArgs[2]}, // TODO: d2m.generic verifier
                                                // requires one output
         /*additionalArgs=*/scalarArgs,
         /*grid=*/grid,
@@ -195,8 +204,9 @@ struct ConvertTritonFunc : public OpConversionPattern<triton::FuncOp> {
         /*scratch_inputs=*/nullptr,
         /*regionsCount=*/1);
 
-    // The kernel returns void.
-    rewriter.create<func::ReturnOp>(loc);
+    auto resultTensor =
+        newEntry->getArgument(tensorArgIndices.back()); // TODO: hacked
+    rewriter.create<func::ReturnOp>(loc, resultTensor);
 
     // Populate the generic's region with the old triton body.
     //
