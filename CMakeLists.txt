@@ -15,6 +15,7 @@ set(TTMLIR_LIB_NAMES
     MLIRD2MDialect
     MLIRD2MTransforms
     TTMLIRD2MToTTMetal
+    TTMLIRD2MToTTNN
     TTMLIRD2MToTTKernel
     MLIRD2MAnalysis
     MLIRD2MUtils

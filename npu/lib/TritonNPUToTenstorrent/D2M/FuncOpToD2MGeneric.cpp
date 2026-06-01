@@ -7,6 +7,8 @@
 
 #include "ttmlir/Dialect/D2M/IR/D2M.h"
 #include "ttmlir/Dialect/D2M/IR/D2MOps.h"
+#include "ttmlir/Dialect/TTIR/IR/TTIROps.h"
+#include "ttmlir/Dialect/TTNN/IR/TTNNOpsAttrs.h"
 #include "ttmlir/FunctionTypes.h"
 
 #include "mlir/Dialect/Func/IR/FuncOps.h"
@@ -39,6 +41,9 @@ struct ConvertTritonFunc : public OpConversionPattern<triton::FuncOp> {
     MLIRContext *context = funcOp.getContext();
     auto typeConverter = getTypeConverter();
 
+    // TODO: populate correct grid size
+    auto grid = ttcore::GridAttr::get(context, {1, 1});
+
     mlir::FunctionType tritonTy = funcOp.getFunctionType();
     assert(tritonTy.getResults().empty() &&
            "expected triton kernel to return void");
@@ -46,9 +51,63 @@ struct ConvertTritonFunc : public OpConversionPattern<triton::FuncOp> {
     Block &oldEntry = funcOp.getBody().front();
 
     SmallVector<Type> convertedArgTypes;
-    if (failed(typeConverter->convertTypes(tritonTy.getInputs(),
-                                           convertedArgTypes)))
-      return rewriter.notifyMatchFailure(funcOp, "failed to convert arg types");
+    DenseMap<unsigned, Type>
+        tensorArgsMap; // maps new argument index to the original triton type
+
+    for (Type argType : tritonTy.getInputs()) {
+      if (auto tensorTy = dyn_cast<RankedTensorType>(argType)) {
+        if (isa<PointerType>(tensorTy.getElementType())) {
+          // TODO: need to handle the pointer path... don't forget
+          assert(false && "pointer types not yet supported");
+        }
+      }
+      if (auto tensorDescTy = dyn_cast<triton::TensorDescType>(argType)) {
+        auto blockTensorTy = tensorDescTy.getBlockType();
+        auto makeDynamicTensorTy = [](RankedTensorType tensorTy,
+                                      Attribute encoding) {
+          SmallVector<int64_t> dynShape(tensorTy.getRank(),
+                                        ShapedType::kDynamic);
+          return RankedTensorType::get(dynShape, tensorTy.getElementType(),
+                                       encoding);
+        };
+        tensorArgsMap[convertedArgTypes.size()] = tensorDescTy;
+
+        SmallVector<Type> expandedTypes;
+        if (failed(typeConverter->convertType(argType, expandedTypes))) {
+          return rewriter.notifyMatchFailure(
+              funcOp, "failed to convert tensor desc arg type");
+        }
+        assert(!expandedTypes.empty() &&
+               isa<MemRefType>(expandedTypes.front()) &&
+               "expected first expanded tensor desc type to be memref");
+        // drop the memref, but populate the rest of the expanded args
+        auto perCoreMemRef = cast<MemRefType>(expandedTypes.front());
+        auto memSpaceAttr =
+            cast<ttcore::MemorySpaceAttr>(perCoreMemRef.getMemorySpace());
+        // TODO: is there ever a case where this would be L1?
+        ttnn::BufferType bufferType =
+            memSpaceAttr.getValue() == ttcore::MemorySpace::DeviceL1
+                ? ttnn::BufferType::L1
+                : ttnn::BufferType::DRAM;
+
+        auto ttnnLayout =
+            ttnn::TTNNLayoutAttr::Builder(context, blockTensorTy.getShape(),
+                                          blockTensorTy.getElementType())
+                .setBufferType(bufferType)
+                .setMemoryLayout(
+                    ttnn::TensorMemoryLayout::Interleaved) // or Sharded?
+                .build();
+
+        convertedArgTypes.push_back(
+            makeDynamicTensorTy(blockTensorTy, ttnnLayout));
+
+        convertedArgTypes.append(expandedTypes.begin() + 1,
+                                 expandedTypes.end());
+        continue;
+      }
+      auto convertedType = typeConverter->convertType(argType);
+      convertedArgTypes.push_back(convertedType);
+    }
 
     // add block start/block end args
     convertedArgTypes.push_back(rewriter.getI32Type()); // block start
@@ -66,27 +125,47 @@ struct ConvertTritonFunc : public OpConversionPattern<triton::FuncOp> {
     SmallVector<Location> argLocs(convertedArgTypes.size(), loc);
     Block *newEntry = rewriter.createBlock(&newRegion, newRegion.end(),
                                            convertedArgTypes, argLocs);
-    SmallVector<Value> newFuncArgs(newEntry->args_begin(),
-                                   newEntry->args_end());
-
-    auto isTileMemref = [](Value v) {
-      auto memRefType = dyn_cast<MemRefType>(v.getType());
-      return memRefType &&
-             isa<tt::ttcore::TileType>(memRefType.getElementType());
-    };
-    SmallVector<Value> tensorArgs, scalarArgs;
-    std::partition_copy(newFuncArgs.begin(), newFuncArgs.end(),
-                        std::back_inserter(tensorArgs),
-                        std::back_inserter(scalarArgs), isTileMemref);
 
     rewriter.setInsertionPointToStart(newEntry);
+    SmallVector<Value> newFuncArgs(
+        newEntry->getNumArguments()); // for remapping
+    SmallVector<Value> tensorArgs, scalarArgs;
+    for (auto [i, arg] : llvm::enumerate(newEntry->getArguments())) {
+      auto it = tensorArgsMap.find(i);
+      if (it != tensorArgsMap.end()) {
+        assert(isa<RankedTensorType>(arg.getType()) &&
+               "expected converted tensor arg to be ranked tensor (i.e. not a "
+               "memref)");
+
+        SmallVector<Type> outputTypes;
+        if (failed(typeConverter->convertType(it->second, outputTypes))) {
+          return rewriter.notifyMatchFailure(
+              funcOp,
+              "failed to convert back original tensor desc type for d2m.view");
+        }
+        assert(!outputTypes.empty() && isa<MemRefType>(outputTypes.front()) &&
+               "expected at least one output type and for the first output "
+               "type to be a memref");
+
+        auto layoutCast = ttir::TTNNMetalLayoutCastOp::create(
+            rewriter, arg.getLoc(), outputTypes[0], arg);
+        Value result = layoutCast.getResult();
+        tensorArgs.push_back(result);
+        newFuncArgs[i] = result;
+        continue;
+      }
+      assert(!(isa<RankedTensorType>(arg.getType()) ||
+               isa<MemRefType>(arg.getType()) ||
+               isa<TensorDescType>(arg.getType())) &&
+             "expected non-tensor arg to not be ranked tensor");
+      scalarArgs.push_back(arg);
+      newFuncArgs[i] = arg;
+    }
 
     // Build the GenericOp in explicit data-movement form (all three of
     // indexing_maps / block_factors / iterator_types are empty).
     auto threadsAttr = rewriter.getArrayAttr(
         rewriter.getAttr<d2m::ThreadAttr>(d2m::ThreadType::Unified));
-    // TODO: populate correct grid size
-    auto grid = ttcore::GridAttr::get(context, {1, 1});
     auto emptyAttr = rewriter.getArrayAttr({});
 
     auto genericOp = rewriter.create<d2m::GenericOp>(

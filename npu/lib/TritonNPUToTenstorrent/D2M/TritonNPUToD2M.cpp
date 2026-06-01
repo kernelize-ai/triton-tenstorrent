@@ -10,6 +10,8 @@
 
 #include "ttmlir/Dialect/D2M/IR/D2M.h"
 #include "ttmlir/Dialect/D2M/IR/D2MOps.h"
+#include "ttmlir/Dialect/TTIR/IR/TTIROps.h"
+#include "ttmlir/Dialect/TTNN/IR/TTNN.h"
 
 #include "mlir/Dialect/Linalg/IR/Linalg.h"
 #include "mlir/Dialect/SCF/Transforms/Patterns.h"
@@ -225,6 +227,7 @@ struct ConvertTritonNPUToD2MPass
 
     funcTarget.addLegalOp<UnrealizedConversionCastOp>();
     funcTarget.addLegalOp<d2m::GenericOp>();
+    funcTarget.addLegalOp<ttir::TTNNMetalLayoutCastOp>();
     funcTarget.addLegalDialect<func::FuncDialect>();
 
     mlir::RewritePatternSet funcPatterns(context);
