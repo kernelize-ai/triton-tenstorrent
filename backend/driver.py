@@ -275,7 +275,6 @@ class TTRTUtils(object):
         return self._device
 
     def load_binary(self, name, kernel, shared_mem, device):
-        # TODO
         import ttrt
         from ttrt.runtime._ttmlir_runtime.binary import load_binary_from_bytes
         binary = load_binary_from_bytes(kernel)
