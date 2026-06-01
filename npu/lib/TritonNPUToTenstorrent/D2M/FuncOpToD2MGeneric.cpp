@@ -92,7 +92,7 @@ struct ConvertTritonFunc : public OpConversionPattern<triton::FuncOp> {
 
         auto ttnnLayout =
             ttnn::TTNNLayoutAttr::Builder(context, blockTensorTy.getShape(),
-                                          blockTensorTy.getElementType())
+                                          perCoreMemRef.getElementType())
                 .setBufferType(bufferType)
                 .setMemoryLayout(
                     ttnn::TensorMemoryLayout::Interleaved) // or Sharded?
