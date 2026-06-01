@@ -264,14 +264,21 @@ class TTRTUtils(object):
             return
         self._initialized = True
         self._device = None  # lazy init
+        import atexit
+        atexit.register(self._cleanup)
+
+    def _cleanup(self):
+        if self._device is not None:
+            import ttrt.runtime
+            ttrt.runtime.close_mesh_device(self._device)
+            self._device = None  # drop the Python reference
+            TTRTUtils.instance = None  # break the singleton ref too
 
     def _init_device(self):
         if self._device is None:
             import ttrt.runtime
             mesh_options = ttrt.runtime.MeshDeviceOptions()
             self._device = ttrt.runtime.open_mesh_device(mesh_options)
-            import atexit
-            atexit.register(lambda: ttrt.runtime.close_mesh_device(self._device))
         return self._device
 
     def load_binary(self, name, kernel, shared_mem, device):
