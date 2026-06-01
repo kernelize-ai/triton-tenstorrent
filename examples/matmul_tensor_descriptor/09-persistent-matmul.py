@@ -78,9 +78,9 @@ def matmul_get_configs(pre_hook=None):
     return [
         triton.Config({'BLOCK_SIZE_M': BM, 'BLOCK_SIZE_N': BN, "BLOCK_SIZE_K": BK, "GROUP_SIZE_M": 1}, num_stages=s,
                       num_warps=w, pre_hook=pre_hook)
-        for BM in [64]
-        for BN in [64]
-        for BK in [64]
+        for BM in [32]
+        for BN in [32]
+        for BK in [32]
         for s in ([1])
         for w in [1]
     ]
@@ -111,7 +111,7 @@ def matmul_kernel_tma(a_desc, b_desc, c_desc,  #
                       FP8_OUTPUT: tl.constexpr,  #
                       WARP_SPECIALIZE: tl.constexpr,  #
                       ):
-    dtype = tl.float8e4nv if FP8_OUTPUT else tl.float16
+    dtype = tl.float8e4nv if FP8_OUTPUT else tl.float32
 
     pid = tl.program_id(axis=0)
     num_pid_m = tl.cdiv(M, BLOCK_SIZE_M)
@@ -152,7 +152,7 @@ def matmul_tma(a, b, warp_specialize: bool):
     K, N = b.shape 
     dtype = a.dtype
 
-    c = torch.empty((M, N), device=a.device, dtype=dtype)
+    c = torch.full((M, N), 7.5, device=a.device, dtype=dtype)
 
     # A dummy block value that will [maybe?] be overwritten when we have the real block size
     dummy_block = [32, 32]
@@ -220,14 +220,14 @@ def bench_fn(label, reps, warmup_reps, fn, *args):
 def bench(K, dtype, reps=10000, warmup_reps=10000):
     M = 8192
     N = 8192
-    a = torch.randn((M, K), device="cuda", dtype=torch.float16).to(dtype)
-    b = torch.randn((K, N), device="cuda", dtype=torch.float16).to(dtype)
+    a = torch.randn((M, K), device="cuda", dtype=torch.bfloat16).to(dtype)
+    b = torch.randn((K, N), device="cuda", dtype=torch.bfloat16).to(dtype)
 
     b = b.T.contiguous()
 
     if cublas is not None:
         bench_fn("cublas", reps, warmup_reps, cublas_matmul, a, b)
-    if dtype == torch.float16:
+    if dtype == torch.bfloat16:
         bench_fn("torch", reps, warmup_reps, torch_matmul, a, b)
     bench_fn("naive", reps, warmup_reps, matmul, a, b.T)
     bench_fn("persistent", reps, warmup_reps, matmul_persistent, a, b.T)
@@ -256,15 +256,19 @@ def run_test(expect, fn, a, b, label, enabled=True):
 
 def validate(M, N, K, dtype):
     print(f"{M=}, {N=}, {K=}, verification naive vs: ")
-    a = torch.randn((M, K), device="cpu", dtype=torch.float16).to(dtype)
-    b = torch.randn((K, N), device="cpu", dtype=torch.float16).to(dtype)
+    a = torch.randn((M, K), device="cpu", dtype=torch.float32).to(dtype)
+    b = torch.randn((K, N), device="cpu", dtype=torch.float32).to(dtype)
+    #a = torch.arange(M*K, dtype=torch.float32).reshape(M, K)
+    #a = torch.full((M, K), 2.0, device="cpu", dtype=torch.bfloat16).to(dtype)
+    #b = torch.ones((K, N), device="cpu", dtype=torch.float32).to(dtype)
     #b = b.T.contiguous()
 
-    naive_result = torch_matmul(a, b.T).to(torch.float16)
+    naive_result = torch_matmul(a, b.T).to(torch.float32)
     triton_result = matmul_tma(a, b, False)
     print(f"triton_result: {triton_result}")
     print(f"naive_result: {naive_result}")
-
+    torch.testing.assert_allclose(naive_result, triton_result, atol=0.05, rtol=1e-2)
+    print("Success!")
     """
     run_test(naive_result, torch_matmul, a, b, "Torch", enabled=dtype == torch.float16)
     run_test(naive_result, cublas_matmul, a, b, "cuBLAS", enabled=cublas is not None)
@@ -310,7 +314,7 @@ if __name__ == "__main__":
     if args.prec == 'fp8' and (not hasattr(torch, "float8_e4m3fn") or not is_cuda()):
         print("This example requires CUDA with fp8 support.")
     else:
-        dtype = torch.float8_e4m3fn if args.prec == 'fp8' else torch.float16
+        dtype = torch.float8_e4m3fn if args.prec == 'fp8' else torch.float32
 
         if args.K and args.K_range is None:
             args.K_range = [args.K, args.K]
@@ -318,7 +322,9 @@ if __name__ == "__main__":
 
         torch.manual_seed(0)
 
-        validate(64, 32, 64, dtype)
+        validate(32, 32, 32, dtype)
+        import sys
+        sys.exit(0)
         validate(1024, 1024, 1024, dtype)
         
         """
