@@ -52,7 +52,6 @@ private:
     MLIRContext *context = &getContext();
     unsigned idx = arg.getArgNumber();
 
-    llvm::errs() << "need to tag input: " << arg << "\n";
     SetVector<Operation *> slice;
     mlir::getForwardSlice(arg, &slice);
 
@@ -75,11 +74,9 @@ private:
 
     for (auto *op : slice) {
       if (isa<triton::LoadOp, triton::DescriptorLoadOp>(op)) {
-        llvm::errs() << "need to tag load: " << *op << "\n";
         if (failed(tagAs(tt::IOType::INPUT)))
           return failure();
       } else if (isa<triton::StoreOp, triton::DescriptorStoreOp>(op)) {
-        llvm::errs() << "need to tag store: " << *op << "\n";
         if (failed(tagAs(tt::IOType::OUTPUT)))
           return failure();
       }
