@@ -9,8 +9,10 @@
 #include "triton/Dialect/Triton/IR/Dialect.h"
 #include "triton/Dialect/TritonGPU/IR/Dialect.h"
 
-#define GET_OP_CLASSES
 #include "npu/include/Dialect/TritonTenstorrent/IR/Dialect.h.inc"
+#include "npu/include/Dialect/TritonTenstorrent/IR/OpsEnums.h.inc"
+
+#define GET_OP_CLASSES
 #include "npu/include/Dialect/TritonTenstorrent/IR/Ops.h.inc"
 
 #endif // TRITON_DIALECT_TRITONTENSTORRENT_IR_DIALECT_H_

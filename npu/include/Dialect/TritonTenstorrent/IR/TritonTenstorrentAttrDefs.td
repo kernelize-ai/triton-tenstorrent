@@ -2,10 +2,20 @@
 #define TRITONTENSTORRENT_ATTRDEFS
 
 include "mlir/IR/AttrTypeBase.td"
+include "mlir/IR/EnumAttr.td"
 
 include "npu/include/Dialect/TritonTenstorrent/IR/TritonTenstorrentDialect.td"
-include "triton/Dialect/Triton/IR/TritonInterfaces.td" // might not need this?
-include "triton/Dialect/TritonGPU/IR/TritonGPUAttrDefs.td" // might not need this?
+include "triton/Dialect/TritonGPU/IR/TritonGPUAttrDefs.td"
+
+
+def TritonTenstorrent_IOTypeAttr : I32EnumAttr<
+    "IOType", "",
+    [
+        I32EnumAttrCase<"INPUT", 1, "input">,
+        I32EnumAttrCase<"OUTPUT", 2, "output">,
+    ]> {
+    let cppNamespace = "::mlir::triton::npu::tt";
+}
 
 def TiledEncodingAttr : AttrDef<TritonTenstorrent_Dialect, "TiledEncoding", [DistributedEncodingTrait, LayoutEncodingTrait]> {
   let mnemonic = "tiled_encoding";
