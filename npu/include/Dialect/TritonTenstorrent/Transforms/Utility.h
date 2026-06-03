@@ -21,7 +21,7 @@ void setStoreLikeValue(Operation *op, Value v);
 
 class TensorDescriptorUnpacked {
 public:
-  TensorDescriptorUnpacked(TensorDescType type, ValueRange pack);
+  TensorDescriptorUnpacked(TensorDescType type, Value desc);
 
   Value generatePtr(OpBuilder &builder, const Location &loc,
                     ArrayRef<int64_t> blockShape, ValueRange offsets);
@@ -44,15 +44,16 @@ public:
   Value getPtr() const { return base; }
 
 protected:
+  void captureTensorDescriptor(TensorDescType type, Value desc);
+
   Value generateOffsetsFromOffsetRanges(OpBuilder &builder, Location loc,
                                         ArrayRef<int64_t> blockShape,
                                         ValueRange tileBaseOffsets,
                                         ValueRange offsetRanges);
 
   Value base;
-  ValueRange shape;
-  ValueRange strides;
-  Value paddingOption;
+  SmallVector<Value> shape;
+  SmallVector<Value> strides;
 };
 
 /// Walk up the stack to find the offset of the register buffer for the given
