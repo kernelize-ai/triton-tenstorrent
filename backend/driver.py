@@ -278,6 +278,7 @@ class TTRTUtils(object):
         if self._device is None:
             import ttrt.runtime
             mesh_options = ttrt.runtime.MeshDeviceOptions()
+            mesh_options.mesh_shape = (1, 1)
             self._device = ttrt.runtime.open_mesh_device(mesh_options)
         return self._device
 
