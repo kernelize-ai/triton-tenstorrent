@@ -470,7 +470,7 @@ class CPUDriver(DriverBase):
         return self.runtime.get_device(device_id)
 
     def __init__(self):
-        if (use_ttrt := os.environ.get("TRITON_TTMLIR_TARGET", "")) == "d2m":
+        if os.environ.get("TRITON_TTMLIR_TARGET", "") == "d2m":
             self.utils = TTRTUtils()
             import torch
             self.get_current_stream = lambda idx: torch.cpu.Stream()  # TODO: maybe ttrt/pjrt here?

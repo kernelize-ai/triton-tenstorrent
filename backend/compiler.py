@@ -55,7 +55,7 @@ class CPUBackend(BaseBackend):
 
     def __init__(self, target: GPUTarget) -> None:
         super().__init__(target)
-        self.binary_ext = "flatbuffer"  # TODO: pick based on runtime/d2m path
+        self.binary_ext = "flatbuffer" if os.environ.get("TRITON_TTMLIR_TARGET", "") == "d2m" else "cpp"
         self.device = 'Tenstorrent'
 
     def parse_options(self, options):
