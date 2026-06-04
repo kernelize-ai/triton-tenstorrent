@@ -51,10 +51,12 @@ struct ConvertTritonFunc : public OpConversionPattern<triton::FuncOp> {
     Block &oldEntry = funcOp.getBody().front();
 
     SmallVector<Type> convertedArgTypes;
+    SmallVector<Location> argLocs;
     DenseMap<unsigned, Type>
         tensorArgsMap; // maps new argument index to the original triton type
 
-    for (Type argType : tritonTy.getInputs()) {
+    for (auto [argType, oldArg] :
+         llvm::zip(tritonTy.getInputs(), oldEntry.getArguments())) {
       if (auto tensorTy = dyn_cast<RankedTensorType>(argType)) {
         if (isa<PointerType>(tensorTy.getElementType())) {
           // TODO: need to handle the pointer path... don't forget
@@ -100,6 +102,7 @@ struct ConvertTritonFunc : public OpConversionPattern<triton::FuncOp> {
 
         convertedArgTypes.push_back(
             makeDynamicTensorTy(blockTensorTy, ttnnLayout));
+        argLocs.append(expandedTypes.size(), oldArg.getLoc());
 
         convertedArgTypes.append(expandedTypes.begin() + 1,
                                  expandedTypes.end());
@@ -107,11 +110,21 @@ struct ConvertTritonFunc : public OpConversionPattern<triton::FuncOp> {
       }
       auto convertedType = typeConverter->convertType(argType);
       convertedArgTypes.push_back(convertedType);
+      argLocs.push_back(oldArg.getLoc());
     }
 
-    // add block start/block end args
+    // Add block start/block end arguments with appropriate NameLocs:
+    // %block_start, %block_end.
     convertedArgTypes.push_back(rewriter.getI32Type()); // block start
+    auto blockStartLoc =
+        NameLoc::get(StringAttr::get(context, "block_start"),
+                     FileLineColLoc::get(context, __FILE__, __LINE__, 0));
+    argLocs.push_back(blockStartLoc);
+    auto blockEndLoc =
+        NameLoc::get(StringAttr::get(context, "block_end"),
+                     FileLineColLoc::get(context, __FILE__, __LINE__, 0));
     convertedArgTypes.push_back(rewriter.getI32Type()); // block end
+    argLocs.push_back(blockEndLoc);
 
     auto newFuncType =
         rewriter.getFunctionType(convertedArgTypes, /*results=*/{});
@@ -122,7 +135,6 @@ struct ConvertTritonFunc : public OpConversionPattern<triton::FuncOp> {
 
     // Create the function entry block with converted arg types as block args.
     Region &newRegion = newFunc.getBody();
-    SmallVector<Location> argLocs(convertedArgTypes.size(), loc);
     Block *newEntry = rewriter.createBlock(&newRegion, newRegion.end(),
                                            convertedArgTypes, argLocs);
 

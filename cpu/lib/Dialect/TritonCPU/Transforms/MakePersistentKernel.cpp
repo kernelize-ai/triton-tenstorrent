@@ -114,6 +114,18 @@ static triton::FuncOp cloneTTFuncWithExtraI32Arg(ModuleOp mod,
   Block &oldEntry = src.getBody().front();
   Block &newEntry = newFunc.getBody().front();
 
+  // Replace the locations of the new block arguments with those of the old
+  // block arguments (clobbered by `FIXME` in addEntryBlock()).
+  for (auto [oldArg, newArg] : llvm::zip(
+           oldEntry.getArguments(),
+           newEntry.getArguments().take_front(oldEntry.getNumArguments())))
+    newArg.setLoc(oldArg.getLoc());
+
+  // Give the extra block-index argument a NameLoc: %block_idx.
+  newEntry.getArguments().back().setLoc(
+      NameLoc::get(StringAttr::get(ctx, "block_idx"),
+                   FileLineColLoc::get(ctx, __FILE__, __LINE__, 0)));
+
   IRMapping map;
   // Map old BB args -> new BB args (1:1 for the original args).
   for (auto it : llvm::zip(
@@ -150,8 +162,15 @@ static triton::FuncOp buildWrapper(ModuleOp mod, triton::FuncOp kernel,
                 b.getStringAttr("public"));
 
   Block *entry = wrap.addEntryBlock();
-  OpBuilder wb(entry, entry->end());
 
+  // Like cloneTTFuncWithExtraI32Arg above, preserve old NameLocs clobbered
+  // by the `FIXME` in addEntryBlock().
+  Block &kernelEntry = kernel.getBody().front();
+  for (auto [kernelArg, wrapArg] :
+       llvm::zip(kernelEntry.getArguments(), entry->getArguments()))
+    wrapArg.setLoc(kernelArg.getLoc());
+
+  OpBuilder wb(entry, entry->end());
   Value bEnd = triton::cpu::BlockEndOp::create(wb, wrap.getLoc(), i32Ty);
   Value bStart = triton::cpu::BlockStartOp::create(wb, wrap.getLoc(), i32Ty);
   Value bStep = arith::ConstantOp::create(wb, wrap.getLoc(), i32Ty,
