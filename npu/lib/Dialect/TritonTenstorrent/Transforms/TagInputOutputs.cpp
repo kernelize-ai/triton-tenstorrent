@@ -53,7 +53,15 @@ private:
     unsigned idx = arg.getArgNumber();
 
     SetVector<Operation *> slice;
-    mlir::getForwardSlice(arg, &slice);
+    mlir::ForwardSliceOptions opts;
+    opts.filter = [&](Operation *op) {
+      if (isa<triton::LoadOp, triton::DescriptorLoadOp, triton::StoreOp,
+              triton::DescriptorStoreOp>(op)) {
+        return llvm::is_contained(op->getOperands(), arg);
+      }
+      return true;
+    };
+    mlir::getForwardSlice(arg, &slice, opts);
 
     // Tag the argument with `desired`, failing if it was already tagged with a
     // conflicting io_type (i.e. used as both an input and an output).
