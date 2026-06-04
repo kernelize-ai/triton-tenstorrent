@@ -39,13 +39,20 @@ struct ConvertTritonFunc : public OpConversionPattern<triton::FuncOp> {
   // and add the expanded values to the function signature to match the triton
   // runtime. For scalar args, just use the type converter.
   LogicalResult
-  convertTritonFunctionArgs(mlir::FunctionType tritonTy, Block &oldEntry,
+  convertTritonFunctionArgs(Block &oldEntry,
                             SmallVector<Type> &convertedArgTypes,
                             SmallVector<Location> &argLocs, Type &returnType,
                             DenseMap<unsigned, Type> &tensorArgsMap,
                             ConversionPatternRewriter &rewriter) const {
-    for (auto [argType, oldArg] :
-         llvm::zip(tritonTy.getInputs(), oldEntry.getArguments())) {
+    auto makeDynamicTensorTy = [](RankedTensorType tensorTy,
+                                  Attribute encoding) {
+      SmallVector<int64_t> dynShape(tensorTy.getRank(), ShapedType::kDynamic);
+      return RankedTensorType::get(dynShape, tensorTy.getElementType(),
+                                   encoding);
+    };
+
+    for (auto oldArg : oldEntry.getArguments()) {
+      Type argType = oldArg.getType();
       if (auto tensorTy = dyn_cast<RankedTensorType>(argType)) {
         if (isa<PointerType>(tensorTy.getElementType())) {
           return emitError(oldArg.getLoc(), "pointer types not yet supported");
@@ -53,13 +60,7 @@ struct ConvertTritonFunc : public OpConversionPattern<triton::FuncOp> {
       }
       if (auto tensorDescTy = dyn_cast<triton::TensorDescType>(argType)) {
         auto blockTensorTy = tensorDescTy.getBlockType();
-        auto makeDynamicTensorTy = [](RankedTensorType tensorTy,
-                                      Attribute encoding) {
-          SmallVector<int64_t> dynShape(tensorTy.getRank(),
-                                        ShapedType::kDynamic);
-          return RankedTensorType::get(dynShape, tensorTy.getElementType(),
-                                       encoding);
-        };
+
         tensorArgsMap[convertedArgTypes.size()] = tensorDescTy;
 
         SmallVector<Type> expandedTypes;
@@ -136,8 +137,8 @@ struct ConvertTritonFunc : public OpConversionPattern<triton::FuncOp> {
     // 1. Convert function arguments and add tenstorrent specific args (block
     // start/end)
     Type returnType;
-    if (failed(convertTritonFunctionArgs(tritonTy, oldEntry, convertedArgTypes,
-                                         argLocs, returnType, tensorArgsMap,
+    if (failed(convertTritonFunctionArgs(oldEntry, convertedArgTypes, argLocs,
+                                         returnType, tensorArgsMap,
                                          rewriter))) {
       return rewriter.notifyMatchFailure(
           funcOp, "failed to convert function arguments");
