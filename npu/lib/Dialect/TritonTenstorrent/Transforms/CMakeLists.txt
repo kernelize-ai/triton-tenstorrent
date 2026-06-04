@@ -9,6 +9,7 @@ add_triton_library(TritonTenstorrentTransforms
     RegAlloc.cpp
     RemoveDotLoadLayoutConversions.cpp
     RemoveRedundantMasks.cpp
+    TagInputOutputs.cpp
     Utility.cpp
 
     DEPENDS

@@ -77,6 +77,9 @@ void init_triton_npu_passes_tenstorrent(py::module &&m) {
   m.def("add_convert_compute_ops", [](mlir::PassManager &pm) {
     pm.addPass(mlir::triton::npu::createTritonTenstorrentConvertComputeOps());
   });
+  m.def("add_tag_ios", [](mlir::PassManager &pm) {
+    pm.addPass(mlir::triton::npu::createTritonTenstorrentTagInputOutputs());
+  });
   m.def("add_accelerate_matmul", [](mlir::PassManager &pm) {
     pm.addPass(mlir::triton::npu::createTritonTenstorrentAccelerateMatmul());
   });

@@ -10,6 +10,8 @@
 
 #include "npu/include/Dialect/TritonTenstorrent/IR/Dialect.cpp.inc"
 
+#include "npu/include/Dialect/TritonTenstorrent/IR/OpsEnums.cpp.inc"
+
 using namespace mlir;
 using namespace mlir::triton;
 using namespace mlir::triton::npu;

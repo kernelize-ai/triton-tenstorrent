@@ -225,6 +225,8 @@ class CPUBackend(BaseBackend):
         passes.common.add_cse(pm)
         passes.common.add_canonicalizer(pm)
 
+        cpu.passes.tenstorrent.add_tag_ios(pm)
+
         sys_desc_path = os.getenv("TT_SYSTEM_DESC_PATH", "")
         cpu.passes.tenstorrent.add_ttcore_register_device_pass(pm, sys_desc_path)
 

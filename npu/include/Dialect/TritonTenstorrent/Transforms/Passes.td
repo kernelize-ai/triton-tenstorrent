@@ -3,6 +3,16 @@
 
 include "mlir/Pass/PassBase.td"
 
+def TritonTenstorrentTagInputOutputs : Pass<"tritontenstorrent-tag-ios", "mlir::ModuleOp"> {
+    let summary = "Tag tensor-typed function arguments with input or output arguments based on usage in load/store ops";
+
+    let description = [{
+        The Tenstorrent D2M lower requires that the host function return output tensors and that the input tensors are passed separately to d2m.Generic/ttnn.Generic ops. This pass analyzes the tensor type function arguments and traces their usage to load/stores to determine whether they are used as inputs or outputs. We add the appropriate attribute to the tensor argument for the FuncOpToD2M lowering pass to read when triton func ops are converted to Tenstorrent-compatible Func ops, and D2M.GenericOp is injected into the kernel.
+    }];
+
+    let dependentDialects = ["mlir::triton::npu::tt::TritonTenstorrentDialect"];
+}
+
 def TritonTenstorrentAccelerateMatmul : Pass<"tritontenstorrent-accelerate-matmul",  "mlir::ModuleOp"> {
     let summary = "accelerate matmul";
 
