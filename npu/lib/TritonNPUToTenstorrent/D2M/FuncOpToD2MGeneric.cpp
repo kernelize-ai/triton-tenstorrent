@@ -31,6 +31,9 @@ namespace experimental {
 namespace {
 
 struct ArgConversionHelper {
+  // map the converted arg index to the original memref type for tensor
+  // arguments so that we can create the appropriate layout cast to pass the
+  // function argument to the d2m.genericop
   DenseMap<unsigned, MemRefType> inputTensorMap;
   DenseMap<unsigned, MemRefType> outputTensorMap;
   SmallVector<Type> convertedArgTypes;
@@ -42,8 +45,52 @@ struct ArgConversionHelper {
                                          ConversionPatternRewriter &rewriter,
                                          const TypeConverter *typeConverter);
 
-  Block *generateNewFunction(triton::FuncOp origFunc,
-                             ConversionPatternRewriter &rewriter);
+  func::FuncOp generateNewFunction(triton::FuncOp origFunc,
+                                   ConversionPatternRewriter &rewriter);
+
+  SmallVector<Value> getScalarArgs(func::FuncOp newFunc) const {
+    auto filtered = llvm::make_filter_range(
+        llvm::enumerate(newFunc.getArguments()), [&](auto indexedArg) {
+          auto [index, arg] = indexedArg;
+          return inputTensorMap.count(index) == 0 &&
+                 outputTensorMap.count(index) == 0;
+        });
+    return llvm::to_vector(llvm::map_range(
+        filtered, [](auto indexedArg) -> Value { return indexedArg.value(); }));
+  }
+
+  SmallVector<Value>
+  generateInputArgs(func::FuncOp newFunc,
+                    ConversionPatternRewriter &rewriter) const {
+    SmallVector<Value> inputArgs;
+    for (auto [index, memrefType] : inputTensorMap) {
+      auto arg = newFunc.getArgument(index);
+      auto layoutCast = ttir::TTNNMetalLayoutCastOp::create(
+          rewriter, arg.getLoc(), memrefType, arg);
+      inputArgs.push_back(layoutCast.getResult());
+    }
+    return inputArgs;
+  }
+
+  SmallVector<Value>
+  generateOutputArgs(func::FuncOp newFunc,
+                     ConversionPatternRewriter &rewriter) const {
+    SmallVector<Value> outputArgs;
+    for (auto [index, memrefType] : outputTensorMap) {
+      auto arg = newFunc.getArgument(index);
+      auto layoutCast = ttir::TTNNMetalLayoutCastOp::create(
+          rewriter, arg.getLoc(), memrefType, arg);
+      outputArgs.push_back(layoutCast.getResult());
+    }
+    return outputArgs;
+  }
+
+  bool isInputTensorArg(unsigned index) const {
+    return inputTensorMap.count(index) > 0;
+  }
+  bool isOutputTensorArg(unsigned index) const {
+    return outputTensorMap.count(index) > 0;
+  }
 };
 
 LogicalResult ArgConversionHelper::convertFunctionArguments(
@@ -57,7 +104,7 @@ LogicalResult ArgConversionHelper::convertFunctionArguments(
   };
 
   Block &oldEntry = funcOp.getBody().front();
-  for (auto oldArg : oldEntry.getArguments()) {
+  for (auto [idx, oldArg] : llvm::enumerate(oldEntry.getArguments())) {
     Type argType = oldArg.getType();
     if (auto tensorTy = dyn_cast<RankedTensorType>(argType)) {
       if (isa<PointerType>(tensorTy.getElementType())) {
@@ -94,6 +141,22 @@ LogicalResult ArgConversionHelper::convertFunctionArguments(
               .build();
 
       // TODO: read attribute from funcOp, put in appropraite input/output list
+      // TODO: define attribute name in dialect
+      auto ioTypeAttr = dyn_cast_or_null<tt::IOTypeAttr>(
+          funcOp.getArgAttr(idx, "triton_tenstorrent.io_type"));
+      if (!ioTypeAttr) {
+        return rewriter.notifyMatchFailure(
+            funcOp, "missing IOType attribute on tensor argument");
+      }
+      if (ioTypeAttr.getValue() == tt::IOType::INPUT) {
+        inputTensorMap.insert({convertedArgTypes.size(), perCoreMemRef});
+      } else if (ioTypeAttr.getValue() == tt::IOType::OUTPUT) {
+        outputTensorMap.insert({convertedArgTypes.size(), perCoreMemRef});
+      } else {
+        return rewriter.notifyMatchFailure(
+            funcOp, "unexpected IOType value on tensor argument");
+      }
+
       convertedArgTypes.push_back(
           makeDynamicTensorTy(blockTensorTy, ttnnLayout));
       argLocs.append(expandedTypes.size(), oldArg.getLoc());
@@ -127,18 +190,20 @@ LogicalResult ArgConversionHelper::convertFunctionArguments(
   return success();
 }
 
-Block *
+func::FuncOp
 ArgConversionHelper::generateNewFunction(triton::FuncOp origFunc,
                                          ConversionPatternRewriter &rewriter) {
   assert(outputTensorMap.size() == 1 &&
          "currently only support one output tensor argument");
-  Type returnType = outputTensorMap.begin()->second.getElementType();
+  // the new function returns a tensor, not a memref
+  Type returnType = convertedArgTypes[outputTensorMap.begin()->first];
 
   auto newFuncType =
       rewriter.getFunctionType(convertedArgTypes, /*results=*/{returnType});
 
   LDBG("Converting function " << origFunc.getFunctionType()
                               << " to new function type: " << newFuncType);
+
   auto newFunc = func::FuncOp::create(rewriter, origFunc.getLoc(),
                                       origFunc.getName(), newFuncType);
   ttmlir::utils::setFunctionType(newFunc,
@@ -147,7 +212,7 @@ ArgConversionHelper::generateNewFunction(triton::FuncOp origFunc,
   Region &newRegion = newFunc.getBody();
   Block *newEntry = rewriter.createBlock(&newRegion, newRegion.end(),
                                          convertedArgTypes, argLocs);
-  return newEntry;
+  return newFunc;
 }
 
 struct ConvertTritonFunc : public OpConversionPattern<triton::FuncOp> {
@@ -284,8 +349,8 @@ struct ConvertTritonFunc : public OpConversionPattern<triton::FuncOp> {
     //  << tritonTy " arguments to Tenstorrent compatible function signature: "
     //  << convertedArgTypes);
 #if 1
-    Block *newEntry = helper.generateNewFunction(funcOp, rewriter);
-    assert(false && "TODO");
+    func::FuncOp newFunc = helper.generateNewFunction(funcOp, rewriter);
+    Block *newEntry = &newFunc.getBody().front();
 #else
     assert(false && "TODO");
 
@@ -317,16 +382,11 @@ struct ConvertTritonFunc : public OpConversionPattern<triton::FuncOp> {
 #endif
     // 3. populate the new function body with a d2m.generic op
     rewriter.setInsertionPointToStart(newEntry);
-    SmallVector<Value> newFuncArgs(
-        newEntry->getNumArguments()); // for remapping
+    // SmallVector<Value> newFuncArgs(
+    //     newEntry->getNumArguments()); // for remapping
     SmallVector<Value> tensorArgs, scalarArgs;
     SmallVector<unsigned> tensorArgIndices;
 #if 1
-    for (auto [index, type] : tensorIndexToMemrefType) {
-      llvm::errs() << "tensor arg index: " << index << ", memref type: " << type
-                   << "\n";
-      assert(false && "TODO");
-    }
 #else
     for (auto [i, arg] : llvm::enumerate(newEntry->getArguments())) {
       auto it = tensorArgsMap.find(i);
@@ -367,27 +427,31 @@ struct ConvertTritonFunc : public OpConversionPattern<triton::FuncOp> {
         rewriter.getAttr<d2m::ThreadAttr>(d2m::ThreadType::Unified));
     auto emptyAttr = rewriter.getArrayAttr({});
 
-    auto genericOp = rewriter.create<d2m::GenericOp>(
-        loc,
-        /*results=*/TypeRange{},
-        /*inputs=*/ValueRange{tensorArgs[0], tensorArgs[1]}, // TODO: proper
-                                                             // input/output
-                                                             // tagging, I'm
-                                                             // cheating here!
-        /*outputs=*/ValueRange{tensorArgs[2]}, // TODO: d2m.generic verifier
-                                               // requires one output
-        /*additionalArgs=*/scalarArgs,
-        /*grid=*/grid,
-        /*block_factors=*/emptyAttr,
-        /*indexing_maps=*/emptyAttr,
-        /*iterator_types=*/emptyAttr,
-        /*threads=*/threadsAttr,
-        /*scratch_inputs=*/nullptr,
-        /*regionsCount=*/1);
+    // generate casts from the converted function args to the types expected by
+    // the d2m.generic op
+    SmallVector<Value> inputArgs = helper.generateInputArgs(newFunc, rewriter);
+    SmallVector<Value> outputArgs =
+        helper.generateOutputArgs(newFunc, rewriter);
 
+    auto genericOp =
+        d2m::GenericOp::create(rewriter, loc,
+                               /*results=*/TypeRange{},
+                               /*inputs=*/inputArgs,
+                               /*outputs=*/outputArgs,
+                               /*additionalArgs=*/helper.getScalarArgs(newFunc),
+                               /*grid=*/grid,
+                               /*block_factors=*/emptyAttr,
+                               /*indexing_maps=*/emptyAttr,
+                               /*iterator_types=*/emptyAttr,
+                               /*threads=*/threadsAttr,
+                               /*scratch_inputs=*/nullptr,
+                               /*regionsCount=*/1);
+
+    assert(helper.outputTensorMap.size() == 1 &&
+           "currently only support one output tensor argument");
     auto resultTensor =
-        newEntry->getArgument(tensorArgIndices.back()); // TODO: hacked
-    rewriter.create<func::ReturnOp>(loc, resultTensor);
+        newFunc.getArgument(helper.outputTensorMap.begin()->first);
+    func::ReturnOp::create(rewriter, loc, resultTensor);
 
     // 4. Populate the generic's region with the old triton body.
     //
@@ -405,26 +469,36 @@ struct ConvertTritonFunc : public OpConversionPattern<triton::FuncOp> {
 
       SmallVector<Value> argReplacements;
       unsigned convertedIdx = 0;
+      unsigned crtInputIndex = 0, crtOutputIndex = 0;
       for (BlockArgument oldArg : oldEntry.getArguments()) {
         Type oldType = oldArg.getType();
         SmallVector<Type> convertedTypes;
         (void)typeConverter->convertType(oldType, convertedTypes);
 
-        SmallVector<Value> convertedVals(newFuncArgs.begin() + convertedIdx,
-                                         newFuncArgs.begin() + convertedIdx +
-                                             convertedTypes.size());
-        convertedIdx += convertedTypes.size();
-
         if (convertedTypes.size() == 1 && convertedTypes[0] == oldType) {
           // Identity conversion: use the converted arg directly.
-          argReplacements.push_back(convertedVals[0]);
+          argReplacements.push_back(newEntry->getArgument(convertedIdx));
         } else {
           // Reconstruct the original type from the expanded converted values.
+          SmallVector<Value> convertedVals(
+              newEntry->getArguments().begin() + convertedIdx,
+              newEntry->getArguments().begin() + convertedIdx +
+                  convertedTypes.size());
+          // overwrite the converted values from the function arguments with the
+          // appropriate layout casts generated by the helper which will be
+          // forwarded through the generic
+          if (helper.isInputTensorArg(convertedIdx))
+            convertedVals[0] = inputArgs[crtInputIndex++];
+          else if (helper.isOutputTensorArg(convertedIdx))
+            convertedVals[0] = outputArgs[crtOutputIndex++];
+
           Value materialized = typeConverter->materializeSourceConversion(
               rewriter, loc, oldType, convertedVals);
           assert(materialized && "expected source materialization to succeed");
           argReplacements.push_back(materialized);
         }
+
+        convertedIdx += convertedTypes.size();
       }
 
       // Move the old triton body into the generic's region and merge the
