@@ -28,10 +28,11 @@ cd "$REPO_ROOT/third_party/tt-mlir" || exit 1
 export _ACTIVATE_ECHO_TOOLCHAIN_DIR_AND_EXIT=""
 source env/activate
 
-if ! python -c "import nanobind; assert nanobind.__version__ == '2.10'" 2>/dev/null; then
+if ! python -c "import nanobind, sys; sys.exit(nanobind.__version__ != '2.10.2')" 2>/dev/null; then
     echo "Installing tt-mlir python dependencies"
-    python -m pip install 'nanobind==2.10'
+    python -m pip install 'nanobind==2.10.2'
 fi
+
 
 LLVM_LIBRARY_DIR="$LLVM_BUILD_DIR/lib"
 MLIR_DIR="$LLVM_LIBRARY_DIR/cmake/mlir"
