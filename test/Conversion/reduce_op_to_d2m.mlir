@@ -15,7 +15,7 @@ module attributes {"ttg.num-ctas" = 1 : i32, "ttg.num-warps" = 1 : i32, ttg.targ
 
   // CHECK-LABEL: func.func @reduce_sum_f16
   tt.func public @reduce_sum_f16(
-      %in_desc: !tt.tensordesc<tensor<32x2048xf16>>, %row: i32, %col: i32)
+      %in_desc: !tt.tensordesc<tensor<32x2048xf16>> {triton_tenstorrent.io_type = #triton_tenstorrent.io_type<input>}, %out_desc: !tt.tensordesc<tensor<1024xbf16>> {triton_tenstorrent.io_type = #triton_tenstorrent.io_type<output>}, %row: i32, %col: i32)
       attributes {noinline = false} {
     // CHECK-DAG: %[[SRC:.*]] = memref.alloc() : memref<1x64x!ttcore.tile<32x32, f16>
     // CHECK-DAG: %[[DST:.*]] = memref.alloc() : memref<1x!ttcore.tile<32x32, f16>
@@ -37,6 +37,10 @@ module attributes {"ttg.num-ctas" = 1 : i32, "ttg.num-warps" = 1 : i32, ttg.targ
     // CHECK: d2m.tile_reduce_sum
     // CHECK-SAME: reduce_dim = #d2m<reduce_dim R>
     // CHECK: linalg.yield
+
+    // TODO: D2M Generic currently requires an output
+    %cst = arith.constant dense<0.000000e+00> : tensor<1024xbf16, #tiled_1d>
+    tt.descriptor_store %out_desc[%row], %cst : !tt.tensordesc<tensor<1024xbf16>>, tensor<1024xbf16, #tiled_1d>
     tt.return
   }
 
@@ -47,7 +51,7 @@ module attributes {"ttg.num-ctas" = 1 : i32, "ttg.num-warps" = 1 : i32, ttg.targ
 
   // CHECK-LABEL: func.func @reduce_sum_f32
   tt.func public @reduce_sum_f32(
-      %in_desc: !tt.tensordesc<tensor<64x64xf32>>, %row: i32, %col: i32)
+      %in_desc: !tt.tensordesc<tensor<64x64xf32>> {triton_tenstorrent.io_type = #triton_tenstorrent.io_type<input>}, %out_desc: !tt.tensordesc<tensor<1024xbf16>> {triton_tenstorrent.io_type = #triton_tenstorrent.io_type<output>}, %row: i32, %col: i32)
       attributes {noinline = false} {
     // CHECK-DAG: %[[SRC:.*]] = memref.alloc() : memref<2x2x!ttcore.tile<32x32, f32>
     // CHECK-DAG: %[[DST:.*]] = memref.alloc() : memref<2x!ttcore.tile<32x32, f32>
@@ -69,6 +73,10 @@ module attributes {"ttg.num-ctas" = 1 : i32, "ttg.num-warps" = 1 : i32, ttg.targ
     // CHECK: d2m.tile_reduce_sum
     // CHECK-SAME: reduce_dim = #d2m<reduce_dim R>
     // CHECK: linalg.yield
+
+    // TODO: D2M Generic currently requires an output
+    %cst = arith.constant dense<0.000000e+00> : tensor<1024xbf16, #tiled_1d>
+    tt.descriptor_store %out_desc[%row], %cst : !tt.tensordesc<tensor<1024xbf16>>, tensor<1024xbf16, #tiled_1d>
     tt.return
   }
 
@@ -79,7 +87,7 @@ module attributes {"ttg.num-ctas" = 1 : i32, "ttg.num-warps" = 1 : i32, ttg.targ
 
   // CHECK-LABEL: func.func @reduce_max_f32
   tt.func public @reduce_max_f32(
-      %in_desc: !tt.tensordesc<tensor<128x128xf32>>, %row: i32, %col: i32)
+      %in_desc: !tt.tensordesc<tensor<128x128xf32>> {triton_tenstorrent.io_type = #triton_tenstorrent.io_type<input>}, %out_desc: !tt.tensordesc<tensor<1024xbf16>> {triton_tenstorrent.io_type = #triton_tenstorrent.io_type<output>}, %row: i32, %col: i32)
       attributes {noinline = false} {
     // CHECK-DAG: %[[SRC:.*]] = memref.alloc() : memref<4x4x!ttcore.tile<32x32, f32>
     // CHECK-DAG: %[[DST:.*]] = memref.alloc() : memref<4x!ttcore.tile<32x32, f32>
@@ -101,6 +109,10 @@ module attributes {"ttg.num-ctas" = 1 : i32, "ttg.num-warps" = 1 : i32, ttg.targ
     // CHECK: d2m.tile_reduce_max
     // CHECK-SAME: reduce_dim = #d2m<reduce_dim C>
     // CHECK: linalg.yield
+
+    // TODO: D2M Generic currently requires an output
+    %cst = arith.constant dense<0.000000e+00> : tensor<1024xbf16, #tiled_1d>
+    tt.descriptor_store %out_desc[%row], %cst : !tt.tensordesc<tensor<1024xbf16>>, tensor<1024xbf16, #tiled_1d>
     tt.return
   }
 
@@ -110,7 +122,7 @@ module attributes {"ttg.num-ctas" = 1 : i32, "ttg.num-warps" = 1 : i32, ttg.targ
 
   // CHECK-LABEL: func.func @reduce_sum_bf16_1d
   tt.func public @reduce_sum_bf16_1d(
-      %in_desc: !tt.tensordesc<tensor<1024xbf16>>, %row: i32)
+      %in_desc: !tt.tensordesc<tensor<1024xbf16>> {triton_tenstorrent.io_type = #triton_tenstorrent.io_type<input>}, %out_desc: !tt.tensordesc<tensor<1024xbf16>> {triton_tenstorrent.io_type = #triton_tenstorrent.io_type<output>}, %row: i32)
       attributes {noinline = false} {
     // CHECK: %[[SRC:.*]] = memref.alloc() : memref<1x!ttcore.tile<32x32, bf16>
     // CHECK: %[[DST:.*]] = memref.alloc() : memref<1x!ttcore.tile<32x32, bf16>
@@ -132,6 +144,10 @@ module attributes {"ttg.num-ctas" = 1 : i32, "ttg.num-warps" = 1 : i32, ttg.targ
     // CHECK: d2m.tile_reduce_sum
     // CHECK-SAME: reduce_dim = #d2m<reduce_dim RC>
     // CHECK: linalg.yield
+
+    // TODO: D2M Generic currently requires an output
+    %cst = arith.constant dense<0.000000e+00> : tensor<1024xbf16, #tiled_1d>
+    tt.descriptor_store %out_desc[%row], %cst : !tt.tensordesc<tensor<1024xbf16>>, tensor<1024xbf16, #tiled_1d>
     tt.return
   }
 
