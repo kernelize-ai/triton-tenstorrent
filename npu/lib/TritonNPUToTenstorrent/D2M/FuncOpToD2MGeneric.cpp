@@ -150,16 +150,14 @@ LogicalResult ArgConversionHelper::convertFunctionArguments(
       auto ioTypeAttr = dyn_cast_or_null<tt::IOTypeAttr>(
           funcOp.getArgAttr(idx, "triton_tenstorrent.io_type"));
       if (!ioTypeAttr) {
-        return rewriter.notifyMatchFailure(
-            funcOp, "missing IOType attribute on tensor argument");
+        return funcOp.emitError("missing IOType attribute on tensor argument");
       }
       if (ioTypeAttr.getValue() == tt::IOType::INPUT) {
         inputTensorMap.insert({convertedArgTypes.size(), perCoreMemRef});
       } else if (ioTypeAttr.getValue() == tt::IOType::OUTPUT) {
         outputTensorMap.insert({convertedArgTypes.size(), perCoreMemRef});
       } else {
-        return rewriter.notifyMatchFailure(
-            funcOp, "unexpected IOType value on tensor argument");
+        return funcOp.emitError("unexpected IOType value on tensor argument");
       }
 
       convertedArgTypes.push_back(
@@ -227,8 +225,7 @@ struct ConvertTritonFunc : public OpConversionPattern<triton::FuncOp> {
   matchAndRewrite(triton::FuncOp funcOp, OpAdaptor adaptor,
                   ConversionPatternRewriter &rewriter) const override {
     if (!triton::isKernel(funcOp)) {
-      return rewriter.notifyMatchFailure(
-          funcOp, "non-kernel functions are not yet supported");
+      return funcOp.emitError("non-kernel functions are not yet supported");
     }
 
     Location loc = funcOp.getLoc();
@@ -247,8 +244,7 @@ struct ConvertTritonFunc : public OpConversionPattern<triton::FuncOp> {
     // start/end)
     if (failed(helper.convertFunctionArguments(funcOp, rewriter,
                                                getTypeConverter()))) {
-      return rewriter.notifyMatchFailure(
-          funcOp, "failed to convert function arguments");
+      return funcOp.emitError("failed to convert function arguments");
     }
 
     // 2. Generate the new function with converted signature and a single entry
