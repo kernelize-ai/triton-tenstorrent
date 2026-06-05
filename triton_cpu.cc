@@ -140,21 +140,6 @@ void init_triton_npu_passes_tenstorrent(py::module &&m) {
   m.def("add_ttkernel_hoist_inits", [](mlir::PassManager &pm) {
     pm.addPass(mlir::tt::ttkernel::createTTKernelHoistInits());
   });
-
-  m.def("serialize_ttnn_to_flatbuffer", [](mlir::ModuleOp module) -> py::bytes {
-    std::unordered_map<
-        std::string, std::unordered_map<std::uint32_t, mlir::tt::GoldenTensor>>
-        goldenMap;
-    std::vector<std::pair<std::string, std::string>> moduleCache;
-
-    std::string buffer;
-    llvm::raw_string_ostream os(buffer);
-    if (mlir::failed(mlir::tt::ttnn::translateTTNNToFlatbuffer(
-            module.getOperation(), os, goldenMap, moduleCache))) {
-      throw std::runtime_error("Failed to serialize TTNN flatbuffer");
-    }
-    return py::bytes(buffer);
-  });
 }
 
 void init_tenstorrent_d2m_passes(py::module &&m) {
@@ -346,6 +331,21 @@ void init_triton_cpu(py::module &&m) {
                "failed to translate kernel func to C++");
         return py::str(cppCode);
       });
+
+  m.def("serialize_ttnn_to_flatbuffer", [](mlir::ModuleOp module) -> py::bytes {
+    std::unordered_map<
+        std::string, std::unordered_map<std::uint32_t, mlir::tt::GoldenTensor>>
+        goldenMap;
+    std::vector<std::pair<std::string, std::string>> moduleCache;
+
+    std::string buffer;
+    llvm::raw_string_ostream os(buffer);
+    if (mlir::failed(mlir::tt::ttnn::translateTTNNToFlatbuffer(
+            module.getOperation(), os, goldenMap, moduleCache))) {
+      throw std::runtime_error("Failed to serialize TTNN flatbuffer");
+    }
+    return py::bytes(buffer);
+  });
 
   m.def("load_dialects",
         [](mlir::MLIRContext &context, const std::string &device) {

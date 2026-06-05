@@ -400,8 +400,7 @@ class CPUBackend(BaseBackend):
         assert len(names) == 1
         metadata["name"] = names[0]
 
-        # TODO: out of passes namespace...
-        fb = cpu.passes.tenstorrent.serialize_ttnn_to_flatbuffer(mod)
+        fb = cpu.serialize_ttnn_to_flatbuffer(mod)
         return fb
 
     @staticmethod
