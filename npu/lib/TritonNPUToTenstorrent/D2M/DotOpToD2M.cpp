@@ -36,7 +36,8 @@ struct ConvertTiledConstantOp : public OpConversionPattern<arith::ConstantOp> {
     if (!resultTensorType)
       return failure();
 
-    if (!isa<npu::tt::TiledEncodingAttr>(resultTensorType.getEncoding()))
+    if (!isa_and_nonnull<npu::tt::TiledEncodingAttr>(
+            resultTensorType.getEncoding()))
       return failure();
 
     // TODO: check if the constant is 0

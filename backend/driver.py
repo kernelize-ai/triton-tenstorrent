@@ -252,6 +252,206 @@ class CPUDeviceInterface:
         return CPUDeviceInterface.TimerEvent()
 
 
+class TTRTUtils(object):
+
+    def __new__(cls):
+        if not hasattr(cls, "_instance"):
+            cls._instance = super(TTRTUtils, cls).__new__(cls)
+        return cls._instance
+
+    def __init__(self):
+        if getattr(self, "_initialized", False):
+            return
+        self._initialized = True
+        self._device = None  # lazy init
+        import atexit
+        atexit.register(self._cleanup)
+
+    def _cleanup(self):
+        if self._device is not None:
+            import ttrt.runtime
+            ttrt.runtime.close_mesh_device(self._device)
+            self._device = None  # drop the Python reference
+            TTRTUtils.instance = None  # break the singleton ref too
+
+    def _init_device(self):
+        if self._device is None:
+            import ttrt.runtime
+            mesh_options = ttrt.runtime.MeshDeviceOptions()
+            mesh_options.mesh_shape = (1, 1)
+            self._device = ttrt.runtime.open_mesh_device(mesh_options)
+        return self._device
+
+    def load_binary(self, name, kernel, shared_mem, device):
+        import ttrt
+        from ttrt.runtime._ttmlir_runtime.binary import load_binary_from_bytes
+        binary = load_binary_from_bytes(kernel)
+        # TODO we can probably eliminate this line
+        ttrt.runtime.set_compatible_device_runtime(binary.fbb if hasattr(binary, "fbb") else binary)
+        self._init_device()
+        function = (binary, 0)  # program_index 0 — extend if multi-program later
+        return (binary, function, 0, 0, 1)  # module, function, n_regs, n_spills, n_max_threads
+
+    def get_device_properties(self, *args):
+        core_count = 130  # ttrt query?
+        return {
+            "max_num_regs": core_count * 4, "max_shared_mem": 1024 * 1024 * 1024, "multiprocessor_count": core_count,
+            "warpSize": 1
+        }
+
+
+class TTRTLauncher(object):
+
+    def __init__(self, src, metadata):
+        self.metadata = metadata
+        self.signature = {idx: value for idx, value in src.signature.items()}
+
+    def _torch_to_ttrt_dtype(self, dtype):
+        import torch, ttrt.runtime
+        return {
+            torch.float32: ttrt.runtime.DataType.Float32,
+            torch.float16: ttrt.runtime.DataType.Float16,
+            torch.bfloat16: ttrt.runtime.DataType.BFloat16,
+            torch.int32: ttrt.runtime.DataType.Int32,
+            torch.uint32: ttrt.runtime.DataType.UInt32,
+        }[dtype]
+
+    def _to_runtime_input(self, arg):
+        """Wrap any triton arg (tensor / TensorDescriptor / scalar) as a ttrt borrowed
+        tensor. Returns (runtime tensor, torch tensor to keep alive, is_tensor_arg).
+
+        is_tensor_arg is True for actual tensors (real torch tensors / TensorDescriptors)
+        and False for wrapped scalars — used downstream to decide which slots are
+        candidate output buffers.
+        """
+        import ttrt.runtime
+        import torch
+
+        _TORCH_TO_TTRT_DTYPE = {
+            torch.float32: ttrt.runtime.DataType.Float32,
+            torch.bfloat16: ttrt.runtime.DataType.BFloat16,
+            torch.int32: ttrt.runtime.DataType.Int32,
+            torch.uint32: ttrt.runtime.DataType.UInt32,
+            torch.uint16: ttrt.runtime.DataType.UInt16,
+            torch.uint8: ttrt.runtime.DataType.UInt8,
+        }
+
+        # Tensor or TensorDescriptor → existing path.
+        if hasattr(arg, "base") or isinstance(arg, torch.Tensor):
+            t = arg.base if hasattr(arg, "base") else arg
+            # if t.dtype in _TORCH_DTYPE_PROMOTION:
+            #     t = t.to(_TORCH_DTYPE_PROMOTION[t.dtype]).contiguous()
+            rt = ttrt.runtime.create_borrowed_host_tensor(
+                t.data_ptr(),
+                list(t.shape),
+                list(t.stride()),
+                t.element_size(),
+                _TORCH_TO_TTRT_DTYPE[t.dtype],
+            )
+            return rt, t, True
+
+        # Python scalar → 1-elem torch buffer. Choose dtype by Python type.
+        # TODO: use src.signature[i] from metadata to pick the exact dtype the
+        # binary expects (e.g. i32 vs u32 vs fp32). For now, heuristic by type.
+        if isinstance(arg, bool):
+            scalar_dtype = torch.uint8  # ttrt has no bool; uint8 is the alias
+        elif isinstance(arg, int):
+            scalar_dtype = torch.int32  # int64 unsupported; truncate
+        elif isinstance(arg, float):
+            scalar_dtype = torch.float32
+        else:
+            raise TypeError(f"Don't know how to wrap arg of type {type(arg).__name__}")
+
+        buf = torch.tensor([arg], dtype=scalar_dtype)
+        rt = ttrt.runtime.create_borrowed_host_tensor(
+            buf.data_ptr(),
+            [1],
+            [1],
+            buf.element_size(),
+            _TORCH_TO_TTRT_DTYPE[buf.dtype],
+        )
+        return rt, buf, False
+
+    def __call__(self, gridX, gridY, gridZ, stream, function, *args):
+        import ttrt.runtime
+        import torch
+        from ttrt.runtime._ttmlir_runtime.runtime import create_scalar_tensor  # TODO: add to ttrt/runtime/init.py
+        binary, program_index = function
+        device = TTRTUtils()._device
+
+        sig_types = list(self.signature.values())
+
+        kernel_metadata, launch_metadata, enter_hook, exit_hook = args[:4]
+        kernel_args = []
+        for i, arg in enumerate(args[4:]):
+            ty = sig_types[i]
+            if ty == "constexpr":
+                continue
+            if isinstance(arg, TensorDescriptor):
+                base = arg.base
+                kernel_args.append(base)
+                kernel_args.extend(arg.shape)
+                kernel_args.extend(arg.strides)
+                kernel_args.append(1 if arg.padding == "nan" else 0)
+                kernel_args.extend(arg.shape)  # duplicate (intentional)
+                kernel_args.extend(arg.strides)
+            else:
+                kernel_args.append(arg)
+
+        def _unwrap(a):
+            return a.base if hasattr(a, "base") else a
+
+        # wrap inputs and copy to device
+        wrapped = [self._to_runtime_input(a) for a in kernel_args]
+        host_inputs = [w[0] for w in wrapped]
+        # Borrowed host tensors hold raw pointers into the torch buffers — keep the
+        # torch tensors alive until submit + wait finish.
+        keepalive = [w[1] for w in wrapped]
+        is_tensor = [w[2] for w in wrapped]
+
+        host_inputs.append(create_scalar_tensor(0))  # block start
+        host_inputs.append(create_scalar_tensor(1))  # block end
+
+        # Push each input to the program's expected on-device layout.
+        device_inputs = [
+            ttrt.runtime.to_layout(
+                host_inputs[i],
+                device,
+                ttrt.runtime.get_layout(binary, program_index, i),
+            ) for i in range(len(host_inputs))
+        ]
+
+        # execute
+        outputs = ttrt.runtime.submit(device, binary, program_index, device_inputs)
+        ttrt.runtime.wait(outputs)
+
+        # outputs[i] corresponds to tensor_args_in_order[i] by positional convention.
+        tensor_args_in_order = [ka for ka, is_t in zip(keepalive, is_tensor) if is_t]
+
+        assert len(outputs) <= len(tensor_args_in_order), (
+            f"submit returned {len(outputs)} outputs but kernel only has "
+            f"{len(tensor_args_in_order)} tensor args")
+
+        output_dst_torch = tensor_args_in_order[-len(outputs):] if outputs else []
+
+        for dst_torch, out_dev in zip(output_dst_torch, outputs):
+            host_list = ttrt.runtime.to_host(out_dev, untilize=True, blocking=True)
+            promoted = dst_torch.dtype  #_TORCH_DTYPE_PROMOTION.get(dst_torch.dtype, dst_torch.dtype)
+            if promoted == dst_torch.dtype:
+                ttrt.runtime.memcpy(dst_torch.data_ptr(), host_list[0])
+            else:
+                intermediate = torch.empty(dst_torch.shape, dtype=promoted)
+                ttrt.runtime.memcpy(intermediate.data_ptr(), host_list[0])
+                dst_torch.copy_(intermediate)
+            ttrt.runtime.deallocate_tensor(out_dev)
+
+        # Clean up device-resident inputs.
+        for t in device_inputs:
+            ttrt.runtime.deallocate_tensor(t)
+
+        del keepalive
+
+
 class CPUDriver(DriverBase):
 
     @staticmethod
@@ -270,11 +470,17 @@ class CPUDriver(DriverBase):
         return self.runtime.get_device(device_id)
 
     def __init__(self):
-        self.runtime = None
-        self.utils = CpuUtils(self)
-        import torch
-        self.get_current_stream = lambda idx: torch.cpu.Stream()
-        self.launcher_cls = CPULauncher
+        if os.environ.get("TRITON_TTMLIR_TARGET", "") == "d2m":
+            self.utils = TTRTUtils()
+            import torch
+            self.get_current_stream = lambda idx: torch.cpu.Stream()  # TODO: maybe ttrt/pjrt here?
+            self.launcher_cls = TTRTLauncher
+        else:
+            self.runtime = None
+            self.utils = CpuUtils(self)
+            import torch
+            self.get_current_stream = lambda idx: torch.cpu.Stream()
+            self.launcher_cls = CPULauncher
 
     def get_device_interface(self):
         return CPUDeviceInterface()

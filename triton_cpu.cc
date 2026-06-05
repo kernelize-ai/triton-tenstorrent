@@ -27,6 +27,7 @@
 #include "ttmlir/Dialect/TTKernel/IR/TTKernel.h"
 #include "ttmlir/Dialect/TTKernel/Transforms/Passes.h"
 #include "ttmlir/Target/TTKernel/TTKernelToCpp.h"
+#include "ttmlir/Target/TTNN/TTNNToFlatbuffer.h"
 
 #include <pybind11/pybind11.h>
 
@@ -256,11 +257,12 @@ void init_tenstorrent_d2m_passes(py::module &&m) {
     pm.addPass(d2m::createD2MGenericRegionsToFuncs());
   });
 
-  m.def("add_convert_d2m_to_ttkernel", [](mlir::PassManager &pm) {
-    d2m::ConvertD2MToTTKernelOptions D2MToTTKernelOptions;
-    D2MToTTKernelOptions.ttnnMode = true;
-    pm.addPass(createConvertD2MToTTKernelPass(D2MToTTKernelOptions));
-  });
+  m.def("add_convert_d2m_to_ttkernel",
+        [](mlir::PassManager &pm, bool ttnnMode) {
+          d2m::ConvertD2MToTTKernelOptions D2MToTTKernelOptions;
+          D2MToTTKernelOptions.ttnnMode = ttnnMode;
+          pm.addPass(createConvertD2MToTTKernelPass(D2MToTTKernelOptions));
+        });
 
   m.def("add_convert_d2m_to_ttmetal", [](mlir::PassManager &pm) {
     d2m::ConvertD2MToTTMetalOptions d2mToTTMetalOptions;
@@ -329,6 +331,21 @@ void init_triton_cpu(py::module &&m) {
                "failed to translate kernel func to C++");
         return py::str(cppCode);
       });
+
+  m.def("serialize_ttnn_to_flatbuffer", [](mlir::ModuleOp module) -> py::bytes {
+    std::unordered_map<
+        std::string, std::unordered_map<std::uint32_t, mlir::tt::GoldenTensor>>
+        goldenMap;
+    std::vector<std::pair<std::string, std::string>> moduleCache;
+
+    std::string buffer;
+    llvm::raw_string_ostream os(buffer);
+    if (mlir::failed(mlir::tt::ttnn::translateTTNNToFlatbuffer(
+            module.getOperation(), os, goldenMap, moduleCache))) {
+      throw std::runtime_error("Failed to serialize TTNN flatbuffer");
+    }
+    return py::bytes(buffer);
+  });
 
   m.def("load_dialects",
         [](mlir::MLIRContext &context, const std::string &device) {

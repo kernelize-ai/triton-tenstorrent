@@ -12,9 +12,9 @@
 module attributes {"ttg.num-ctas" = 1 : i32, "ttg.num-warps" = 1 : i32, ttg.target = "cpu", "ttg.threads-per-warp" = 1 : i32} {
   // CHECK-LABEL: func.func @matmul
   tt.func public @matmul(
-      %a_desc: !tt.tensordesc<tensor<64x64xf16>>, %a_row: i32, %a_col: i32,
-      %b_desc: !tt.tensordesc<tensor<64x64xf16>>, %b_row: i32, %b_col: i32,
-      %c_desc: !tt.tensordesc<tensor<64x64xf16>>, %c_row: i32, %c_col: i32)
+      %a_desc: !tt.tensordesc<tensor<64x64xf16>> {triton_tenstorrent.io_type = #triton_tenstorrent.io_type<input>}, %a_row: i32, %a_col: i32,
+      %b_desc: !tt.tensordesc<tensor<64x64xf16>> {triton_tenstorrent.io_type = #triton_tenstorrent.io_type<input>}, %b_row: i32, %b_col: i32,
+      %c_desc: !tt.tensordesc<tensor<64x64xf16>> {triton_tenstorrent.io_type = #triton_tenstorrent.io_type<output>}, %c_row: i32, %c_col: i32)
       attributes {noinline = false} {
     // all allocs hoisted
     // CHECK-DAG: %[[ACC:.*]] = memref.alloc() : memref<2x2x!ttcore.tile<32x32, f32>, #ttcore.cb_layout<8192x4096, 2>, #l1>
