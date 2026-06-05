@@ -38,6 +38,33 @@ brew install node
 brew install clang-format
 ```
 5. Install Triton.
+
+#### Experimental Tenstorrent TTMLIR Runtime
+
+Triton Tenstorrent supports an experimental lowering path and runtime for compiling Triton kernels to Tenstorrent D2M (Direct to Metal) dialect and then lowering to the Tenstorrent ttnn MLIR dialect which can be interpreted by the TTMLIR runtime. This path is enabled using the flag `TRITON_TTMLIR_TARGET="d2m"`.
+
+To enable the TTMIR runtime integration in Triton we must build Triton against a custom LLVM build with MLIR Python buildings enabled. The script `scripts/build-llvm-with-bindings.sh` will build LLVM with the necessary MLIR Python bindings. Note that you may have to set `TRITON_HOME` if the Triton sources are in a non-standard location. The script also prints out the necessary flags to build Triton with TTMLIR support, which are reproduced below.
+
+Once the custom LLVM version is built, build Triton with the `TTMLIR_RUNTIME_ENABLED=ON` and the `LLVM_BUILD_DIR` flag pointing to the custom LLVM build directory. E.g.:
+
+```
+export LLVM_BUILD_DIR="/home/user/.triton/llvm-with-python-bindings/llvm-f6ded0be-ubuntu-x64"
+TTMLIR_RUNTIME_ENABLED=ON LLVM_INCLUDE_DIRS="$LLVM_BUILD_DIR/include" LLVM_LIBRARY_DIR="$LLVM_BUILD_DIR/lib" LLVM_SYSPATH=$LLVM_BUILD_DIR  TRITON_VENV_DIR=triton/.venv TRITON_PLUGIN_DIRS=triton-tenstorrent pip install -e . --no-build-isolation
+```
+
+Generate a system descriptor with `ttrt`:
+```
+ttrt query --save-artifacts
+```
+and note the save path.
+
+Then run the ttnn version of the matmul tutorial:
+```
+TRITON_TTMLIR_TARGET="d2m" TT_SYSTEM_DESC_PATH="path-to-sys-desc-from-ttrt.ttsys" python triton-tenstorrent/examples/matmul_tensor_descriptor/09-persistent-matmul.py
+```
+
+#### Metal Runtime
+
 ```
 TTMLIR_RUNTIME_ENABLED=ON TRITON_VENV_DIR=/path/to/triton/.venv TRITON_PLUGIN_DIRS=/path/to/triton-tenstorrent pip install -e . --no-build-isolation
 ```
