@@ -13,13 +13,17 @@ module attributes {"ttg.num-ctas" = 1 : i32, "ttg.num-warps" = 1 : i32, "ttg.thr
 
 // -----
 
-// Same conflict, but for a tensor-of-pointers argument driven by tt.load/tt.store.
-#blocked = #ttg.blocked<{sizePerThread = [1, 1], threadsPerWarp = [1, 1], warpsPerCTA = [1, 1], order = [1, 0]}>
+// Same conflict, but for a scalar !tt.ptr argument splatted/offset into a tensor
+// of pointers and driven by tt.load/tt.store.
+#blocked = #ttg.blocked<{sizePerThread = [1024], threadsPerWarp = [1], warpsPerCTA = [1], order = [0]}>
 module attributes {"ttg.num-ctas" = 1 : i32, "ttg.num-warps" = 1 : i32, "ttg.threads-per-warp" = 1 : i32} {
   // expected-error @+1 {{is used as both an input and an output; conflicting io_type tag}}
-  tt.func public @conflict_ptr_tensor(%arg0: tensor<64x64x!tt.ptr<f16>, #blocked>) {
-    %0 = tt.load %arg0 : tensor<64x64x!tt.ptr<f16>, #blocked>
-    tt.store %arg0, %0 : tensor<64x64x!tt.ptr<f16>, #blocked>
+  tt.func public @conflict_scalar_ptr(%ptr: !tt.ptr<f32>) {
+    %offsets = tt.make_range {end = 1024 : i32, start = 0 : i32} : tensor<1024xi32, #blocked>
+    %t = tt.splat %ptr : !tt.ptr<f32> -> tensor<1024x!tt.ptr<f32>, #blocked>
+    %ptrs = tt.addptr %t, %offsets : tensor<1024x!tt.ptr<f32>, #blocked>, tensor<1024xi32, #blocked>
+    %v = tt.load %ptrs : tensor<1024x!tt.ptr<f32>, #blocked>
+    tt.store %ptrs, %v : tensor<1024x!tt.ptr<f32>, #blocked>
     tt.return
   }
 }
