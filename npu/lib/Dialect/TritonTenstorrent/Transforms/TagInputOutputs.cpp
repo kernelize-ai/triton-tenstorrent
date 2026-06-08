@@ -18,6 +18,54 @@ namespace npu {
 #define GEN_PASS_DEF_TRITONTENSTORRENTTAGINPUTOUTPUTS
 #include "npu/include/Dialect/TritonTenstorrent/Transforms/Passes.h.inc"
 
+namespace {
+
+static BlockArgument traceToFuncArg(Value v, triton::FuncOp funcOp) {
+  while (true) {
+    if (auto blockArg = dyn_cast<BlockArgument>(v))
+      return blockArg.getOwner() == &funcOp.getBody().front() ? blockArg
+                                                              : nullptr;
+
+    Operation *def = v.getDefiningOp();
+    if (!def)
+      return nullptr;
+
+    // traverse the addptr -> splat -> broadcast chain to find the original
+    // ptr argument
+    v = llvm::TypeSwitch<Operation *, Value>(def)
+            .Case<triton::AddPtrOp>(
+                [](auto addPtrOp) { return addPtrOp.getPtr(); })
+            .Case<triton::SplatOp>(
+                [](auto splatOp) { return splatOp.getSrc(); })
+            .Case<triton::BroadcastOp, triton::ExpandDimsOp, triton::ReshapeOp,
+                  triton::BitcastOp>([](auto o) { return o->getOperand(0); })
+            .Default([](Operation *) { return Value(); });
+
+    if (!v)
+      return nullptr;
+  }
+}
+
+// Tag the argument with `desired`, failing if it was already tagged with a
+// conflicting io_type (i.e. used as both an input and an output).
+static LogicalResult tagAs(unsigned idx, tt::IOType desired,
+                           triton::FuncOp funcOp) {
+  if (auto existingAttr = funcOp.getArgAttr(idx, kIOTypeAttrName)) {
+    auto existing = dyn_cast<tt::IOTypeAttr>(existingAttr);
+    if (existing && existing.getValue() == desired)
+      return success(); // already tagged consistently, no conflict
+    return funcOp.emitError()
+           << "argument " << funcOp.getArgument(idx) << " (# " << idx
+           << ") is used as both an input and an output; conflicting "
+              "io_type tag";
+  }
+  funcOp.setArgAttr(idx, kIOTypeAttrName,
+                    tt::IOTypeAttr::get(funcOp.getContext(), desired));
+  return success();
+}
+
+} // namespace
+
 class TritonTenstorrentTagInputOutputsPass
     : public npu::impl::TritonTenstorrentTagInputOutputsBase<
           TritonTenstorrentTagInputOutputsPass> {
@@ -57,54 +105,6 @@ public:
           signalPassFailure();
       });
     });
-  }
-
-private:
-  static constexpr llvm::StringLiteral kIOTypeAttrName =
-      "triton_tenstorrent.io_type";
-
-  static BlockArgument traceToFuncArg(Value v, triton::FuncOp funcOp) {
-    while (true) {
-      if (auto blockArg = dyn_cast<BlockArgument>(v))
-        return blockArg.getOwner() == &funcOp.getBody().front() ? blockArg
-                                                                : nullptr;
-
-      Operation *def = v.getDefiningOp();
-      if (!def)
-        return nullptr;
-
-      // traverse the addptr -> splat -> broadcast chain to find the original
-      // ptr argument
-      v = llvm::TypeSwitch<Operation *, Value>(def)
-              .Case<triton::AddPtrOp>(
-                  [](auto addPtrOp) { return addPtrOp.getPtr(); })
-              .Case<triton::SplatOp>(
-                  [](auto splatOp) { return splatOp.getSrc(); })
-              .Case<triton::BroadcastOp, triton::ExpandDimsOp,
-                    triton::ReshapeOp, triton::BitcastOp>(
-                  [](auto o) { return o->getOperand(0); })
-              .Default([](Operation *) { return Value(); });
-
-      if (!v)
-        return nullptr;
-    }
-  }
-
-  // Tag the argument with `desired`, failing if it was already tagged with a
-  // conflicting io_type (i.e. used as both an input and an output).
-  static LogicalResult tagAs(unsigned idx, tt::IOType desired, triton::FuncOp funcOp) {
-    if (auto existingAttr = funcOp.getArgAttr(idx, kIOTypeAttrName)) {
-      auto existing = dyn_cast<tt::IOTypeAttr>(existingAttr);
-      if (existing && existing.getValue() == desired)
-        return success(); // already tagged consistently, no conflict
-      return funcOp.emitError()
-             << "argument " << funcOp.getArgument(idx) << " (# " << idx
-             << ") is used as both an input and an output; conflicting "
-                "io_type tag";
-    }
-    funcOp.setArgAttr(idx, kIOTypeAttrName,
-                      tt::IOTypeAttr::get(funcOp.getContext(), desired));
-    return success();
   }
 };
 

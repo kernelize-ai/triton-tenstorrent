@@ -145,10 +145,8 @@ LogicalResult ArgConversionHelper::convertFunctionArguments(
                   ttnn::TensorMemoryLayout::Interleaved) // or Sharded?
               .build();
 
-      // TODO: read attribute from funcOp, put in appropraite input/output list
-      // TODO: define attribute name in dialect
       auto ioTypeAttr = dyn_cast_or_null<tt::IOTypeAttr>(
-          funcOp.getArgAttr(idx, "triton_tenstorrent.io_type"));
+          funcOp.getArgAttr(idx, kIOTypeAttrName));
       if (!ioTypeAttr) {
         return funcOp.emitError("missing IOType attribute on tensor argument");
       }
