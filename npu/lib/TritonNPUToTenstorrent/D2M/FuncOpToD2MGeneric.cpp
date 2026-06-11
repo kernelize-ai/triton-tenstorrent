@@ -44,6 +44,7 @@ struct ArgConversionHelper {
 
   LogicalResult convertFunctionArguments(triton::FuncOp funcOp,
                                          ConversionPatternRewriter &rewriter,
+                                         ttcore::GridAttr grid,
                                          const TypeConverter *typeConverter);
 
   func::FuncOp generateNewFunction(triton::FuncOp origFunc,
@@ -138,7 +139,7 @@ static Op findLoadStoreOpForTensorArg(BlockArgument arg,
 // runtime. For scalar args, just use the type converter.
 LogicalResult ArgConversionHelper::convertFunctionArguments(
     triton::FuncOp funcOp, ConversionPatternRewriter &rewriter,
-    const TypeConverter *typeConverter) {
+    ttcore::GridAttr grid, const TypeConverter *typeConverter) {
   MLIRContext *context = rewriter.getContext();
 
   auto makeDynamicTensorTy = [](RankedTensorType tensorTy, Attribute encoding) {
@@ -177,6 +178,7 @@ LogicalResult ArgConversionHelper::convertFunctionArguments(
       assert(tritonType &&
              "failed to set tensor block shape information from ptr");
 
+      // use the type converter to get the tiled type from the triton tensor
       auto perCoreMemRef =
           cast<MemRefType>(typeConverter->convertType(tritonType));
 
@@ -192,10 +194,24 @@ LogicalResult ArgConversionHelper::convertFunctionArguments(
 
       auto ttnnLayout = getTTNNLayoutForMemRef(perCoreMemRef, scalarShape);
 
+      // The triton type converter doesn't have access to the grid shape. CB
+      // memrefs don't need the grid shape, but function argument ("ptr")
+      // memrefs do need the grid shape as remote load/store ops expect grid
+      // shapes on the memref arguments. Add the grid shape to the perCoreMemref
+      // here
+      SmallVector<int64_t> argShape = llvm::to_vector(grid.getShape());
+      argShape.append(tiledShape);
+
+      MemRefType functionArgMemRef = MemRefType::get(
+          argShape, tile,
+          ttcore::ShardLayoutAttr::get(tiledShape, tile, /*buffers=*/1),
+          ttcore::MemorySpaceAttr::get(context,
+                                       ttcore::MemorySpace::DeviceDRAM));
+
       if (ioTypeAttr.getValue() == tt::IOType::INPUT)
-        inputTensorMap.insert({convertedArgTypes.size(), perCoreMemRef});
+        inputTensorMap.insert({convertedArgTypes.size(), functionArgMemRef});
       else
-        outputTensorMap.insert({convertedArgTypes.size(), perCoreMemRef});
+        outputTensorMap.insert({convertedArgTypes.size(), functionArgMemRef});
 
       convertedArgTypes.push_back(makeDynamicTensorTy(tritonType, ttnnLayout));
       argLocs.push_back(oldArg.getLoc());
@@ -311,7 +327,7 @@ struct ConvertTritonFunc : public OpConversionPattern<triton::FuncOp> {
     ArgConversionHelper helper;
     // 1. Convert function arguments and add tenstorrent specific args (block
     // start/end)
-    if (failed(helper.convertFunctionArguments(funcOp, rewriter,
+    if (failed(helper.convertFunctionArguments(funcOp, rewriter, grid,
                                                getTypeConverter()))) {
       return funcOp.emitError("failed to convert function arguments");
     }

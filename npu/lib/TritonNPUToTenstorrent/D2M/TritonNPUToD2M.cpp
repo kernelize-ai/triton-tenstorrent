@@ -137,7 +137,7 @@ SmallVector<int64_t> calculateShardShape(RankedTensorType tensorType,
     auto cols = tileType.getShape()[1];
     assert(dim % (rows * cols) == 0 &&
            "tensor dimension must be a multiple of tile size");
-    return {dim / (rows * cols)};
+    return {dim / (rows * cols), 1};
   } else if (tensorType.getRank() == 2) {
     return llvm::to_vector(map_range(
         (llvm::zip(tensorType.getShape(), tileType.getShape())),

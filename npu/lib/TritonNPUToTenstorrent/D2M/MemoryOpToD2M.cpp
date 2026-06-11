@@ -16,6 +16,8 @@
 #include "llvm/ADT/TypeSwitch.h"
 #include "llvm/Support/Debug.h"
 
+#include "../Utility.h"
+
 namespace mlir {
 using namespace tt;
 namespace triton {
@@ -153,18 +155,17 @@ struct ConvertLoadOp : public OpConversionPattern<triton::LoadOp> {
 
     // step 1: allocate L1 space for the load
     MemRefType memRef = cast<MemRefType>(ptr.getType());
-    auto tileShape =
-        memRef.getShape(); // TODO: should this memRef actually contain the grid
-                           // shape x shard shape? And then we could get the
-                           // tileShape from the shardShape (tiles per tensix?)
+    SmallVector<int64_t> tileShape = llvm::to_vector(memRef.getShape());
+    if (tileShape.size() == 1)
+      tileShape.push_back(1);
 
     auto loadTensorType = cast<RankedTensorType>(op.getType());
     auto cbLayout = ttcore::CBLayoutAttr::get(
         context, tileShape,
-        ttcore::getElementSizeBytes(loadTensorType.getElementType()),
+        ttcore::getElementSizeBytes(memRef.getElementType()),
         /*buffers=*/tileShape.size());
     auto allocType = MemRefType::get(
-        tileShape, loadTensorType.getElementType(), cbLayout,
+        tileShape, memRef.getElementType(), cbLayout,
         ttcore::MemorySpaceAttr::get(context, ttcore::MemorySpace::DeviceL1));
     auto allocOp = memref::AllocOp::create(rewriter, loc, allocType);
 
@@ -173,20 +174,23 @@ struct ConvertLoadOp : public OpConversionPattern<triton::LoadOp> {
     // will need grid shape on the memref shape above. If not, we can drop this
     // resultType and unify types
     auto resultType = MemRefType::get(
-        tileShape, loadTensorType.getElementType(), MemRefLayoutAttrInterface{},
+        tileShape, memRef.getElementType(), MemRefLayoutAttrInterface{},
         ttcore::MemorySpaceAttr::get(context, ttcore::MemorySpace::DeviceL1));
 
     auto conversionCastOp =
         dyn_cast_or_null<UnrealizedConversionCastOp>(ptr.getDefiningOp());
     assert(conversionCastOp && "expected tt.ptr lowering chain to end in "
                                "integer offset for load ptr argument");
-    Value index = conversionCastOp.getInputs()[0];
+    Value index =
+        arith::IndexCastOp::create(rewriter, loc, rewriter.getIndexType(),
+                                   conversionCastOp.getInputs()[0]);
 
     Value basePtr = traceToBasePtr(op.getPtr());
     assert(basePtr && "expected load ptr chain to terminate at a layout cast");
 
-    d2m::RemoteLoadOp::create(rewriter, loc, {}, allocOp.getResult(), basePtr,
-                              {index});
+    d2m::RemoteLoadOp::create(
+        rewriter, loc, {}, allocOp.getResult(), basePtr,
+        {index, arith::createIndexConstant(loc, rewriter, 0)});
 
     rewriter.replaceOp(op, allocOp.getResult());
     return success();
@@ -207,14 +211,17 @@ struct ConvertStoreOp : public OpConversionPattern<triton::StoreOp> {
         dyn_cast_or_null<UnrealizedConversionCastOp>(ptr.getDefiningOp());
     assert(conversionCastOp && "expected tt.ptr lowering chain to end in "
                                "integer offset for load ptr argument");
-    Value index = conversionCastOp.getInputs()[0];
+    Value index =
+        arith::IndexCastOp::create(rewriter, loc, rewriter.getIndexType(),
+                                   conversionCastOp.getInputs()[0]);
 
     Value basePtr = traceToBasePtr(op.getPtr());
     assert(basePtr && "expected store ptr chain to terminate at a layout cast");
 
     Value src = adaptor.getValue();
-    d2m::RemoteStoreOp::create(rewriter, loc, /*resultType=*/{}, basePtr,
-                               {index}, src);
+    d2m::RemoteStoreOp::create(
+        rewriter, loc, /*resultType=*/{}, basePtr,
+        {index, arith::createIndexConstant(loc, rewriter, 0)}, src);
     rewriter.eraseOp(op);
     return success();
   }
