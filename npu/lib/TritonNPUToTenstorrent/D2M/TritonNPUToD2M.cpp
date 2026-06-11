@@ -191,11 +191,11 @@ struct ConvertTritonNPUToD2MPass
     });
     typeConverter.addConversion([](RankedTensorType tensorType) -> Type {
       auto eType = tensorType.getElementType();
-      if (isa<triton::PointerType>(eType)) {
-        return IntegerType::get(tensorType.getContext(), 32);
+      if (auto ptrType = dyn_cast<triton::PointerType>(eType)) {
+        eType = ptrType.getPointeeType();
       }
       if (!tensorType.getEncoding()) {
-        return tensorType;
+        return RankedTensorType::get(tensorType.getShape(), eType);
       }
       if (isa<npu::tt::TiledEncodingAttr>(tensorType.getEncoding()) ||
           isa<npu::tt::TiledDotOperandEncodingAttr>(tensorType.getEncoding()) ||

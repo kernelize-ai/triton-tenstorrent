@@ -114,15 +114,16 @@ struct ArgConversionHelper {
   }
 };
 
-static triton::LoadOp findLoadOpForTensorArg(BlockArgument arg,
-                                             triton::FuncOp funcOp) {
-  triton::LoadOp ret;
-  funcOp.walk([&](triton::LoadOp load) {
-    BlockArgument funcArg = traceToFuncArg(load.getPtr(), funcOp);
+template <typename Op>
+static Op findLoadStoreOpForTensorArg(BlockArgument arg,
+                                      triton::FuncOp funcOp) {
+  Op ret;
+  funcOp.walk([&](Op op) {
+    BlockArgument funcArg = traceToFuncArg(op.getPtr(), funcOp);
     if (funcArg && funcArg == arg) {
       // TODO: do we care if there are multiple loads for the same ptr?
       // probably...
-      ret = load;
+      ret = op;
       return WalkResult::interrupt();
     }
     return WalkResult::advance();
@@ -150,6 +151,8 @@ LogicalResult ArgConversionHelper::convertFunctionArguments(
     Type argType = oldArg.getType();
 
     if (isa<PointerType>(argType)) {
+      RankedTensorType tritonType;
+
       auto ioTypeAttr = dyn_cast_or_null<tt::IOTypeAttr>(
           funcOp.getArgAttr(idx, kIOTypeAttrName));
       if (!ioTypeAttr)
@@ -157,39 +160,49 @@ LogicalResult ArgConversionHelper::convertFunctionArguments(
       llvm::errs() << "found io type attr " << ioTypeAttr << " for arg "
                    << oldArg << "\n";
       if (ioTypeAttr.getValue() == tt::IOType::INPUT) {
-        auto loadOp = findLoadOpForTensorArg(oldArg, funcOp);
+        auto loadOp =
+            findLoadStoreOpForTensorArg<triton::LoadOp>(oldArg, funcOp);
         assert(
             loadOp &&
             "expected to find dependent load for INPUT type function argument");
-        auto loadType = cast<RankedTensorType>(loadOp.getType());
-        llvm::errs() << "load type = " << loadType << "\n";
-        auto perCoreMemRef =
-            cast<MemRefType>(typeConverter->convertType(loadType));
-        llvm::errs() << "converted type = " << perCoreMemRef << "\n";
-
-        // convert the tiled memref shape to a scalar shape to build the ttnn
-        // layout
-        SmallVector<int64_t> tiledShape =
-            llvm::to_vector(perCoreMemRef.getShape());
-        if (tiledShape.size() == 1)
-          tiledShape.push_back(
-              1); // tenstorrent tiled tensors must be at least rank 2
-        auto tile = cast<ttcore::TileType>(perCoreMemRef.getElementType());
-        auto scalarShape = tile.getScalarShape(tiledShape);
-        llvm::errs() << "scalar shape = " << triton::join(scalarShape) << "\n";
-
-        auto ttnnLayout = getTTNNLayoutForMemRef(perCoreMemRef, scalarShape);
-
-        llvm::errs() << "ttnnLayout = " << ttnnLayout << "\n";
-
-        inputTensorMap.insert({convertedArgTypes.size(), perCoreMemRef});
-        convertedArgTypes.push_back(makeDynamicTensorTy(loadType, ttnnLayout));
-        argLocs.push_back(oldArg.getLoc());
+        tritonType = cast<RankedTensorType>(loadOp.getType());
       } else if (ioTypeAttr.getValue() == tt::IOType::OUTPUT) {
-        llvm_unreachable("TODO");
+        auto storeOp =
+            findLoadStoreOpForTensorArg<triton::StoreOp>(oldArg, funcOp);
+        assert(storeOp && "expected to find dependent store for OUTPUT type "
+                          "function argument");
+        tritonType = cast<RankedTensorType>(storeOp.getPtr().getType());
+        llvm::errs() << "store type = " << tritonType << "\n";
       } else {
         llvm_unreachable("unexpected IOTypeAttr for function argument");
       }
+      assert(tritonType &&
+             "failed to set tensor block shape information from ptr");
+
+      auto perCoreMemRef =
+          cast<MemRefType>(typeConverter->convertType(tritonType));
+
+      // convert the tiled memref shape to a scalar shape to build the ttnn
+      // layout
+      SmallVector<int64_t> tiledShape =
+          llvm::to_vector(perCoreMemRef.getShape());
+      if (tiledShape.size() == 1)
+        tiledShape.push_back(
+            1); // tenstorrent tiled tensors must be at least rank 2
+      auto tile = cast<ttcore::TileType>(perCoreMemRef.getElementType());
+      auto scalarShape = tile.getScalarShape(tiledShape);
+      llvm::errs() << "scalar shape = " << triton::join(scalarShape) << "\n";
+
+      auto ttnnLayout = getTTNNLayoutForMemRef(perCoreMemRef, scalarShape);
+
+      llvm::errs() << "ttnnLayout = " << ttnnLayout << "\n";
+      if (ioTypeAttr.getValue() == tt::IOType::INPUT)
+        inputTensorMap.insert({convertedArgTypes.size(), perCoreMemRef});
+      else
+        outputTensorMap.insert({convertedArgTypes.size(), perCoreMemRef});
+
+      convertedArgTypes.push_back(makeDynamicTensorTy(tritonType, ttnnLayout));
+      argLocs.push_back(oldArg.getLoc());
     }
     if (auto tensorDescTy = dyn_cast<triton::TensorDescType>(argType)) {
       auto blockTensorTy = tensorDescTy.getBlockType();
