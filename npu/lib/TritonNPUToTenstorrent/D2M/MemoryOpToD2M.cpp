@@ -2,7 +2,7 @@
 
 #include "llvm/Support/Debug.h"
 
-#include "npu/include/Analysis/Utility.h"
+// #include "npu/include/Analysis/Utility.h"
 #include "npu/include/Dialect/TritonTenstorrent/IR/Attributes.h"
 
 #include "triton/Dialect/Triton/IR/Dialect.h"
@@ -12,9 +12,11 @@
 #include "ttmlir/Dialect/D2M/IR/D2MGenericRegionOps.h"
 #include "ttmlir/Dialect/D2M/IR/D2MOps.h"
 
+#include "mlir/Analysis/SliceAnalysis.h"
 #include "mlir/Dialect/Arith/IR/Arith.h"
-#include "mlir/Dialect/Func/IR/FuncOps.h"
+#include "ttmlir/Dialect/TTIR/IR/TTIROps.h"
 
+#include "llvm/ADT/TypeSwitch.h"
 namespace mlir {
 using namespace tt;
 namespace triton {
@@ -117,6 +119,28 @@ struct ConvertTensorDescStoreOp
   }
 };
 
+static Value traceToBasePtr(Value v) {
+  while (Operation *def = v.getDefiningOp()) {
+    if (isa<ttir::TTNNMetalLayoutCastOp>(def))
+      return v;
+
+    Value next =
+        llvm::TypeSwitch<Operation *, Value>(def)
+            .Case<triton::AddPtrOp>([](auto o) { return o.getPtr(); })
+            .Case<triton::SplatOp>([](auto o) { return o.getSrc(); })
+            .Case<triton::BroadcastOp, triton::ExpandDimsOp, triton::ReshapeOp,
+                  triton::BitcastOp>([](auto o) { return o->getOperand(0); })
+            .Case<UnrealizedConversionCastOp>(
+                [](auto o) { return o.getInputs()[0]; })
+            .Default([](Operation *) { return Value(); });
+
+    if (!next)
+      return nullptr;
+    v = next;
+  }
+  // bail on block arguments
+  return nullptr;
+}
 struct ConvertLoadOp : public OpConversionPattern<triton::LoadOp> {
   using OpConversionPattern<triton::LoadOp>::OpConversionPattern;
 
@@ -162,19 +186,13 @@ struct ConvertLoadOp : public OpConversionPattern<triton::LoadOp> {
                                "integer offset for load ptr argument");
     Value index = conversionCastOp.getInputs()[0];
 
-    auto parentFunc = op->getParentOfType<func::FuncOp>();
-    assert(parentFunc &&
-           "expected load op to have mlir::FuncOp parent during conversion");
-
-    // TODO: maybe we need ptr info analysis here after all?
-    Value basePtr = traceToFuncArg(op.getPtr(), parentFunc);
-    llvm::errs() << "base ptr = " << basePtr << "\n";
+    Value basePtr = traceToBasePtr(op.getPtr());
+    assert(basePtr && "expected load ptr chain to terminate at a layout cast");
 
     d2m::RemoteLoadOp::create(rewriter, loc, {}, allocOp.getResult(), basePtr,
                               {index});
 
     rewriter.replaceOp(op, allocOp.getResult());
-
     return success();
   }
 };
