@@ -2,6 +2,7 @@
 
 #include "llvm/Support/Debug.h"
 
+#include "npu/include/Analysis/Utility.h"
 #include "npu/include/Dialect/TritonTenstorrent/IR/Attributes.h"
 
 #include "triton/Dialect/Triton/IR/Dialect.h"
@@ -12,6 +13,7 @@
 #include "ttmlir/Dialect/D2M/IR/D2MOps.h"
 
 #include "mlir/Dialect/Arith/IR/Arith.h"
+#include "mlir/Dialect/Func/IR/FuncOps.h"
 
 namespace mlir {
 using namespace tt;
@@ -115,6 +117,68 @@ struct ConvertTensorDescStoreOp
   }
 };
 
+struct ConvertLoadOp : public OpConversionPattern<triton::LoadOp> {
+  using OpConversionPattern<triton::LoadOp>::OpConversionPattern;
+
+  LogicalResult
+  matchAndRewrite(triton::LoadOp op, OpAdaptor adaptor,
+                  ConversionPatternRewriter &rewriter) const override {
+    MLIRContext *context = getContext();
+    Location loc = op.getLoc();
+    auto typeConverter = getTypeConverter();
+
+    Value ptr = adaptor.getPtr();
+    llvm::errs() << "adaptor ptr = " << ptr << "\n";
+    llvm::errs() << "op ptr = " << op.getPtr() << "\n";
+
+    // step 1: allocate L1 space for the load
+    MemRefType memRef = cast<MemRefType>(ptr.getType());
+    auto tileShape =
+        memRef.getShape(); // TODO: should this memRef actually contain the grid
+                           // shape x shard shape? And then we could get the
+                           // tileShape from the shardShape (tiles per tensix?)
+
+    auto loadTensorType = cast<RankedTensorType>(op.getType());
+    auto cbLayout = ttcore::CBLayoutAttr::get(
+        context, tileShape,
+        ttcore::getElementSizeBytes(loadTensorType.getElementType()),
+        /*buffers=*/tileShape.size());
+    auto allocType = MemRefType::get(
+        tileShape, loadTensorType.getElementType(), cbLayout,
+        ttcore::MemorySpaceAttr::get(context, ttcore::MemorySpace::DeviceL1));
+    auto allocOp = memref::AllocOp::create(rewriter, loc, allocType);
+
+    // step 2: create the load
+    // TODO: this should be the same as the memref shape above, but I suspect we
+    // will need grid shape on the memref shape above. If not, we can drop this
+    // resultType and unify types
+    auto resultType = MemRefType::get(
+        tileShape, loadTensorType.getElementType(), MemRefLayoutAttrInterface{},
+        ttcore::MemorySpaceAttr::get(context, ttcore::MemorySpace::DeviceL1));
+
+    auto conversionCastOp =
+        dyn_cast_or_null<UnrealizedConversionCastOp>(ptr.getDefiningOp());
+    assert(conversionCastOp && "expected tt.ptr lowering chain to end in "
+                               "integer offset for load ptr argument");
+    Value index = conversionCastOp.getInputs()[0];
+
+    auto parentFunc = op->getParentOfType<func::FuncOp>();
+    assert(parentFunc &&
+           "expected load op to have mlir::FuncOp parent during conversion");
+
+    // TODO: maybe we need ptr info analysis here after all?
+    Value basePtr = traceToFuncArg(op.getPtr(), parentFunc);
+    llvm::errs() << "base ptr = " << basePtr << "\n";
+
+    d2m::RemoteLoadOp::create(rewriter, loc, {}, allocOp.getResult(), basePtr,
+                              {index});
+
+    rewriter.replaceOp(op, allocOp.getResult());
+
+    return success();
+  }
+};
+
 } // namespace
 
 void populateMemoryOpConversionPattern(TypeConverter &typeConverter,
@@ -122,6 +186,8 @@ void populateMemoryOpConversionPattern(TypeConverter &typeConverter,
                                        PatternBenefit benefit) {
   patterns.add<ConvertTensorDescLoadOp>(typeConverter, patterns.getContext());
   patterns.add<ConvertTensorDescStoreOp>(typeConverter, patterns.getContext());
+
+  patterns.add<ConvertLoadOp>(typeConverter, patterns.getContext());
 }
 
 } // namespace experimental
