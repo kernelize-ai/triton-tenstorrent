@@ -1,4 +1,5 @@
 add_triton_library(TritonNPUToD2M
+    ComputeOpToD2M.cpp
     DotOpToD2M.cpp
     FuncOpToD2MGeneric.cpp
     MemoryOpToD2M.cpp

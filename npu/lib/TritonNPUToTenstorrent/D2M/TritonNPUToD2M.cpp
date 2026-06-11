@@ -254,6 +254,7 @@ struct ConvertTritonNPUToD2MPass
     target.addIllegalDialect<triton::TritonDialect>();
     target.addIllegalDialect<triton::cpu::TritonCPUDialect>();
     target.addIllegalDialect<triton::gpu::TritonGPUDialect>();
+    target.addIllegalDialect<npu::tt::TritonTenstorrentDialect>();
 
     target.addLegalOp<UnrealizedConversionCastOp>();
     target.addDynamicallyLegalDialect<arith::ArithDialect>([&](Operation *op) {
@@ -270,6 +271,8 @@ struct ConvertTritonNPUToD2MPass
     });
 
     mlir::RewritePatternSet patterns(context);
+    experimental::populateComputeOpConversionPattern(typeConverter, patterns,
+                                                     PatternBenefit(1));
     experimental::populateDotOpConversionPattern(typeConverter, patterns,
                                                  PatternBenefit(1));
     experimental::populateMemoryOpConversionPattern(typeConverter, patterns,
