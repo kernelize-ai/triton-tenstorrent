@@ -199,6 +199,7 @@ LogicalResult ArgConversionHelper::convertFunctionArguments(
 
       convertedArgTypes.push_back(makeDynamicTensorTy(tritonType, ttnnLayout));
       argLocs.push_back(oldArg.getLoc());
+      continue;
     }
     if (auto tensorDescTy = dyn_cast<triton::TensorDescType>(argType)) {
       auto blockTensorTy = tensorDescTy.getBlockType();
