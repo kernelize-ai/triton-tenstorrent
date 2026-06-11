@@ -1,8 +1,5 @@
 #include "PatternTritonNPUToD2M.h"
 
-#include "llvm/Support/Debug.h"
-
-// #include "npu/include/Analysis/Utility.h"
 #include "npu/include/Dialect/TritonTenstorrent/IR/Attributes.h"
 
 #include "triton/Dialect/Triton/IR/Dialect.h"
@@ -17,6 +14,8 @@
 #include "ttmlir/Dialect/TTIR/IR/TTIROps.h"
 
 #include "llvm/ADT/TypeSwitch.h"
+#include "llvm/Support/Debug.h"
+
 namespace mlir {
 using namespace tt;
 namespace triton {
@@ -149,11 +148,8 @@ struct ConvertLoadOp : public OpConversionPattern<triton::LoadOp> {
                   ConversionPatternRewriter &rewriter) const override {
     MLIRContext *context = getContext();
     Location loc = op.getLoc();
-    auto typeConverter = getTypeConverter();
 
     Value ptr = adaptor.getPtr();
-    llvm::errs() << "adaptor ptr = " << ptr << "\n";
-    llvm::errs() << "op ptr = " << op.getPtr() << "\n";
 
     // step 1: allocate L1 space for the load
     MemRefType memRef = cast<MemRefType>(ptr.getType());
@@ -197,6 +193,33 @@ struct ConvertLoadOp : public OpConversionPattern<triton::LoadOp> {
   }
 };
 
+struct ConvertStoreOp : public OpConversionPattern<triton::StoreOp> {
+  using OpConversionPattern<triton::StoreOp>::OpConversionPattern;
+
+  LogicalResult
+  matchAndRewrite(triton::StoreOp op, OpAdaptor adaptor,
+                  ConversionPatternRewriter &rewriter) const override {
+    MLIRContext *context = getContext();
+    Location loc = op.getLoc();
+
+    Value ptr = adaptor.getPtr();
+    auto conversionCastOp =
+        dyn_cast_or_null<UnrealizedConversionCastOp>(ptr.getDefiningOp());
+    assert(conversionCastOp && "expected tt.ptr lowering chain to end in "
+                               "integer offset for load ptr argument");
+    Value index = conversionCastOp.getInputs()[0];
+
+    Value basePtr = traceToBasePtr(op.getPtr());
+    assert(basePtr && "expected store ptr chain to terminate at a layout cast");
+
+    Value src = adaptor.getValue();
+    d2m::RemoteStoreOp::create(rewriter, loc, /*resultType=*/{}, basePtr,
+                               {index}, src);
+    rewriter.eraseOp(op);
+    return success();
+  }
+};
+
 } // namespace
 
 void populateMemoryOpConversionPattern(TypeConverter &typeConverter,
@@ -206,6 +229,7 @@ void populateMemoryOpConversionPattern(TypeConverter &typeConverter,
   patterns.add<ConvertTensorDescStoreOp>(typeConverter, patterns.getContext());
 
   patterns.add<ConvertLoadOp>(typeConverter, patterns.getContext());
+  patterns.add<ConvertStoreOp>(typeConverter, patterns.getContext());
 }
 
 } // namespace experimental
