@@ -199,7 +199,8 @@ struct ConvertTritonNPUToD2MPass
       }
       if (isa<npu::tt::TiledEncodingAttr>(tensorType.getEncoding()) ||
           isa<npu::tt::TiledDotOperandEncodingAttr>(tensorType.getEncoding()) ||
-          isa<gpu::DotOperandEncodingAttr>(tensorType.getEncoding())) {
+          isa<gpu::DotOperandEncodingAttr>(tensorType.getEncoding()) ||
+          isa<gpu::BlockedEncodingAttr>(tensorType.getEncoding())) {
         // Convert to memref in L1.
         auto tileType = ttcore::TileType::get(
             tensorType.getContext(), ttcore::TileType::getDefaultShape(),

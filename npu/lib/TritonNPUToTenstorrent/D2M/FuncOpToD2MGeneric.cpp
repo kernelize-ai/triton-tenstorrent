@@ -15,6 +15,7 @@
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/IR/IRMapping.h"
 
+#include "npu/include/Analysis/Utility.h"
 #include "npu/include/Dialect/TritonTenstorrent/IR/Attributes.h"
 #include "npu/include/Dialect/TritonTenstorrent/IR/Dialect.h"
 
@@ -91,7 +92,43 @@ struct ArgConversionHelper {
   bool isOutputTensorArg(unsigned index) const {
     return outputTensorMap.count(index) > 0;
   }
+
+  static ttnn::TTNNLayoutAttr
+  getTTNNLayoutForMemRef(MemRefType perCoreMemRef,
+                         ArrayRef<int64_t> scalarShape) {
+    MLIRContext *context = perCoreMemRef.getContext();
+    auto memSpaceAttr =
+        ttcore::MemorySpaceAttr::get(context, ttcore::MemorySpace::DeviceDRAM);
+    // TODO: is there ever a case where this would be L1?
+    ttnn::BufferType bufferType =
+        memSpaceAttr.getValue() == ttcore::MemorySpace::DeviceL1
+            ? ttnn::BufferType::L1
+            : ttnn::BufferType::DRAM;
+
+    return ttnn::TTNNLayoutAttr::Builder(context, scalarShape,
+                                         perCoreMemRef.getElementType())
+        .setBufferType(bufferType)
+        .setMemoryLayout(
+            ttnn::TensorMemoryLayout::Interleaved) // support sharded?
+        .build();
+  }
 };
+
+static triton::LoadOp findLoadOpForTensorArg(BlockArgument arg,
+                                             triton::FuncOp funcOp) {
+  triton::LoadOp ret;
+  funcOp.walk([&](triton::LoadOp load) {
+    BlockArgument funcArg = traceToFuncArg(load.getPtr(), funcOp);
+    if (funcArg && funcArg == arg) {
+      // TODO: do we care if there are multiple loads for the same ptr?
+      // probably...
+      ret = load;
+      return WalkResult::interrupt();
+    }
+    return WalkResult::advance();
+  });
+  return ret;
+}
 
 // Convert function arguments - for tensor arguments, we convert to dynamic
 // shape tensors with ttnn layouts. For tensor descriptor arguments, we
@@ -111,9 +148,47 @@ LogicalResult ArgConversionHelper::convertFunctionArguments(
   Block &oldEntry = funcOp.getBody().front();
   for (auto [idx, oldArg] : llvm::enumerate(oldEntry.getArguments())) {
     Type argType = oldArg.getType();
-    if (auto tensorTy = dyn_cast<RankedTensorType>(argType)) {
-      if (isa<PointerType>(tensorTy.getElementType())) {
-        return emitError(oldArg.getLoc(), "pointer types not yet supported");
+
+    if (isa<PointerType>(argType)) {
+      auto ioTypeAttr = dyn_cast_or_null<tt::IOTypeAttr>(
+          funcOp.getArgAttr(idx, kIOTypeAttrName));
+      if (!ioTypeAttr)
+        return funcOp.emitError("missing IOType attribute on tensor argument");
+      llvm::errs() << "found io type attr " << ioTypeAttr << " for arg "
+                   << oldArg << "\n";
+      if (ioTypeAttr.getValue() == tt::IOType::INPUT) {
+        auto loadOp = findLoadOpForTensorArg(oldArg, funcOp);
+        assert(
+            loadOp &&
+            "expected to find dependent load for INPUT type function argument");
+        auto loadType = cast<RankedTensorType>(loadOp.getType());
+        llvm::errs() << "load type = " << loadType << "\n";
+        auto perCoreMemRef =
+            cast<MemRefType>(typeConverter->convertType(loadType));
+        llvm::errs() << "converted type = " << perCoreMemRef << "\n";
+
+        // convert the tiled memref shape to a scalar shape to build the ttnn
+        // layout
+        SmallVector<int64_t> tiledShape =
+            llvm::to_vector(perCoreMemRef.getShape());
+        if (tiledShape.size() == 1)
+          tiledShape.push_back(
+              1); // tenstorrent tiled tensors must be at least rank 2
+        auto tile = cast<ttcore::TileType>(perCoreMemRef.getElementType());
+        auto scalarShape = tile.getScalarShape(tiledShape);
+        llvm::errs() << "scalar shape = " << triton::join(scalarShape) << "\n";
+
+        auto ttnnLayout = getTTNNLayoutForMemRef(perCoreMemRef, scalarShape);
+
+        llvm::errs() << "ttnnLayout = " << ttnnLayout << "\n";
+
+        inputTensorMap.insert({convertedArgTypes.size(), perCoreMemRef});
+        convertedArgTypes.push_back(makeDynamicTensorTy(loadType, ttnnLayout));
+        argLocs.push_back(oldArg.getLoc());
+      } else if (ioTypeAttr.getValue() == tt::IOType::OUTPUT) {
+        llvm_unreachable("TODO");
+      } else {
+        llvm_unreachable("unexpected IOTypeAttr for function argument");
       }
     }
     if (auto tensorDescTy = dyn_cast<triton::TensorDescType>(argType)) {
@@ -128,22 +203,8 @@ LogicalResult ArgConversionHelper::convertFunctionArguments(
              "expected first expanded tensor desc type to be memref");
       // drop the memref, but populate the rest of the expanded args
       auto perCoreMemRef = cast<MemRefType>(expandedTypes.front());
-      auto memSpaceAttr =
-          cast<ttcore::MemorySpaceAttr>(perCoreMemRef.getMemorySpace());
-      // TODO: is there ever a case where this would be L1?
-      ttnn::BufferType bufferType =
-          memSpaceAttr.getValue() == ttcore::MemorySpace::DeviceL1
-              ? ttnn::BufferType::L1
-              : ttnn::BufferType::DRAM;
-
       auto ttnnLayout =
-          ttnn::TTNNLayoutAttr::Builder(rewriter.getContext(),
-                                        blockTensorTy.getShape(),
-                                        perCoreMemRef.getElementType())
-              .setBufferType(bufferType)
-              .setMemoryLayout(
-                  ttnn::TensorMemoryLayout::Interleaved) // or Sharded?
-              .build();
+          getTTNNLayoutForMemRef(perCoreMemRef, blockTensorTy.getShape());
 
       auto ioTypeAttr = dyn_cast_or_null<tt::IOTypeAttr>(
           funcOp.getArgAttr(idx, kIOTypeAttrName));
