@@ -157,8 +157,7 @@ LogicalResult ArgConversionHelper::convertFunctionArguments(
           funcOp.getArgAttr(idx, kIOTypeAttrName));
       if (!ioTypeAttr)
         return funcOp.emitError("missing IOType attribute on tensor argument");
-      llvm::errs() << "found io type attr " << ioTypeAttr << " for arg "
-                   << oldArg << "\n";
+
       if (ioTypeAttr.getValue() == tt::IOType::INPUT) {
         auto loadOp =
             findLoadStoreOpForTensorArg<triton::LoadOp>(oldArg, funcOp);
@@ -172,7 +171,6 @@ LogicalResult ArgConversionHelper::convertFunctionArguments(
         assert(storeOp && "expected to find dependent store for OUTPUT type "
                           "function argument");
         tritonType = cast<RankedTensorType>(storeOp.getPtr().getType());
-        llvm::errs() << "store type = " << tritonType << "\n";
       } else {
         llvm_unreachable("unexpected IOTypeAttr for function argument");
       }
@@ -191,11 +189,9 @@ LogicalResult ArgConversionHelper::convertFunctionArguments(
             1); // tenstorrent tiled tensors must be at least rank 2
       auto tile = cast<ttcore::TileType>(perCoreMemRef.getElementType());
       auto scalarShape = tile.getScalarShape(tiledShape);
-      llvm::errs() << "scalar shape = " << triton::join(scalarShape) << "\n";
 
       auto ttnnLayout = getTTNNLayoutForMemRef(perCoreMemRef, scalarShape);
 
-      llvm::errs() << "ttnnLayout = " << ttnnLayout << "\n";
       if (ioTypeAttr.getValue() == tt::IOType::INPUT)
         inputTensorMap.insert({convertedArgTypes.size(), perCoreMemRef});
       else
