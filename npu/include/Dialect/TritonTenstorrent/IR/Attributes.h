@@ -6,6 +6,9 @@
 #include "npu/include/Dialect/TritonTenstorrent/IR/Dialect.h"
 #include "triton/Dialect/TritonGPU/IR/Dialect.h"
 
+inline constexpr llvm::StringLiteral kIOTypeAttrName =
+    "triton_tenstorrent.io_type";
+
 #define GET_ATTRDEF_CLASSES
 #include "npu/include/Dialect/TritonTenstorrent/IR/AttrDefs.h.inc"
 
