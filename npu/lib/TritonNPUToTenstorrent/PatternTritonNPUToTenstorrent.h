@@ -23,7 +23,8 @@ void populateComputeOpConversionPattern(TypeConverter &typeConverter,
 
 void populateElementwiseOpConversionPattern(TypeConverter &typeConverter,
                                             RewritePatternSet &patterns,
-                                            PatternBenefit benefit);
+                                            PatternBenefit benefit,
+                                            bool isD2M = false);
 
 void populateIntrinsicOpConversionPattern(TypeConverter &typeConverter,
                                           RewritePatternSet &patterns,
