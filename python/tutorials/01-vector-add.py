@@ -102,7 +102,6 @@ if torch.allclose(output_torch.float(), output_triton.float(), rtol=0, atol=atol
 else:
     print(f'❌ FAIL (max diff {max_diff:.6g} > atol {atol})')
 
-
 # %%
 # Seems like we're good to go!
 
