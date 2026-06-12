@@ -44,12 +44,12 @@ module attributes {"ttg.num-ctas" = 1 : i32, "ttg.num-warps" = 1 : i32, ttg.targ
 
   // Each !tt.ptr<f32> arg becomes (tensor, i32); INPUT/OUTPUT pointers map to
   // tensors, the trailing i32s plus block start/end become additionalArgs.
-  // CHECK-LABEL: func.func @add_kernel(
-  // CHECK-SAME: tensor<?xf32, #[[L]]>, %{{[^:]+}}: i32,
-  // CHECK-SAME: tensor<?xf32, #[[L]]>, %{{[^:]+}}: i32,
-  // CHECK-SAME: tensor<?x!tt.ptr<f32>, #[[L]]>, %{{[^:]+}}: i32,
+  // CHECK: func.func @add_kernel(
+  // CHECK-SAME: tensor<?x?xf32, #[[L]]>,
+  // CHECK-SAME: tensor<?x?xf32, #[[L]]>,
+  // CHECK-SAME: tensor<?x?x!tt.ptr<f32>, #[[L]]>,
   // CHECK-SAME: i32, %{{[^:]+}}: i32, %{{[^:]+}}: i32)
-  // CHECK-SAME: -> tensor<?x!tt.ptr<f32>, #[[L]]>
+  // CHECK-SAME: -> tensor<?x?x!tt.ptr<f32>, #[[L]]>
   // CHECK-SAME: attributes {tt.function_type = "forward_device"}
   tt.func public @add_kernel(
       %x_ptr: !tt.ptr<f32> {triton_tenstorrent.io_type = #triton_tenstorrent.io_type<input>, tt.divisibility = 8 : i32},
