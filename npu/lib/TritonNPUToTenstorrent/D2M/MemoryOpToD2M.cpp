@@ -58,10 +58,11 @@ struct ConvertTensorDescLoadOp
     auto tileShape = llvm::to_vector(
         llvm::drop_begin(gridShardShape, loadTensorType.getRank()));
 
+    // TODO: get this from the type converter?
     auto cbLayout = ttcore::CBLayoutAttr::get(
         context, tileShape,
         ttcore::getElementSizeBytes(descType.getElementType()),
-        /*buffers=*/tileShape.size());
+        /*buffers=*/2);
     auto allocType = MemRefType::get(
         tileShape, descType.getElementType(), cbLayout,
         ttcore::MemorySpaceAttr::get(context, ttcore::MemorySpace::DeviceL1));
@@ -159,14 +160,8 @@ struct ConvertLoadOp : public OpConversionPattern<triton::LoadOp> {
     if (tileShape.size() == 1)
       tileShape.push_back(1);
 
-    auto loadTensorType = cast<RankedTensorType>(op.getType());
-    auto cbLayout = ttcore::CBLayoutAttr::get(
-        context, tileShape,
-        ttcore::getElementSizeBytes(memRef.getElementType()),
-        /*buffers=*/tileShape.size());
-    auto allocType = MemRefType::get(
-        tileShape, memRef.getElementType(), cbLayout,
-        ttcore::MemorySpaceAttr::get(context, ttcore::MemorySpace::DeviceL1));
+    auto allocType = cast<MemRefType>(
+        getTypeConverter()->convertType(op.getResult().getType()));
     auto allocOp = memref::AllocOp::create(rewriter, loc, allocType);
 
     // step 2: create the load
@@ -181,6 +176,8 @@ struct ConvertLoadOp : public OpConversionPattern<triton::LoadOp> {
         dyn_cast_or_null<UnrealizedConversionCastOp>(ptr.getDefiningOp());
     assert(conversionCastOp && "expected tt.ptr lowering chain to end in "
                                "integer offset for load ptr argument");
+    // TODO: index is in bytes, not tiles. need to divide by tile size
+    // TODO: remote load always loads the entire tile - is that a problem here?
     Value index =
         arith::IndexCastOp::create(rewriter, loc, rewriter.getIndexType(),
                                    conversionCastOp.getInputs()[0]);
@@ -211,6 +208,7 @@ struct ConvertStoreOp : public OpConversionPattern<triton::StoreOp> {
         dyn_cast_or_null<UnrealizedConversionCastOp>(ptr.getDefiningOp());
     assert(conversionCastOp && "expected tt.ptr lowering chain to end in "
                                "integer offset for load ptr argument");
+    // TODO: index is in bytes, not tiles. need to divide by tile size
     Value index =
         arith::IndexCastOp::create(rewriter, loc, rewriter.getIndexType(),
                                    conversionCastOp.getInputs()[0]);
