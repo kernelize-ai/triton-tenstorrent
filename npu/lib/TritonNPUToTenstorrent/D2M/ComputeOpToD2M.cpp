@@ -33,8 +33,6 @@ struct ConvertBinaryComputeOp
     Value lhs = adaptor.getLhs();
     Value rhs = adaptor.getRhs();
 
-    llvm::errs() << "lhs: " << lhs << "\n";
-    llvm::errs() << "rhs: " << rhs << "\n";
     auto cbType = cast<MemRefType>(lhs.getType());
     Value out = memref::AllocOp::create(rewriter, loc, cbType);
 
