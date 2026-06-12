@@ -178,6 +178,7 @@ struct ConvertTritonNPUToD2MPass
 
       SmallVector<int64_t> shape(tensorType.getRank(), 1);
       shape.append(shardShape.begin(), shardShape.end());
+      // TODO: shard layout or interleaved?
       auto memRefType = MemRefType::get(
           shape, tileType,
           ttcore::ShardLayoutAttr::get(shardShape, tileType, /*buffers=*/1),
@@ -208,11 +209,11 @@ struct ConvertTritonNPUToD2MPass
         SmallVector<int64_t> shardShape =
             calculateShardShape(tensorType, tileType);
 
-        // Assume all L1 allocations are in CBs.
-        auto cbLayout =
-            ttcore::CBLayoutAttr::get(tensorType.getContext(), shardShape,
-                                      ttcore::getElementSizeBytes(tileType),
-                                      /*buffers=*/shardShape.size());
+        // Assume all L1 allocations are in double-buffered CBs.
+        auto cbLayout = ttcore::CBLayoutAttr::get(
+            tensorType.getContext(), shardShape,
+            ttcore::getElementSizeBytes(tileType),
+            /*buffers=*/2);
         auto memRefType = MemRefType::get(
             shardShape, tileType, cbLayout,
             ttcore::MemorySpaceAttr::get(tensorType.getContext(),
