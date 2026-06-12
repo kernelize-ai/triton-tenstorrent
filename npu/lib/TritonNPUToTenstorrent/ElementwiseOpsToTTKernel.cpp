@@ -21,6 +21,11 @@ namespace {
 struct ConvertAddPtrOp : public OpConversionPattern<AddPtrOp> {
   using OpConversionPattern<AddPtrOp>::OpConversionPattern;
 
+  explicit ConvertAddPtrOp(TypeConverter &typeConverter,
+                           bool includeAddPtrByteOffset, MLIRContext *context)
+      : OpConversionPattern<AddPtrOp>(typeConverter, context),
+        includeAddPtrByteOffset(includeAddPtrByteOffset) {}
+
   LogicalResult
   matchAndRewrite(AddPtrOp op, OpAdaptor adaptor,
                   ConversionPatternRewriter &rewriter) const override {
@@ -119,12 +124,14 @@ struct ConvertAddPtrOp : public OpConversionPattern<AddPtrOp> {
     Value offset = rewrittenOffsetOps.back();
     LDBG("Computed scalar offset: " << offset);
 
-    // Drop the base addr and just return the offset converted to bytes
-    auto ptrType = cast<triton::PointerType>(tensorType.getElementType());
-    auto elemType = ptrType.getPointeeType();
-    auto elemSize = elemType.getIntOrFloatBitWidth() / 8;
-    Value elemSizeValue = arith::createConstantI32(loc, rewriter, elemSize);
-    offset = arith::MulIOp::create(rewriter, loc, offset, elemSizeValue);
+    if (includeAddPtrByteOffset) {
+      // Drop the base addr and just return the offset converted to bytes
+      auto ptrType = cast<triton::PointerType>(tensorType.getElementType());
+      auto elemType = ptrType.getPointeeType();
+      auto elemSize = elemType.getIntOrFloatBitWidth() / 8;
+      Value elemSizeValue = arith::createConstantI32(loc, rewriter, elemSize);
+      offset = arith::MulIOp::create(rewriter, loc, offset, elemSizeValue);
+    }
     LDBG("Replace addptr with offset in bytes: " << offset);
 
     // for addptr ops with a loop carried ptr operand we want to keep the add
@@ -142,6 +149,8 @@ struct ConvertAddPtrOp : public OpConversionPattern<AddPtrOp> {
 
     return success();
   }
+
+  const bool includeAddPtrByteOffset;
 };
 
 template <typename OpTy>
@@ -192,8 +201,10 @@ struct ArithUnaryOpOnTensorsConversion : public OpConversionPattern<OpTy> {
 
 void populateElementwiseOpConversionPattern(TypeConverter &typeConverter,
                                             RewritePatternSet &patterns,
-                                            PatternBenefit benefit) {
-  patterns.add<ConvertAddPtrOp>(typeConverter, patterns.getContext());
+                                            PatternBenefit benefit,
+                                            bool isD2M) {
+  patterns.add<ConvertAddPtrOp>(
+      typeConverter, /*includeAddPtrByteOffset=*/!isD2M, patterns.getContext());
 
 #define POPULATE_ARITH_BINARY_OP_ON_TENSORS(OP)                                \
   patterns.add<ArithBinaryOpOnTensorsConversion<OP>>(typeConverter,            \
@@ -215,7 +226,9 @@ void populateElementwiseOpConversionPattern(TypeConverter &typeConverter,
   patterns.add<ArithUnaryOpOnTensorsConversion<OP>>(typeConverter,             \
                                                     patterns.getContext());
 
-  POPULATE_ARITH_UNARY_OP_ON_TENSORS(arith::TruncFOp);
+  if (!isD2M) {
+    POPULATE_ARITH_UNARY_OP_ON_TENSORS(arith::TruncFOp);
+  }
 }
 
 } // namespace npu

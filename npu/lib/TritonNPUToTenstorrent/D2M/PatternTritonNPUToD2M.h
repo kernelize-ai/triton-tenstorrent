@@ -8,6 +8,10 @@ namespace triton {
 namespace npu {
 namespace experimental {
 
+void populateComputeOpConversionPattern(TypeConverter &typeConverter,
+                                        RewritePatternSet &patterns,
+                                        PatternBenefit benefit);
+
 void populateDotOpConversionPattern(TypeConverter &typeConverter,
                                     RewritePatternSet &patterns,
                                     PatternBenefit benefit);

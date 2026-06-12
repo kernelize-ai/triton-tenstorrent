@@ -137,7 +137,7 @@ SmallVector<int64_t> calculateShardShape(RankedTensorType tensorType,
     auto cols = tileType.getShape()[1];
     assert(dim % (rows * cols) == 0 &&
            "tensor dimension must be a multiple of tile size");
-    return {dim / (rows * cols)};
+    return {dim / (rows * cols), 1};
   } else if (tensorType.getRank() == 2) {
     return llvm::to_vector(map_range(
         (llvm::zip(tensorType.getShape(), tileType.getShape())),
@@ -176,8 +176,14 @@ struct ConvertTritonNPUToD2MPass
       SmallVector<int64_t> shardShape =
           calculateShardShape(tensorType, tileType);
 
+      // TODO: this should probably be the grid shape, and we don't have enough
+      // info to handle that here - so we should be handling grid shape
+      // conversions at the call site
       SmallVector<int64_t> shape(tensorType.getRank(), 1);
+      if (shape.size() == 1)
+        shape.push_back(1);
       shape.append(shardShape.begin(), shardShape.end());
+      // TODO: shard layout or interleaved?
       auto memRefType = MemRefType::get(
           shape, tileType,
           ttcore::ShardLayoutAttr::get(shardShape, tileType, /*buffers=*/1),
@@ -191,15 +197,16 @@ struct ConvertTritonNPUToD2MPass
     });
     typeConverter.addConversion([](RankedTensorType tensorType) -> Type {
       auto eType = tensorType.getElementType();
-      if (isa<triton::PointerType>(eType)) {
-        return IntegerType::get(tensorType.getContext(), 32);
+      if (auto ptrType = dyn_cast<triton::PointerType>(eType)) {
+        eType = ptrType.getPointeeType();
       }
       if (!tensorType.getEncoding()) {
-        return tensorType;
+        return RankedTensorType::get(tensorType.getShape(), eType);
       }
       if (isa<npu::tt::TiledEncodingAttr>(tensorType.getEncoding()) ||
           isa<npu::tt::TiledDotOperandEncodingAttr>(tensorType.getEncoding()) ||
-          isa<gpu::DotOperandEncodingAttr>(tensorType.getEncoding())) {
+          isa<gpu::DotOperandEncodingAttr>(tensorType.getEncoding()) ||
+          isa<gpu::BlockedEncodingAttr>(tensorType.getEncoding())) {
         // Convert to memref in L1.
         auto tileType = ttcore::TileType::get(
             tensorType.getContext(), ttcore::TileType::getDefaultShape(),
@@ -207,11 +214,11 @@ struct ConvertTritonNPUToD2MPass
         SmallVector<int64_t> shardShape =
             calculateShardShape(tensorType, tileType);
 
-        // Assume all L1 allocations are in CBs.
+        // Assume all L1 allocations are in double-buffered CBs.
         auto cbLayout =
             ttcore::CBLayoutAttr::get(tensorType.getContext(), shardShape,
                                       ttcore::getElementSizeBytes(tileType),
-                                      /*buffers=*/shardShape.size());
+                                      /*buffers=*/2);
         auto memRefType = MemRefType::get(
             shardShape, tileType, cbLayout,
             ttcore::MemorySpaceAttr::get(tensorType.getContext(),
@@ -253,6 +260,7 @@ struct ConvertTritonNPUToD2MPass
     target.addIllegalDialect<triton::TritonDialect>();
     target.addIllegalDialect<triton::cpu::TritonCPUDialect>();
     target.addIllegalDialect<triton::gpu::TritonGPUDialect>();
+    target.addIllegalDialect<npu::tt::TritonTenstorrentDialect>();
 
     target.addLegalOp<UnrealizedConversionCastOp>();
     target.addDynamicallyLegalDialect<arith::ArithDialect>([&](Operation *op) {
@@ -269,6 +277,8 @@ struct ConvertTritonNPUToD2MPass
     });
 
     mlir::RewritePatternSet patterns(context);
+    experimental::populateComputeOpConversionPattern(typeConverter, patterns,
+                                                     PatternBenefit(1));
     experimental::populateDotOpConversionPattern(typeConverter, patterns,
                                                  PatternBenefit(1));
     experimental::populateMemoryOpConversionPattern(typeConverter, patterns,
@@ -277,6 +287,14 @@ struct ConvertTritonNPUToD2MPass
                                                   PatternBenefit(1));
     experimental::populateReduceOpConversionPattern(typeConverter, patterns,
                                                     PatternBenefit(1));
+
+    populateMakeRangeOpConversionPattern(typeConverter, patterns,
+                                         PatternBenefit(1));
+    populateElementwiseOpConversionPattern(typeConverter, patterns,
+                                           PatternBenefit(1),
+                                           /*isD2M=*/true);
+    populateViewOpConversionPattern(typeConverter, patterns, PatternBenefit(1));
+
     mlir::scf::populateSCFStructuralTypeConversionsAndLegality(
         typeConverter, patterns, target);
 
