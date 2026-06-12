@@ -52,11 +52,12 @@ struct ConvertTensorDescLoadOp
     auto gridShardShape = descType.getShape();
 
     auto loadTensorType = cast<RankedTensorType>(op.getType());
-    assert(gridShardShape.size() == 2 * loadTensorType.getRank() &&
+
+    const int64_t rank = std::max(loadTensorType.getRank(), int64_t{2});
+    assert(gridShardShape.size() == 2 * rank &&
            "expecting descriptor to have 2*rank dimensions for grid shape and "
            "shard shape");
-    auto tileShape = llvm::to_vector(
-        llvm::drop_begin(gridShardShape, loadTensorType.getRank()));
+    auto tileShape = llvm::to_vector(llvm::drop_begin(gridShardShape, rank));
 
     // TODO: get this from the type converter?
     auto cbLayout = ttcore::CBLayoutAttr::get(
@@ -80,6 +81,8 @@ struct ConvertTensorDescLoadOp
     for (Value idx : op.getIndices())
       indices.push_back(arith::IndexCastOp::create(
           rewriter, loc, rewriter.getIndexType(), idx));
+    if (indices.size() == 1)
+      indices.push_back(arith::createIndexConstant(loc, rewriter, 0));
 
     // step 3: create the remote load
     d2m::RemoteLoadOp::create(rewriter, loc, {}, allocOp.getResult(), descPtr,
@@ -109,6 +112,8 @@ struct ConvertTensorDescStoreOp
     for (Value idx : op.getIndices())
       indices.push_back(arith::IndexCastOp::create(
           rewriter, loc, rewriter.getIndexType(), idx));
+    if (indices.size() == 1)
+      indices.push_back(arith::createIndexConstant(loc, rewriter, 0));
 
     Value src = adaptor.getSrc()[0];
 

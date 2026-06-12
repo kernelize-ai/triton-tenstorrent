@@ -124,8 +124,8 @@ module attributes {"ttg.num-ctas" = 1 : i32, "ttg.num-warps" = 1 : i32, ttg.targ
   tt.func public @reduce_sum_bf16_1d(
       %in_desc: !tt.tensordesc<tensor<1024xbf16>> {triton_tenstorrent.io_type = #triton_tenstorrent.io_type<input>}, %out_desc: !tt.tensordesc<tensor<1024xbf16>> {triton_tenstorrent.io_type = #triton_tenstorrent.io_type<output>}, %row: i32)
       attributes {noinline = false} {
-    // CHECK: %[[SRC:.*]] = memref.alloc() : memref<1x!ttcore.tile<32x32, bf16>
-    // CHECK: %[[DST:.*]] = memref.alloc() : memref<1x!ttcore.tile<32x32, bf16>
+    // CHECK: %[[SRC:.*]] = memref.alloc() : memref<1x1x!ttcore.tile<32x32, bf16>
+    // CHECK: %[[DST:.*]] = memref.alloc() : memref<1x1x!ttcore.tile<32x32, bf16>
     %in = tt.descriptor_load %in_desc[%row] : !tt.tensordesc<tensor<1024xbf16>> -> tensor<1024xbf16, #tiled_1d>
     %red = "tt.reduce"(%in) <{axis = 0 : i32}> ({
     ^bb0(%lhs: bf16, %rhs: bf16):
@@ -137,7 +137,7 @@ module attributes {"ttg.num-ctas" = 1 : i32, "ttg.num-warps" = 1 : i32, ttg.targ
     // CHECK: d2m.tile_fill
     // CHECK: linalg.yield
     // CHECK: linalg.generic
-    // CHECK-SAME: iterator_types = ["parallel"]
+    // CHECK-SAME: iterator_types = ["parallel", "parallel"]
     // CHECK-SAME: ins(%[[SRC]]
     // CHECK-SAME: outs(%[[DST]]
     // CHECK: d2m.tile_fill

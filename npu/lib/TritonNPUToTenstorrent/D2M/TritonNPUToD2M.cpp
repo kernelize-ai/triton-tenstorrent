@@ -176,7 +176,12 @@ struct ConvertTritonNPUToD2MPass
       SmallVector<int64_t> shardShape =
           calculateShardShape(tensorType, tileType);
 
+      // TODO: this should probably be the grid shape, and we don't have enough
+      // info to handle that here - so we should be handling grid shape
+      // conversions at the call site
       SmallVector<int64_t> shape(tensorType.getRank(), 1);
+      if (shape.size() == 1)
+        shape.push_back(1);
       shape.append(shardShape.begin(), shardShape.end());
       // TODO: shard layout or interleaved?
       auto memRefType = MemRefType::get(
@@ -210,10 +215,10 @@ struct ConvertTritonNPUToD2MPass
             calculateShardShape(tensorType, tileType);
 
         // Assume all L1 allocations are in double-buffered CBs.
-        auto cbLayout = ttcore::CBLayoutAttr::get(
-            tensorType.getContext(), shardShape,
-            ttcore::getElementSizeBytes(tileType),
-            /*buffers=*/2);
+        auto cbLayout =
+            ttcore::CBLayoutAttr::get(tensorType.getContext(), shardShape,
+                                      ttcore::getElementSizeBytes(tileType),
+                                      /*buffers=*/2);
         auto memRefType = MemRefType::get(
             shardShape, tileType, cbLayout,
             ttcore::MemorySpaceAttr::get(tensorType.getContext(),
@@ -286,7 +291,8 @@ struct ConvertTritonNPUToD2MPass
     populateMakeRangeOpConversionPattern(typeConverter, patterns,
                                          PatternBenefit(1));
     populateElementwiseOpConversionPattern(typeConverter, patterns,
-                                           PatternBenefit(1));
+                                           PatternBenefit(1),
+                                           /*isD2M=*/true);
     populateViewOpConversionPattern(typeConverter, patterns, PatternBenefit(1));
 
     mlir::scf::populateSCFStructuralTypeConversionsAndLegality(
