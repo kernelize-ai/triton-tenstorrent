@@ -213,7 +213,11 @@ LogicalResult ArgConversionHelper::convertFunctionArguments(
       else
         outputTensorMap.insert({convertedArgTypes.size(), functionArgMemRef});
 
-      convertedArgTypes.push_back(makeDynamicTensorTy(tritonType, ttnnLayout));
+      // use the tiled shape in the function arguments so the tensor rank
+      // matches the memrefs
+      convertedArgTypes.push_back(makeDynamicTensorTy(
+          RankedTensorType::get(tiledShape, tritonType.getElementType()),
+          ttnnLayout));
       argLocs.push_back(oldArg.getLoc());
       continue;
     }
