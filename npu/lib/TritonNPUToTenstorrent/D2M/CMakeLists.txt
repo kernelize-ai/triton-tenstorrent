@@ -10,5 +10,7 @@ add_triton_library(TritonNPUToD2M
     DEPENDS
     TritonNPUToD2MConversionPassIncGen
 
-    LINK_LIBS ${TTMLIR_LIBS}
+    LINK_LIBS
+    ${TTMLIR_LIBS}
+    TritonNPUAnalysis
     )
