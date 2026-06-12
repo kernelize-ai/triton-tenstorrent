@@ -351,6 +351,9 @@ class TTRTLauncher(object):
             #       i) instead of assuming a 32-wide row; that also covers the
             #       N % 32 != 0 case (needs padding + masking in the kernel).
             if t.dim() == 1 and t.numel() % 32 == 0:
+                if not t.is_contiguous():
+                    raise ValueError(
+                        "Cannot reshape non-contiguous 1D tensor for tilization; please pass a contiguous tensor")
                 t = t.view(t.numel() // 32, 32)
             rt = ttrt.runtime.create_borrowed_host_tensor(
                 t.data_ptr(),
