@@ -21,6 +21,12 @@ using namespace mlir::triton::npu;
 
 namespace mlir::triton::npu::tt {
 
+GridAttr TritonTenstorrentDialect::getGridAttr(ModuleOp mod) {
+  if (auto attr = mod->getAttrOfType<GridAttr>(AttrGridName))
+    return attr;
+  assert(false && "TODO");
+}
+
 // TODO: refactor to shared header
 
 static LogicalResult parseIntAttrValue(AsmParser &parser, Attribute attr,
