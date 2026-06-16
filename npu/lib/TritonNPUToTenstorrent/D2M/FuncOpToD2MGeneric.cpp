@@ -321,8 +321,12 @@ struct ConvertTritonFunc : public OpConversionPattern<triton::FuncOp> {
     MLIRContext *context = funcOp.getContext();
     auto typeConverter = getTypeConverter();
 
-    // TODO: populate correct grid size
-    auto grid = ttcore::GridAttr::get(context, {1, 1});
+    ModuleOp mod = funcOp->getParentOfType<ModuleOp>();
+    // read the triton defined grid attribute from the module and use it to set
+    // tenstorrent grid parameters
+    auto gridAttr = tt::TritonTenstorrentDialect::getGridAttr(mod);
+
+    auto grid = ttcore::GridAttr::get(context, gridAttr.getShape());
 
     mlir::FunctionType tritonTy = funcOp.getFunctionType();
     assert(tritonTy.getResults().empty() &&
