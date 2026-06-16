@@ -178,40 +178,31 @@ int main() {
         uint32_t(num_cores * blocks_per_core * n_elements_per_tile)
     };
 
+
+    // instead of passing each core a precomputed
+    // [block_start, block_end), pass {stride_x, stride_y, gridX, gridY} and let
+    // the kernel derive its own range from its logical (my_x, my_y):
+    //   block_start = my_x*stride_x + my_y*stride_y
+    //   block_end   = min(block_start + stride_x, gridX*gridY)
+    // stride_x is the per-core chunk; stride_y steps over a full row of cores.
+    // The z grid dimension is folded into these host-side strides. Because the
+    // per-core offset is computed on device, these four values are identical for
+    // every core (they still must be set as unique runtime args).
+    uint32_t grid_width = cores.grid_size().x;
+    uint32_t total_blocks = num_cores * blocks_per_core;  // == gridX * gridY
+    std::vector<uint32_t> grid_args = {
+        blocks_per_core,               // stride_x (per-core chunk)
+        grid_width * blocks_per_core,  // stride_y (row stride)
+        total_blocks,                  // gridX
+        1                              // gridY
+    };
+    common_args.insert(common_args.end(), grid_args.begin(), grid_args.end());
+
     tt_metal::SetCommonRuntimeArgs(program, binary_reader_kernel_id, common_args);
     tt_metal::SetCommonRuntimeArgs(program, unary_writer_kernel_id, common_args);
     tt_metal::SetCommonRuntimeArgs(program, eltwise_binary_kernel_id, common_args);
 
     fmt::print("Core grid size: {}, {}\n", cores.grid_size().x, cores.grid_size().y);
-    for (const auto& core : cores) {
-        uint32_t core_id = core.x + core.y * cores.grid_size().x;
-        SetRuntimeArgs(
-            program,
-            binary_reader_kernel_id,
-            core,
-            {
-                core_id * blocks_per_core,
-                core_id * blocks_per_core + blocks_per_core
-            });
-
-        SetRuntimeArgs(
-            program, 
-            eltwise_binary_kernel_id, 
-            core, 
-            {
-                core_id * blocks_per_core,
-                core_id * blocks_per_core + blocks_per_core
-            });
-
-        SetRuntimeArgs(
-            program,
-            unary_writer_kernel_id,
-            core,
-            {
-                core_id * blocks_per_core,
-                core_id * blocks_per_core + blocks_per_core
-            });
-    }
 #else
     SetRuntimeArgs(
         program,

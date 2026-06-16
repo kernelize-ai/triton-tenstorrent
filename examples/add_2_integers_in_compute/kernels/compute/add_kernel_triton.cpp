@@ -22,9 +22,12 @@ void kernel_main() {
   CircularBuffer cb_ctarg_1(get_compile_time_arg_val(1));
   CircularBuffer cb_ctarg_0(get_compile_time_arg_val(0));
   init_sfpu(get_compile_time_arg_val(0), get_compile_time_arg_val(2));
-  int32_t v5 = get_arg_val<uint32_t>(v2);
-  int32_t v6 = get_arg_val<uint32_t>(v1);
-  for (int32_t i7 = v6; i7 < v5; i7 += v3) {
+  int32_t v5 = get_common_arg_val<uint32_t>(4);
+  int32_t v6 = get_common_arg_val<uint32_t>(6);
+  int32_t v7 = get_common_arg_val<uint32_t>(7);
+  int32_t v8 = get_common_arg_val<uint32_t>(5);
+  int32_t v9 = (int32_t) ((uint32_t) ((int32_t) ((uint32_t) ((int32_t) ((ptrdiff_t) get_absolute_logical_x())) * (uint32_t) v5)) + (uint32_t) ((int32_t) ((uint32_t) ((int32_t) ((ptrdiff_t) get_absolute_logical_y())) * (uint32_t) v8)));
+  for (int32_t i10 = v9; i10 < ((int32_t) ((uint32_t) v9 + (uint32_t) v5) < (int32_t) ((uint32_t) v6 * (uint32_t) v7) ? (int32_t) ((uint32_t) v9 + (uint32_t) v5) : (int32_t) ((uint32_t) v6 * (uint32_t) v7)); i10 += v3) {
     tile_regs_acquire();
     {
     DeviceZoneScopedN("cb_wait_front");
