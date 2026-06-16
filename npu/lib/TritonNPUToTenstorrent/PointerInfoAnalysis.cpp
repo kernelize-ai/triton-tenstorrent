@@ -33,7 +33,9 @@ inline Value traceToBaseAddress(Value ptr) {
   SetVector<Operation *> baseAddrSlice;
   mlir::BackwardSliceOptions opt;
   opt.omitBlockArguments = true;
-  opt.filter = [](Operation *op) { return !isa<ttkernel::GetArgValOp>(op); };
+  opt.filter = [](Operation *op) {
+    return !isa<ttkernel::GetCommonArgValOp>(op);
+  };
   (void)getBackwardSlice(ptr, &baseAddrSlice, opt);
   LLVM_DEBUG(for (Operation *op : baseAddrSlice) {
     DBGS() << "backward slice op: " << *op << "\n";

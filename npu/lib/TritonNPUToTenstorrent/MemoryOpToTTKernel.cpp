@@ -792,7 +792,7 @@ struct ConvertMulticastOp : public OpConversionPattern<npu::tt::MulticastOp> {
     auto multicastGroupArgsBase =
         parentFuncOp->getAttrOfType<IntegerAttr>(kTTNumPerCoreArgsAttr)
             .getInt() +
-        PerCoreArgOffsets::kThreadId;
+        PerCoreArgOffsets::kMulticastGroup;
     Value multicastStartIndex =
         arith::createIndexConstant(loc, rewriter, multicastGroupArgsBase);
     Value multicastEndIndex =

@@ -24,27 +24,13 @@ struct ConvertGetProgramIdOp : public OpConversionPattern<GetProgramIdOp> {
   LogicalResult
   matchAndRewrite(GetProgramIdOp op, OpAdaptor adaptor,
                   ConversionPatternRewriter &rewriter) const override {
-    Location loc = op.getLoc();
-    auto axis = adaptor.getAxis() == ProgramIDDim::X   ? 0
-                : adaptor.getAxis() == ProgramIDDim::Y ? 1
-                                                       : 2;
-
-    auto funcOp = op->getParentOfType<func::FuncOp>();
-    assert(funcOp && "expected FuncOp as a parent of GetProgramIdOp");
-    auto launchParamIndex =
-        funcOp->getAttrOfType<IntegerAttr>(kTTNumPerCoreArgsAttr).getInt();
-    // TODO: this needs to support multiple dimensions for each per core arg
-    // offset
-    Value paramIndexValue =
-        arith::createIndexConstant(loc, rewriter, launchParamIndex + axis);
-    auto launchParam = ttkernel::GetArgValOp::create(
-        rewriter, loc, rewriter.getI32Type(), paramIndexValue);
-    rewriter.replaceOp(op, launchParam);
-
-    return success();
+    return op.emitError("Expected GetProgramId op to be replaced during "
+                        "MakePersistentKernel pass");
   }
 };
 
+// Note: we currently ignore the axis attribute since the (x,y,z) grid is folded
+// to (x,y) on the host
 struct ConvertGetNumProgramsOp : public OpConversionPattern<GetNumProgramsOp> {
   using OpConversionPattern<GetNumProgramsOp>::OpConversionPattern;
 
@@ -55,53 +41,100 @@ struct ConvertGetNumProgramsOp : public OpConversionPattern<GetNumProgramsOp> {
 
     auto funcOp = op->getParentOfType<func::FuncOp>();
     assert(funcOp && "expected FuncOp as a parent of GetProgramIdOp");
-    auto perCoreArgsBase =
-        funcOp->getAttrOfType<IntegerAttr>(kTTNumPerCoreArgsAttr).getInt();
-    // TODO: this needs to support multiple dimensions for each per core arg
-    // offset
-    Value index = arith::createIndexConstant(
-        loc, rewriter, perCoreArgsBase + PerCoreArgOffsets::kNumBlocks);
-    auto runtimeArgVal = ttkernel::GetArgValOp::create(
-        rewriter, loc, rewriter.getI32Type(), index);
-    rewriter.replaceOp(op, runtimeArgVal);
+    auto commonArgsBase =
+        funcOp->getAttrOfType<IntegerAttr>(kTTNumCommonArgsAttr).getInt();
+    Value xGridIndex = arith::createIndexConstant(
+        loc, rewriter, commonArgsBase + GridArgffsets::kGridX);
+    Value xGrid = ttkernel::GetCommonArgValOp::create(
+        rewriter, loc, rewriter.getI32Type(), xGridIndex);
+
+    Value yGridIndex = arith::createIndexConstant(
+        loc, rewriter, commonArgsBase + GridArgffsets::kGridY);
+    Value yGrid = ttkernel::GetCommonArgValOp::create(
+        rewriter, loc, rewriter.getI32Type(), yGridIndex);
+    Value numBlocks = arith::MulIOp::create(rewriter, loc, xGrid, yGrid);
+    rewriter.replaceOp(op, numBlocks);
 
     return success();
   }
 };
-template <typename OpTy>
-class BlockIndexOpConversion : public OpConversionPattern<OpTy> {
-  using OpConversionPattern<OpTy>::OpConversionPattern;
-  using OpAdaptor = typename OpTy::Adaptor;
 
-public:
-  explicit BlockIndexOpConversion(TypeConverter &typeConverter,
-                                  const int funcArgIndexOffset,
-                                  MLIRContext *context)
-      : OpConversionPattern<OpTy>(typeConverter, context),
-        funcArgIndexOffset(funcArgIndexOffset) {}
-
+struct BlockStartOpConversion : public OpConversionPattern<cpu::BlockStartOp> {
+  using OpConversionPattern<cpu::BlockStartOp>::OpConversionPattern;
   LogicalResult
-  matchAndRewrite(OpTy op, typename OpTy::Adaptor adaptor,
+  matchAndRewrite(cpu::BlockStartOp op, OpAdaptor adaptor,
                   ConversionPatternRewriter &rewriter) const override {
     Location loc = op.getLoc();
 
-    auto funcOp = op->template getParentOfType<FunctionOpInterface>();
-    assert(funcOp && "expected FuncOp as a parent of BlockIndexOp");
+    auto funcOp = op->getParentOfType<func::FuncOp>();
+    assert(funcOp && "expected FuncOp as a parent of cpu::BlockStartOp");
+    auto commonArgsBase =
+        funcOp->getAttrOfType<IntegerAttr>(kTTNumCommonArgsAttr).getInt();
 
-    auto launchParamIndex =
-        funcOp->template getAttrOfType<IntegerAttr>(kTTNumPerCoreArgsAttr)
-            .getInt();
-    Value paramIndexValue = arith::createIndexConstant(
-        loc, rewriter, launchParamIndex + funcArgIndexOffset);
-    auto launchParam = ttkernel::GetArgValOp::create(
-        rewriter, loc, rewriter.getI32Type(), paramIndexValue);
-    rewriter.replaceOp(op, launchParam);
+    Value xStrideIndex = arith::createIndexConstant(
+        loc, rewriter, commonArgsBase + GridArgffsets::kStrideX);
+    Value xStride = ttkernel::GetCommonArgValOp::create(
+        rewriter, loc, rewriter.getI32Type(), xStrideIndex);
 
+    Value yStrideIndex = arith::createIndexConstant(
+        loc, rewriter, commonArgsBase + GridArgffsets::kStrideY);
+    Value yStride = ttkernel::GetCommonArgValOp::create(
+        rewriter, loc, rewriter.getI32Type(), yStrideIndex);
+
+    Value xLogicalIndex = arith::IndexCastOp::create(
+        rewriter, loc, rewriter.getI32Type(),
+        ttkernel::MyLogicalXOp::create(rewriter, loc));
+    Value yLogicalIndex = arith::IndexCastOp::create(
+        rewriter, loc, rewriter.getI32Type(),
+        ttkernel::MyLogicalYOp::create(rewriter, loc));
+
+    Value xStart = arith::MulIOp::create(rewriter, loc, xLogicalIndex, xStride);
+    Value yStart = arith::MulIOp::create(rewriter, loc, yLogicalIndex, yStride);
+
+    Value start = arith::AddIOp::create(rewriter, loc, xStart, yStart);
+    rewriter.replaceOp(op, start);
     return success();
   }
+};
 
-private:
-  const int funcArgIndexOffset;
+struct BlockEndOpConversion : public OpConversionPattern<cpu::BlockEndOp> {
+  using OpConversionPattern<cpu::BlockEndOp>::OpConversionPattern;
+
+  LogicalResult
+  matchAndRewrite(cpu::BlockEndOp op, OpAdaptor adaptor,
+                  ConversionPatternRewriter &rewriter) const override {
+    Location loc = op.getLoc();
+
+    auto funcOp = op->getParentOfType<func::FuncOp>();
+    assert(funcOp && "expected FuncOp as a parent of cpu::BlockStartOp");
+    auto commonArgsBase =
+        funcOp->getAttrOfType<IntegerAttr>(kTTNumCommonArgsAttr).getInt();
+
+    Value xStrideIndex = arith::createIndexConstant(
+        loc, rewriter, commonArgsBase + GridArgffsets::kStrideX);
+    Value xStride = ttkernel::GetCommonArgValOp::create(
+        rewriter, loc, rewriter.getI32Type(), xStrideIndex);
+
+    Value xGridIndex = arith::createIndexConstant(
+        loc, rewriter, commonArgsBase + GridArgffsets::kGridX);
+    Value xGrid = ttkernel::GetCommonArgValOp::create(
+        rewriter, loc, rewriter.getI32Type(), xGridIndex);
+
+    Value yGridIndex = arith::createIndexConstant(
+        loc, rewriter, commonArgsBase + GridArgffsets::kGridY);
+    Value yGrid = ttkernel::GetCommonArgValOp::create(
+        rewriter, loc, rewriter.getI32Type(), yGridIndex);
+    Value numBlocks = arith::MulIOp::create(rewriter, loc, xGrid, yGrid);
+
+    Value blockStart = cpu::BlockStartOp::create(rewriter, loc);
+    Value currentBlockEnd =
+        arith::AddIOp::create(rewriter, loc, blockStart, xStride);
+
+    Value end =
+        arith::MinSIOp::create(rewriter, loc, currentBlockEnd, numBlocks);
+    rewriter.replaceOp(op, end);
+    return success();
+  }
 };
 
 struct CurrentBlockConversion
@@ -123,10 +156,8 @@ void populateSPMDOpConversionPattern(TypeConverter &typeConverter,
                                      PatternBenefit benefit) {
   patterns.add<ConvertGetProgramIdOp>(typeConverter, patterns.getContext());
   patterns.add<ConvertGetNumProgramsOp>(typeConverter, patterns.getContext());
-  patterns.add<BlockIndexOpConversion<mlir::triton::cpu::BlockStartOp>>(
-      typeConverter, PerCoreArgOffsets::kBlockStart, patterns.getContext());
-  patterns.add<BlockIndexOpConversion<mlir::triton::cpu::BlockEndOp>>(
-      typeConverter, PerCoreArgOffsets::kBlockEnd, patterns.getContext());
+  patterns.add<BlockEndOpConversion>(typeConverter, patterns.getContext());
+  patterns.add<BlockStartOpConversion>(typeConverter, patterns.getContext());
   patterns.add<CurrentBlockConversion>(typeConverter, patterns.getContext());
 }
 

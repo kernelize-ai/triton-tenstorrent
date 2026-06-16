@@ -14,11 +14,15 @@ static constexpr llvm::StringLiteral kTTNumCommonArgsAttr =
 static constexpr llvm::StringLiteral kTTNumPerCoreArgsAttr =
     "tt.num_per_core_args";
 
+namespace GridArgffsets {
+constexpr int kStrideX = 0;
+constexpr int kStrideY = 1;
+constexpr int kGridX = 2;
+constexpr int kGridY = 3;
+} // namespace GridArgffsets
+
 namespace PerCoreArgOffsets {
-constexpr int kBlockStart = 0;
-constexpr int kBlockEnd = 1;
-constexpr int kNumBlocks = 2;
-constexpr int kThreadId = 3;
+constexpr int kMulticastGroup = 0; // TTKernel only
 } // namespace PerCoreArgOffsets
 
 } // namespace npu
