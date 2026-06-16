@@ -142,6 +142,8 @@ jobs:
           python -m pytest --device "cpu" python/test/unit/language/test_core.py -k "test_reduce1d or test_load_store_same_ptr"
           python -m pytest --device "cpu" python/test/unit/runtime/test_launch.py -k "not test_launch_with_options"
       - name: Run the triton offline compiler on tutorial 01
+        # disabled since we can run tutorial 1 on ttrt now. Should try building with tt-sim to see if we can run on the Github Actions instance.
+        if: false
         working-directory: ./triton
         run: |
           source ~/.venv/bin/activate

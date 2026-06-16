@@ -341,6 +341,20 @@ class TTRTLauncher(object):
             t = arg.base if hasattr(arg, "base") else arg
             # if t.dtype in _TORCH_DTYPE_PROMOTION:
             #     t = t.to(_TORCH_DTYPE_PROMOTION[t.dtype]).contiguous()
+            # ttrt.to_layout tilizes by the host tensor's *own* shape, and the
+            # device layout for these args is a 2D (32x32) tile. A flat rank-1
+            # [N] vector tilizes as [1, N] — only one populated row per tile —
+            # so promote it to 2D to map onto whole tiles. .view() shares the
+            # same storage, so the output writeback (a memcpy into data_ptr)
+            # still lands in the caller's tensor.
+            # TODO: derive the target shape from get_layout(binary, program_index,
+            #       i) instead of assuming a 32-wide row; that also covers the
+            #       N % 32 != 0 case (needs padding + masking in the kernel).
+            if t.dim() == 1 and t.numel() % 32 == 0:
+                if not t.is_contiguous():
+                    raise ValueError(
+                        "Cannot reshape non-contiguous 1D tensor for tilization; please pass a contiguous tensor")
+                t = t.view(t.numel() // 32, 32)
             rt = ttrt.runtime.create_borrowed_host_tensor(
                 t.data_ptr(),
                 list(t.shape),
