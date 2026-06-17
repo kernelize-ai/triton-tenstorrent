@@ -204,12 +204,7 @@ struct ConvertTensorDescLoadOp
 
     auto descTy = op.getDesc().getType();
     const auto blockShape = descTy.getBlockType().getShape();
-    auto descOp = op.getDesc().getDefiningOp();
-    ValueRange descValues =
-        isa<UnrealizedConversionCastOp>(descOp)
-            ? cast<UnrealizedConversionCastOp>(descOp).getInputs()
-            : adaptor.getDesc();
-    auto desc = TensorDescriptorUnpacked(descTy, descValues);
+    auto desc = TensorDescriptorUnpacked(descTy, op.getDesc());
 
     // compute noc address
     auto opInsertionPt = rewriter.saveInsertionPoint();
@@ -568,12 +563,7 @@ struct ConvertTensorDescStoreOp
 
     auto descTy = op.getDesc().getType();
     const auto blockShape = descTy.getBlockType().getShape();
-    auto descOp = op.getDesc().getDefiningOp();
-    ValueRange descValues =
-        isa<UnrealizedConversionCastOp>(descOp)
-            ? cast<UnrealizedConversionCastOp>(descOp).getInputs()
-            : adaptor.getDesc();
-    auto desc = TensorDescriptorUnpacked(descTy, descValues);
+    auto desc = TensorDescriptorUnpacked(descTy, op.getDesc());
 
     // compute noc address
     auto opInsertionPt = rewriter.saveInsertionPoint();

@@ -2,7 +2,11 @@
 
 #include "npu/include/Dialect/TritonTenstorrent/Transforms/Utility.h"
 
+#include "ttmlir/Dialect/TTKernel/IR/TTKernel.h"
+#include "ttmlir/Dialect/TTKernel/IR/TTKernelOps.h"
+
 namespace mlir {
+using namespace tt;
 namespace triton {
 namespace npu {
 
@@ -221,16 +225,63 @@ Value TensorDescriptorUnpacked::generateMask(OpBuilder &builder,
 }
 
 TensorDescriptorUnpacked::TensorDescriptorUnpacked(TensorDescType type,
-                                                   ValueRange pack) {
-  int rank = type.getBlockType().getRank();
-  assert(pack.size() == 1 + 2 * static_cast<size_t>(rank) + 1 &&
-         "Expected tensor descriptors to consist of a pointer, "
-         "followed by 'rank' shape values and 'rank' stride values, "
-         "followed by a padding option value.");
-  base = pack[0];
-  shape = pack.slice(1, rank);
-  strides = pack.slice(1 + rank, rank);
-  paddingOption = pack[1 + 2 * rank];
+                                                   Value desc) {
+  captureTensorDescriptor(type, desc);
+}
+
+void TensorDescriptorUnpacked::captureTensorDescriptor(TensorDescType type,
+                                                       Value desc) {
+  int rank = type.getBlockType().getShape().size();
+  if (auto blockArg = dyn_cast<BlockArgument>(desc)) {
+    base = desc;
+    auto parentOp = blockArg.getOwner()->getParentOp();
+    for (int i = 0; i < rank; i++) {
+      auto shapeDim = parentOp->getOperand(blockArg.getArgNumber() + i);
+      // assert(shapeDim.getType().isa<IndexType>());
+      shape.push_back(shapeDim);
+    }
+    for (int i = 0; i < rank; i++) {
+      auto stride = parentOp->getOperand(blockArg.getArgNumber() + rank + i);
+      // assert(stride.getType().isa<IndexType>());
+      strides.push_back(stride);
+    }
+  } else if (auto castOp =
+                 dyn_cast<UnrealizedConversionCastOp>(desc.getDefiningOp())) {
+    base = castOp.getInputs()[0];
+    assert(isa<ttkernel::GetCommonArgValOp>(base.getDefiningOp()));
+    auto baseIndex =
+        base.getDefiningOp<ttkernel::GetCommonArgValOp>()->getOperand(0);
+    OpBuilder builder(castOp.getContext());
+    builder.setInsertionPoint(castOp);
+    auto loc = castOp.getLoc();
+    auto int32Ty = builder.getI32Type();
+    for (unsigned i = 0; i < rank; i++) {
+      auto shapeOffset = builder.create<arith::ConstantIndexOp>(loc, i);
+      auto shapeIndex =
+          builder.create<arith::AddIOp>(loc, baseIndex, shapeOffset);
+      auto shapeVal =
+          builder.create<ttkernel::GetCommonArgValOp>(loc, int32Ty, shapeIndex);
+      shape.push_back(shapeVal);
+    }
+    for (unsigned i = 0; i < rank; i++) {
+      auto strideOffset = builder.create<arith::ConstantIndexOp>(loc, rank + i);
+      auto strideIndex =
+          builder.create<arith::AddIOp>(loc, baseIndex, strideOffset);
+      auto strideVal = builder.create<ttkernel::GetCommonArgValOp>(loc, int32Ty,
+                                                                   strideIndex);
+      strides.push_back(strideVal);
+    }
+  } else if (auto makeTensorDescOp =
+                 desc.getDefiningOp<triton::MakeTensorDescOp>()) {
+    base = makeTensorDescOp.getBase();
+    shape = makeTensorDescOp.getShape();
+    strides = makeTensorDescOp.getStrides();
+  } else {
+    // desc.emitError("desc must be created by a make_tensor_descriptor op");
+    desc.getParentBlock()->getParentOp()->dump();
+    assert(0);
+    return;
+  }
 }
 
 int64_t lookupRegisterIndex(Value value) {
