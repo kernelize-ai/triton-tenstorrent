@@ -24,7 +24,8 @@ namespace mlir::triton::npu::tt {
 GridAttr TritonTenstorrentDialect::getGridAttr(ModuleOp mod) {
   if (auto attr = mod->getAttrOfType<GridAttr>(AttrGridName))
     return attr;
-  assert(false && "TODO");
+  // for now force a 1x1 grid
+  return GridAttr::get(mod.getContext(), {1, 1});
 }
 
 // TODO: refactor to shared header
