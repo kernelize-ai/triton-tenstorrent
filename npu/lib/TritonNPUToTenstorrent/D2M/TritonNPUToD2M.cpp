@@ -182,13 +182,7 @@ struct ConvertTritonNPUToD2MPass
           SmallVector<int64_t> shardShape =
               calculateShardShape(tensorType, tileType);
 
-          // TODO: this should probably be the grid shape, and we don't have
-          // enough info to handle that here - so we should be handling grid
-          // shape conversions at the call site
-          llvm::errs() << "grid: " << triton::join(gridShape) << "\n";
-          SmallVector<int64_t> shape(tensorType.getRank(), 1);
-          if (shape.size() == 1)
-            shape.push_back(1);
+          SmallVector<int64_t> shape = gridShape;
           shape.append(shardShape.begin(), shardShape.end());
           // TODO: shard layout or interleaved?
           auto memRefType = MemRefType::get(
