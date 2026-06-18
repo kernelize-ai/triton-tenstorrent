@@ -19,6 +19,8 @@
 #include "npu/include/Dialect/TritonTenstorrent/IR/Attributes.h"
 #include "npu/include/Dialect/TritonTenstorrent/IR/Dialect.h"
 
+#include "SPMDArgs.h"
+
 namespace mlir {
 using namespace tt;
 namespace triton {
@@ -261,18 +263,12 @@ LogicalResult ArgConversionHelper::convertFunctionArguments(
     argLocs.push_back(oldArg.getLoc());
   }
 
-  // Add block start/block end arguments with appropriate NameLocs:
-  // %block_start, %block_end.
-  convertedArgTypes.push_back(rewriter.getI32Type()); // block start
-  auto blockStartLoc =
-      NameLoc::get(StringAttr::get(context, "block_start"),
-                   FileLineColLoc::get(context, __FILE__, __LINE__, 0));
-  argLocs.push_back(blockStartLoc);
-  auto blockEndLoc =
-      NameLoc::get(StringAttr::get(context, "block_end"),
-                   FileLineColLoc::get(context, __FILE__, __LINE__, 0));
-  convertedArgTypes.push_back(rewriter.getI32Type()); // block end
-  argLocs.push_back(blockEndLoc);
+  for (unsigned i = 0; i < (unsigned)SpmdArg::Count; i++) {
+    convertedArgTypes.push_back(rewriter.getI32Type()); // all SPMD args are i32
+    auto argName = spmdArgName((SpmdArg)i);
+    auto argLoc = NameLoc::get(StringAttr::get(context, argName));
+    argLocs.push_back(argLoc);
+  }
 
   if (outputTensorMap.size() != 1) {
     return emitError(funcOp.getLoc(),
