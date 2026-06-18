@@ -13,6 +13,8 @@
 #include "ttmlir/Dialect/D2M/IR/D2M.h"
 #include "ttmlir/Dialect/D2M/IR/D2MOps.h"
 #include "ttmlir/Dialect/TTIR/IR/TTIROps.h"
+#include "ttmlir/Dialect/TTKernel/IR/TTKernel.h"
+#include "ttmlir/Dialect/TTKernel/IR/TTKernelOps.h"
 #include "ttmlir/Dialect/TTNN/IR/TTNN.h"
 
 #include "mlir/Dialect/Linalg/IR/Linalg.h"
@@ -257,6 +259,8 @@ struct ConvertTritonNPUToD2MPass
     target.addLegalDialect<func::FuncDialect>();
     target.addLegalDialect<memref::MemRefDialect>();
     target.addLegalDialect<linalg::LinalgDialect>();
+    target.addLegalOp<ttkernel::MyLogicalXOp>();
+    target.addLegalOp<ttkernel::MyLogicalYOp>();
 
     target.addIllegalDialect<triton::TritonDialect>();
     target.addIllegalDialect<triton::cpu::TritonCPUDialect>();
