@@ -101,8 +101,60 @@ struct BlockEndOpConversion : public OpConversionPattern<cpu::BlockEndOp> {
                   ConversionPatternRewriter &rewriter) const override {
     Location loc = op.getLoc();
 
-    Value constant = arith::createConstantI32(loc, rewriter, 1);
-    rewriter.replaceOp(op, constant);
+    Value blockStart = cpu::BlockStartOp::create(rewriter, loc);
+
+    ModuleOp mod = op->getParentOfType<ModuleOp>();
+    auto gridAttr = tt::TritonTenstorrentDialect::getGridAttr(mod);
+    SmallVector<int64_t> deviceGrid = llvm::to_vector(gridAttr.getShape());
+    assert(deviceGrid.size() == 2 && "expected rank-2 device grid");
+
+    func::FuncOp func = op->getParentOfType<func::FuncOp>();
+    assert(func && "expected op to have MLIR func dialect FuncOp parent during "
+                   "Triton NPU to D2M op lowering");
+    Value tritonGridX = getSpmdArg(func, SpmdArg::x_grid);
+    Value tritonGridY = getSpmdArg(func, SpmdArg::y_grid);
+    Value numBlocks =
+        arith::MulIOp::create(rewriter, loc, tritonGridX, tritonGridY);
+
+    const int64_t gridWidth = deviceGrid[0];
+    const int64_t gridHeight = deviceGrid[1];
+    const int64_t numCores = gridWidth * gridHeight;
+
+    Value xLogicalIndex = arith::IndexCastOp::create(
+        rewriter, loc, rewriter.getI32Type(),
+        ttkernel::MyLogicalXOp::create(rewriter, loc));
+    Value yLogicalIndex = arith::IndexCastOp::create(
+        rewriter, loc, rewriter.getI32Type(),
+        ttkernel::MyLogicalYOp::create(rewriter, loc));
+    // linear core ID on the device grid
+    Value coreIndex = arith::AddIOp::create(
+        rewriter, loc, xLogicalIndex,
+        arith::MulIOp::create(
+            rewriter, loc, yLogicalIndex,
+            arith::createConstantI32(loc, rewriter, gridWidth)));
+
+    Value numCoresVal = arith::createConstantI32(loc, rewriter, numCores);
+    Value baseBlocksPerCore =
+        arith::FloorDivSIOp::create(rewriter, loc, numBlocks, numCoresVal);
+    // leftover blocks => first coresWithExtraBlock cores get one more
+    Value coresWithExtraBlock =
+        arith::RemSIOp::create(rewriter, loc, numBlocks, numCoresVal);
+
+    Value baseBlockEnd =
+        arith::AddIOp::create(rewriter, loc, blockStart, baseBlocksPerCore);
+
+    Value thisCoreGetsExtra =
+        arith::CmpIOp::create(rewriter, loc, arith::CmpIPredicate::slt,
+                              coreIndex, coresWithExtraBlock);
+    Value oneIfThisCoreGetsExtra =
+        arith::SelectOp::create(rewriter, loc, thisCoreGetsExtra,
+                                arith::createConstantI32(loc, rewriter, 1),
+                                arith::createConstantI32(loc, rewriter, 0));
+
+    Value blockEnd = arith::AddIOp::create(rewriter, loc, baseBlockEnd,
+                                           oneIfThisCoreGetsExtra);
+
+    rewriter.replaceOp(op, blockEnd);
     return success();
   }
 };
