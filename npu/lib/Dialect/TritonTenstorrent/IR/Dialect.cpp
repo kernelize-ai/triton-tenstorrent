@@ -8,8 +8,6 @@
 #include "npu/include/Dialect/TritonTenstorrent/IR/Dialect.h"
 #include "llvm/ADT/TypeSwitch.h"
 
-#include "ttmlir/Dialect/TTCore/IR/Utils.h"
-
 #include "npu/include/Dialect/TritonTenstorrent/IR/Dialect.cpp.inc"
 
 #include "npu/include/Dialect/TritonTenstorrent/IR/OpsEnums.cpp.inc"
@@ -24,17 +22,10 @@ using namespace mlir::triton::npu;
 namespace mlir::triton::npu::tt {
 
 GridAttr TritonTenstorrentDialect::getGridAttr(ModuleOp mod) {
-  if (auto attr = mod->getAttrOfType<GridAttr>(kAttrGridName))
+  if (auto attr = mod->getAttrOfType<GridAttr>(AttrGridName))
     return attr;
-
-  // lazy init, but read from the module attr not the system desc in case we
-  // want to narrow the grid
-  auto deviceGrid = mlir::tt::ttcore::getCurrentScopeSystemDesc(mod)
-                        .getChipDescs()[0]
-                        .getGrid();
-  auto newGridAttr = GridAttr::get(mod.getContext(), deviceGrid);
-  mod->setAttr(kAttrGridName, newGridAttr);
-  return newGridAttr;
+  // for now force a 1x1 grid
+  return GridAttr::get(mod.getContext(), {1, 1});
 }
 
 // TODO: refactor to shared header

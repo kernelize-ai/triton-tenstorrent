@@ -9,6 +9,4 @@ add_triton_library(TritonTenstorrentIR
 
   LINK_LIBS PUBLIC
   TritonIR
-  MLIRTTCoreDialect
-  MLIRQuantDialect
 )
