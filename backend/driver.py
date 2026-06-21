@@ -424,7 +424,8 @@ class TTRTLauncher(object):
         is_tensor = [w[2] for w in wrapped]
 
         # only support 2D grids for now
-        assert (gridZ == 1)
+        if gridZ != 1:
+            raise NotImplementedError(f"3D grids are not supported (gridZ={gridZ})")
         host_inputs.append(create_scalar_tensor(gridX))
         host_inputs.append(create_scalar_tensor(gridY))
 
