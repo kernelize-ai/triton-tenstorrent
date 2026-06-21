@@ -22,8 +22,13 @@ inline llvm::StringRef spmdArgName(SpmdArg a) {
   };
   return names[(int)a];
 }
+
+#undef SPMD_ARGS
+
 // trailing convention: the SPMD args are the last `Count` arguments
 inline mlir::Value getSpmdArg(mlir::FunctionOpInterface f, SpmdArg a) {
+  assert(f.getNumArguments() >= (unsigned)SpmdArg::Count &&
+         "function does not have enough trailing SPMD args");
   unsigned base = f.getNumArguments() - (unsigned)SpmdArg::Count;
   return f.getArgument(base + (unsigned)a);
 }
