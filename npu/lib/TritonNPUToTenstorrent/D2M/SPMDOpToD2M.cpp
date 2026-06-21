@@ -1,5 +1,6 @@
 #include "PatternTritonNPUToD2M.h"
 
+#include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Transforms/DialectConversion.h"
 
 #include "ttmlir/Dialect/D2M/IR/D2MOps.h"
