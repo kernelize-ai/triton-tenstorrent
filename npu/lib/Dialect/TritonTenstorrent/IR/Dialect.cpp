@@ -27,8 +27,9 @@ GridAttr TritonTenstorrentDialect::getGridAttr(ModuleOp mod) {
   if (auto attr = mod->getAttrOfType<GridAttr>(kAttrGridName))
     return attr;
 
-  // lazy init, but read from the module attr not the system desc in case we
-  // want to narrow the grid
+  // Read from the system descriptor if not present in the module, but store the
+  // grid attribute in the module so triton can modify the grid if required
+  // (e.g. shrinking the grid width for better multicast shapes)
   auto deviceGrid = mlir::tt::ttcore::getCurrentScopeSystemDesc(mod)
                         .getChipDescs()[0]
                         .getGrid();
