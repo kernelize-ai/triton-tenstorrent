@@ -13,7 +13,7 @@ namespace mlir::triton::npu::tt {
 
 class GridAttr;
 
-constexpr static char kAttrGridName[] = "tt.device-grid";
+constexpr static char AttrGridName[] = "tt.device-grid";
 
 } // namespace mlir::triton::npu::tt
 

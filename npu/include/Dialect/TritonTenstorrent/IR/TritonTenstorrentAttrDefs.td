@@ -16,7 +16,7 @@ def TritonTenstorrent_GridAttr : AttrDef<TritonTenstorrent_Dialect, "Grid"> {
   let parameters = (ins
     ArrayRefParameter<"int64_t">:$shape);
 
-  let assemblyFormat = "`<` $shape `>`";
+  let assemblyFormat = "`grid` `<` $shape `>`";
 }
 
 def TritonTenstorrent_IOType : I32EnumAttr<
