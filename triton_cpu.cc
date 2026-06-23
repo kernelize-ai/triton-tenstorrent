@@ -108,6 +108,10 @@ void init_triton_npu_passes_tenstorrent(py::module &&m) {
           pm.addPass(mlir::triton::npu::createDropFunction({funcName}));
         });
 
+  m.def("add_tensorize_scalars", [](mlir::PassManager &pm) {
+    pm.addPass(mlir::triton::npu::createTensorizeScalars());
+  });
+
   // tt-mlir specific passes
   m.def("add_ttkernel_control_dst_selection", [](mlir::PassManager &pm) {
     pm.addPass(mlir::tt::ttkernel::createTTKernelControlDstSection());

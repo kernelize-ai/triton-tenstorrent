@@ -5,6 +5,7 @@ add_triton_library(TritonNPUToD2M
     MemoryOpToD2M.cpp
     ReduceOpToD2M.cpp
     SPMDOpToD2M.cpp
+    TensorizeScalars.cpp
     TritonNPUToD2M.cpp
 
     DEPENDS

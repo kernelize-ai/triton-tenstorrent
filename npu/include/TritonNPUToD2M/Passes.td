@@ -21,4 +21,15 @@ def ConvertTritonNPUToD2M : Pass<"convert-triton-npu-to-d2m", "mlir::ModuleOp"> 
                             ];
 }
 
+def TensorizeScalars : Pass<"tensorize-scalars", "mlir::ModuleOp"> {
+    let summary = "Convert scalar arguments to a function into 0D tensors";
+    let description = [{
+        The `tensorize-scalars` pass transforms scalar arguments of functions into 0D tensors. This
+        prepares the IR for injection into tt-mlir. As we understand things, scalars to
+        `{d2m,ttnn}.generic` are only ever allowed to be ui32; `emitc.literal
+        "get_compile_time_arg_val"` only returns a ui32.
+    }];
+    let dependentDialects = ["func::FuncDialect", "tensor::TensorDialect", "mlir::tt::ttnn::TTNNDialect"];
+}
+
 #endif
