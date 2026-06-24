@@ -77,11 +77,19 @@ struct ConvertTensorDescLoadOp
     auto resultType = MemRefType::get(
         tileShape, descType.getElementType(), MemRefLayoutAttrInterface{},
         ttcore::MemorySpaceAttr::get(context, ttcore::MemorySpace::DeviceL1));
+    auto tileType = cast<ttcore::TileType>(descType.getElementType());
 
     SmallVector<Value> indices;
-    for (Value idx : op.getIndices())
+    assert(op.getIndices().size() == tileType.getShape().size());
+    for (auto [elementIndex, t] :
+         llvm::zip(op.getIndices(), tileType.getShape())) {
+      // normalize the element index by the tile shape
+      Value tileIndex =
+          arith::DivSIOp::create(rewriter, loc, elementIndex,
+                                 arith::createConstantI32(loc, rewriter, t));
       indices.push_back(arith::IndexCastOp::create(
-          rewriter, loc, rewriter.getIndexType(), idx));
+          rewriter, loc, rewriter.getIndexType(), tileIndex));
+    }
     if (indices.size() == 1)
       indices.push_back(arith::createIndexConstant(loc, rewriter, 0));
 
@@ -109,14 +117,23 @@ struct ConvertTensorDescStoreOp
     assert(desc.size() >= 1 && "expected at least one value in the descriptor");
     auto descPtr = desc[0];
 
+    Value src = adaptor.getSrc()[0];
+    auto srcMemRef = cast<MemRefType>(src.getType());
+    auto tileType = cast<ttcore::TileType>(srcMemRef.getElementType());
+
     SmallVector<Value> indices;
-    for (Value idx : op.getIndices())
+    assert(op.getIndices().size() == tileType.getShape().size());
+    for (auto [elementIndex, t] :
+         llvm::zip(op.getIndices(), tileType.getShape())) {
+      // normalize the element index by the tile shape
+      Value tileIndex =
+          arith::DivSIOp::create(rewriter, loc, elementIndex,
+                                 arith::createConstantI32(loc, rewriter, t));
       indices.push_back(arith::IndexCastOp::create(
-          rewriter, loc, rewriter.getIndexType(), idx));
+          rewriter, loc, rewriter.getIndexType(), tileIndex));
+    }
     if (indices.size() == 1)
       indices.push_back(arith::createIndexConstant(loc, rewriter, 0));
-
-    Value src = adaptor.getSrc()[0];
 
     // local buffer variant of remote store
     d2m::RemoteStoreOp::create(rewriter, loc, /*resultType=*/{}, descPtr,
