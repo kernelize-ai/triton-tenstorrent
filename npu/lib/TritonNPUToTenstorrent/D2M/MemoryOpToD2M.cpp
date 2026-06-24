@@ -8,10 +8,11 @@
 #include "ttmlir/Dialect/D2M/IR/D2M.h"
 #include "ttmlir/Dialect/D2M/IR/D2MGenericRegionOps.h"
 #include "ttmlir/Dialect/D2M/IR/D2MOps.h"
+#include "ttmlir/Dialect/D2M/Utils/Utils.h"
+#include "ttmlir/Dialect/TTIR/IR/TTIROps.h"
 
 #include "mlir/Analysis/SliceAnalysis.h"
 #include "mlir/Dialect/Arith/IR/Arith.h"
-#include "ttmlir/Dialect/TTIR/IR/TTIROps.h"
 
 #include "llvm/ADT/TypeSwitch.h"
 #include "llvm/Support/Debug.h"
@@ -76,11 +77,19 @@ struct ConvertTensorDescLoadOp
     auto resultType = MemRefType::get(
         tileShape, descType.getElementType(), MemRefLayoutAttrInterface{},
         ttcore::MemorySpaceAttr::get(context, ttcore::MemorySpace::DeviceL1));
+    auto tileType = cast<ttcore::TileType>(descType.getElementType());
 
     SmallVector<Value> indices;
-    for (Value idx : op.getIndices())
+    assert(op.getIndices().size() == tileType.getShape().size());
+    for (auto [elementIndex, t] :
+         llvm::zip(op.getIndices(), tileType.getShape())) {
+      // normalize the element index by the tile shape
+      Value tileIndex =
+          arith::DivSIOp::create(rewriter, loc, elementIndex,
+                                 arith::createConstantI32(loc, rewriter, t));
       indices.push_back(arith::IndexCastOp::create(
-          rewriter, loc, rewriter.getIndexType(), idx));
+          rewriter, loc, rewriter.getIndexType(), tileIndex));
+    }
     if (indices.size() == 1)
       indices.push_back(arith::createIndexConstant(loc, rewriter, 0));
 
@@ -108,14 +117,23 @@ struct ConvertTensorDescStoreOp
     assert(desc.size() >= 1 && "expected at least one value in the descriptor");
     auto descPtr = desc[0];
 
+    Value src = adaptor.getSrc()[0];
+    auto srcMemRef = cast<MemRefType>(src.getType());
+    auto tileType = cast<ttcore::TileType>(srcMemRef.getElementType());
+
     SmallVector<Value> indices;
-    for (Value idx : op.getIndices())
+    assert(op.getIndices().size() == tileType.getShape().size());
+    for (auto [elementIndex, t] :
+         llvm::zip(op.getIndices(), tileType.getShape())) {
+      // normalize the element index by the tile shape
+      Value tileIndex =
+          arith::DivSIOp::create(rewriter, loc, elementIndex,
+                                 arith::createConstantI32(loc, rewriter, t));
       indices.push_back(arith::IndexCastOp::create(
-          rewriter, loc, rewriter.getIndexType(), idx));
+          rewriter, loc, rewriter.getIndexType(), tileIndex));
+    }
     if (indices.size() == 1)
       indices.push_back(arith::createIndexConstant(loc, rewriter, 0));
-
-    Value src = adaptor.getSrc()[0];
 
     // local buffer variant of remote store
     d2m::RemoteStoreOp::create(rewriter, loc, /*resultType=*/{}, descPtr,
@@ -148,6 +166,7 @@ static Value traceToBasePtr(Value v) {
   // bail on block arguments
   return nullptr;
 }
+
 struct ConvertLoadOp : public OpConversionPattern<triton::LoadOp> {
   using OpConversionPattern<triton::LoadOp>::OpConversionPattern;
 
@@ -167,6 +186,7 @@ struct ConvertLoadOp : public OpConversionPattern<triton::LoadOp> {
 
     auto allocType = cast<MemRefType>(
         getTypeConverter()->convertType(op.getResult().getType()));
+    auto tileType = cast<ttcore::TileType>(allocType.getElementType());
     auto allocOp = memref::AllocOp::create(rewriter, loc, allocType);
 
     // step 2: create the load
@@ -181,11 +201,13 @@ struct ConvertLoadOp : public OpConversionPattern<triton::LoadOp> {
         dyn_cast_or_null<UnrealizedConversionCastOp>(ptr.getDefiningOp());
     assert(conversionCastOp && "expected tt.ptr lowering chain to end in "
                                "integer offset for load ptr argument");
-    // TODO: index is in bytes, not tiles. need to divide by tile size
-    // TODO: remote load always loads the entire tile - is that a problem here?
-    Value index =
-        arith::IndexCastOp::create(rewriter, loc, rewriter.getIndexType(),
-                                   conversionCastOp.getInputs()[0]);
+    Value tileOffsetBytes = conversionCastOp.getInputs()[0];
+    Value tileOffset = arith::DivSIOp::create(
+        rewriter, loc, tileOffsetBytes,
+        arith::createConstantI32(loc, rewriter, tileType.getSizeBytes()));
+
+    Value index = arith::IndexCastOp::create(
+        rewriter, loc, rewriter.getIndexType(), tileOffset);
 
     Value basePtr = traceToBasePtr(op.getPtr());
     assert(basePtr && "expected load ptr chain to terminate at a layout cast");
@@ -213,15 +235,20 @@ struct ConvertStoreOp : public OpConversionPattern<triton::StoreOp> {
         dyn_cast_or_null<UnrealizedConversionCastOp>(ptr.getDefiningOp());
     assert(conversionCastOp && "expected tt.ptr lowering chain to end in "
                                "integer offset for load ptr argument");
-    // TODO: index is in bytes, not tiles. need to divide by tile size
-    Value index =
-        arith::IndexCastOp::create(rewriter, loc, rewriter.getIndexType(),
-                                   conversionCastOp.getInputs()[0]);
+    Value tileOffsetBytes = conversionCastOp.getInputs()[0];
+    Value src = adaptor.getValue();
+    auto srcMemRef = cast<MemRefType>(src.getType());
+    auto tileType = cast<ttcore::TileType>(srcMemRef.getElementType());
+    Value tileOffset = arith::DivSIOp::create(
+        rewriter, loc, tileOffsetBytes,
+        arith::createConstantI32(loc, rewriter, tileType.getSizeBytes()));
+
+    Value index = arith::IndexCastOp::create(
+        rewriter, loc, rewriter.getIndexType(), tileOffset);
 
     Value basePtr = traceToBasePtr(op.getPtr());
     assert(basePtr && "expected store ptr chain to terminate at a layout cast");
 
-    Value src = adaptor.getValue();
     d2m::RemoteStoreOp::create(
         rewriter, loc, /*resultType=*/{}, basePtr,
         {index, arith::createIndexConstant(loc, rewriter, 0)}, src);
