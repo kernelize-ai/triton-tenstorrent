@@ -67,26 +67,8 @@ public:
   matchAndRewrite(mlir::ttnn::GenericOp op,
                   OpConversionPattern<mlir::ttnn::GenericOp>::OpAdaptor adaptor,
                   ConversionPatternRewriter &rewriter) const override {
-    LDBG("converting ttnn.generic op");
-
-    SmallVector<std::pair<OpOperand *, Value>> replacements;
-    for (auto [original, converted] :
-         llvm::zip(op->getOpOperands(), adaptor.getOperands())) {
-      if (original.get() != converted) {
-        replacements.push_back({&original, converted});
-      }
-    }
-
-    if (!replacements.empty()) {
-      rewriter.modifyOpInPlace(op, [&]() {
-        for (auto [original, converted] : replacements) {
-          LDBG("replacing ttnn.generic operand " << original->get() << " with "
-                                                 << converted);
-          op->setOperand(original->getOperandNumber(), converted);
-        }
-      });
-    }
-
+    rewriter.modifyOpInPlace(op,
+                             [&]() { op->setOperands(adaptor.getOperands()); });
     return success();
   }
 };
