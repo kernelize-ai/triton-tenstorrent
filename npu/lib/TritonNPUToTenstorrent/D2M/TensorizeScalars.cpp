@@ -98,17 +98,12 @@ struct TensorizeScalarsPass
               });
           return !hasDanglingScalar;
         });
-    target.markUnknownOpDynamicallyLegal([](mlir::Operation *op) {
-      // Ensure all other operations are legal, since we only care about
-      // `func.func` and `ttnn.generic` operations.
-      return true;
-    });
 
     mlir::RewritePatternSet patterns(context);
     mlir::populateFunctionOpInterfaceTypeConversionPattern<func::FuncOp>(
         patterns, typeConverter);
     patterns.add<ConvertTTNNGenericOp>(typeConverter, patterns.getContext());
-    if (failed(applyFullConversion(mod, target, std::move(patterns))))
+    if (failed(applyPartialConversion(mod, target, std::move(patterns))))
       return signalPassFailure();
   }
 };
