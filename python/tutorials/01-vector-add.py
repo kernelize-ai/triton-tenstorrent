@@ -87,7 +87,6 @@ y = torch.rand(size, device=DEVICE).to(torch.bfloat16)
 
 output_torch = x + y
 output_triton = add(x, y)
-torch.set_printoptions(threshold=float('inf'))
 print(output_torch)
 print(output_triton)
 max_diff = torch.max(torch.abs(output_torch.float() - output_triton.float()))
