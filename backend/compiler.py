@@ -355,6 +355,7 @@ class CPUBackend(BaseBackend):
         cpu.passes.tenstorrent.add_form_expressions_pass(pm)
 
         cpu.passes.d2m.add_convert_d2m_to_ttnn(pm)
+        cpu.passes.tenstorrent.add_tensorize_scalars(pm)
 
         pm.run(mod, "make_emit_c")
         return mod
