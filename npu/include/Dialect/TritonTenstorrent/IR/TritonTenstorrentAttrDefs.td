@@ -8,6 +8,17 @@ include "npu/include/Dialect/TritonTenstorrent/IR/TritonTenstorrentDialect.td"
 include "triton/Dialect/TritonGPU/IR/TritonGPUAttrDefs.td"
 
 
+def TritonTenstorrent_GridAttr : AttrDef<TritonTenstorrent_Dialect, "Grid"> {
+  let mnemonic = "grid";
+
+  let description = "The physical device grid this module is built around";
+
+  let parameters = (ins
+    ArrayRefParameter<"int64_t">:$shape);
+
+  let assemblyFormat = "`grid` `<` $shape `>`";
+}
+
 def TritonTenstorrent_IOType : I32EnumAttr<
     "IOType", "",
     [

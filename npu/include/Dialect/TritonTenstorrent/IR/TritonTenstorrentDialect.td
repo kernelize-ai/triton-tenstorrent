@@ -22,6 +22,10 @@ def TritonTenstorrent_Dialect : Dialect {
     "::mlir::IntegerAttr":$alloc_size
   );
 
+  let extraClassDeclaration = [{
+    static GridAttr getGridAttr(ModuleOp mod);
+  }];
+
   let useDefaultAttributePrinterParser = 1;
   let usePropertiesForAttributes = 1;
 }

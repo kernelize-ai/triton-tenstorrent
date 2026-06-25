@@ -423,8 +423,11 @@ class TTRTLauncher(object):
         keepalive = [w[1] for w in wrapped]
         is_tensor = [w[2] for w in wrapped]
 
-        host_inputs.append(create_scalar_tensor(0))  # block start
-        host_inputs.append(create_scalar_tensor(1))  # block end
+        # only support 2D grids for now
+        if gridZ != 1:
+            raise NotImplementedError(f"3D grids are not supported (gridZ={gridZ})")
+        host_inputs.append(create_scalar_tensor(gridX))
+        host_inputs.append(create_scalar_tensor(gridY))
 
         # Push each input to the program's expected on-device layout.
         device_inputs = [
