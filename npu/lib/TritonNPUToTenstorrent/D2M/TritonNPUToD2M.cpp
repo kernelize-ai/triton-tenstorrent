@@ -182,9 +182,9 @@ struct ConvertTritonNPUToD2MPass
           SmallVector<int64_t> shardShape =
               calculateShardShape(tensorType, tileType);
 
-          SmallVector<int64_t> shape = gridShape;
+          // interleaved layout requires unit grid
+          SmallVector<int64_t> shape(gridShape.size(), 1);
           shape.append(shardShape.begin(), shardShape.end());
-          // TODO: shard layout or interleaved?
           auto memRefType = MemRefType::get(
               shape, tileType,
               ttcore::InterleavedLayoutAttr::get(shardShape, tileType),
