@@ -27,8 +27,9 @@ GridAttr TritonTenstorrentDialect::getGridAttr(ModuleOp mod) {
   if (auto attr = mod->getAttrOfType<GridAttr>(kAttrGridName))
     return attr;
 
-  return GridAttr::get(mod.getContext(), {1, 1});
 #if 0
+  return GridAttr::get(mod.getContext(), {1, 1});
+#else
   // Read from the system descriptor if not present in the module, but store the
   // grid attribute in the module so triton can modify the grid if required
   // (e.g. shrinking the grid width for better multicast shapes)
