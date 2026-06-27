@@ -9,6 +9,14 @@
 #include "triton/Dialect/Triton/IR/Dialect.h"
 #include "triton/Dialect/TritonGPU/IR/Dialect.h"
 
+namespace mlir::triton::npu::tt {
+
+class GridAttr;
+
+constexpr static char AttrGridName[] = "tt.device-grid";
+
+} // namespace mlir::triton::npu::tt
+
 #include "npu/include/Dialect/TritonTenstorrent/IR/Dialect.h.inc"
 #include "npu/include/Dialect/TritonTenstorrent/IR/OpsEnums.h.inc"
 

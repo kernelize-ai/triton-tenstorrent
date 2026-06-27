@@ -11,6 +11,8 @@
 #include "ttmlir/Dialect/D2M/IR/D2M.h"
 #include "ttmlir/Dialect/D2M/IR/D2MOps.h"
 #include "ttmlir/Dialect/TTIR/IR/TTIROps.h"
+#include "ttmlir/Dialect/TTKernel/IR/TTKernel.h"
+#include "ttmlir/Dialect/TTKernel/IR/TTKernelOps.h"
 #include "ttmlir/Dialect/TTNN/IR/TTNN.h"
 
 #include "mlir/Dialect/Linalg/IR/Linalg.h"
@@ -160,41 +162,40 @@ struct ConvertTritonNPUToD2MPass
   void runOnOperation() override {
     MLIRContext *context = &getContext();
     ModuleOp mod = getOperation();
+    auto gridAttr = tt::TritonTenstorrentDialect::getGridAttr(mod);
+    SmallVector<int64_t> gridShape = llvm::to_vector(gridAttr.getShape());
 
     TritonNPUToTenstorrentTypeConverter typeConverter(context);
-    typeConverter.addConversion([](mlir::triton::TensorDescType t,
-                                   llvm::SmallVectorImpl<mlir::Type> &out) {
-      // We convert a tensor descriptor into a memref, and a shape and stride
-      // for each dimension, and padding option. i.e., we create 1+2*rank+1
-      // values. Note that tensor descriptors may be signed/unsigned integers
-      // whereas pointers should always be signless.
-      auto tensorType = t.getSignlessBlockType();
-      auto eType = tensorType.getElementType();
-      auto tileType = ttcore::TileType::get(
-          t.getContext(), ttcore::TileType::getDefaultShape(),
-          ttcore::elementTypeToDataType(eType));
-      SmallVector<int64_t> shardShape =
-          calculateShardShape(tensorType, tileType);
+    typeConverter.addConversion(
+        [gridShape](mlir::triton::TensorDescType t,
+                    llvm::SmallVectorImpl<mlir::Type> &out) {
+          // We convert a tensor descriptor into a memref, and a shape and
+          // stride for each dimension, and padding option. i.e., we create
+          // 1+2*rank+1 values. Note that tensor descriptors may be
+          // signed/unsigned integers whereas pointers should always be
+          // signless.
+          auto tensorType = t.getSignlessBlockType();
+          auto eType = tensorType.getElementType();
+          auto tileType = ttcore::TileType::get(
+              t.getContext(), ttcore::TileType::getDefaultShape(),
+              ttcore::elementTypeToDataType(eType));
+          SmallVector<int64_t> shardShape =
+              calculateShardShape(tensorType, tileType);
 
-      // TODO: this should probably be the grid shape, and we don't have enough
-      // info to handle that here - so we should be handling grid shape
-      // conversions at the call site
-      SmallVector<int64_t> shape(tensorType.getRank(), 1);
-      if (shape.size() == 1)
-        shape.push_back(1);
-      shape.append(shardShape.begin(), shardShape.end());
-      // TODO: shard layout or interleaved?
-      auto memRefType = MemRefType::get(
-          shape, tileType,
-          ttcore::ShardLayoutAttr::get(shardShape, tileType, /*buffers=*/1),
-          ttcore::MemorySpaceAttr::get(t.getContext(),
-                                       ttcore::MemorySpace::DeviceDRAM));
-      out.push_back(memRefType);
-      out.insert(out.end(), 2 * tensorType.getRank(),
-                 mlir::IntegerType::get(t.getContext(), 32));
-      out.push_back(mlir::IntegerType::get(t.getContext(), 1));
-      return mlir::success();
-    });
+          SmallVector<int64_t> shape = gridShape;
+          shape.append(shardShape.begin(), shardShape.end());
+          // TODO: shard layout or interleaved?
+          auto memRefType = MemRefType::get(
+              shape, tileType,
+              ttcore::ShardLayoutAttr::get(shardShape, tileType, /*buffers=*/1),
+              ttcore::MemorySpaceAttr::get(t.getContext(),
+                                           ttcore::MemorySpace::DeviceDRAM));
+          out.push_back(memRefType);
+          out.insert(out.end(), 2 * tensorType.getRank(),
+                     mlir::IntegerType::get(t.getContext(), 32));
+          out.push_back(mlir::IntegerType::get(t.getContext(), 1));
+          return mlir::success();
+        });
     typeConverter.addConversion([](RankedTensorType tensorType) -> Type {
       auto eType = tensorType.getElementType();
       if (auto ptrType = dyn_cast<triton::PointerType>(eType)) {
@@ -256,6 +257,8 @@ struct ConvertTritonNPUToD2MPass
     target.addLegalDialect<func::FuncDialect>();
     target.addLegalDialect<memref::MemRefDialect>();
     target.addLegalDialect<linalg::LinalgDialect>();
+    target.addLegalOp<ttkernel::MyLogicalXOp>();
+    target.addLegalOp<ttkernel::MyLogicalYOp>();
 
     target.addIllegalDialect<triton::TritonDialect>();
     target.addIllegalDialect<triton::cpu::TritonCPUDialect>();
