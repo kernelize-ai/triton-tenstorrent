@@ -20,8 +20,6 @@
 
 #include "SPMDArgs.h"
 
-#include "triton/Tools/StrUtil.h" // delete me
-
 namespace mlir {
 using namespace tt;
 namespace triton {
@@ -148,8 +146,6 @@ LogicalResult ArgConversionHelper::convertFunctionArguments(
     ttcore::GridAttr grid, const TypeConverter *typeConverter) {
   MLIRContext *context = rewriter.getContext();
 
-  llvm::errs() << "grid = " << triton::join(grid.getShape()) << "\n";
-
   auto makeDynamicTensorTy = [](RankedTensorType tensorTy, Attribute encoding) {
     SmallVector<int64_t> dynShape(tensorTy.getRank(), ShapedType::kDynamic);
     return RankedTensorType::get(dynShape, tensorTy.getElementType(), encoding);
@@ -244,7 +240,6 @@ LogicalResult ArgConversionHelper::convertFunctionArguments(
       auto perCoreMemRef = cast<MemRefType>(expandedTypes.front());
       auto ttnnLayout = getTTNNLayoutForMemRef(
           perCoreMemRef, blockTensorTy.getShape(), grid.getShape());
-      llvm::errs() << "tnnLayout = " << ttnnLayout << "\n";
 
       auto ioTypeAttr = dyn_cast_or_null<tt::IOTypeAttr>(
           funcOp.getArgAttr(idx, kIOTypeAttrName));
