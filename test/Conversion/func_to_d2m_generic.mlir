@@ -2,7 +2,7 @@
 
 // CHECK: #[[TTNN_LAYOUT:.*]] = #ttnn.ttnn_layout<{{.*}}>
 #tiled = #triton_tenstorrent.tiled_encoding<{tilesPerCore = [2, 2], order = [1, 0], tileShape = [32, 32]}>
-module attributes {"ttg.num-ctas" = 1 : i32, "ttg.num-warps" = 1 : i32, ttg.target = "cpu", "ttg.threads-per-warp" = 1 : i32} {
+module attributes {"ttg.num-ctas" = 1 : i32, "ttg.num-warps" = 1 : i32, ttg.target = "cpu", "ttg.threads-per-warp" = 1 : i32, "tt.device-grid" = #triton_tenstorrent.grid<8, 8>} {
 
   // CHECK: func.func @load_kernel(
   // CHECK-SAME: %[[ARG0:[a-zA-Z0-9_]+]]: tensor<?x?xf16, #[[TTNN_LAYOUT]]>
@@ -17,7 +17,7 @@ module attributes {"ttg.num-ctas" = 1 : i32, "ttg.num-warps" = 1 : i32, ttg.targ
     // CHECK-SAME: -> memref<{{.*}}!ttcore.tile<32x32, f16>{{.*}}>
 
     // CHECK: d2m.generic
-    // CHECK-SAME: grid = #ttcore.grid<1x1>
+    // CHECK-SAME: grid = #ttcore.grid<8x8>
     // CHECK: ins(%[[CAST]]
     %a = tt.descriptor_load %in_desc[%row, %col]
         : !tt.tensordesc<tensor<64x64xf16>> -> tensor<64x64xf16, #tiled>
@@ -34,9 +34,9 @@ module attributes {"ttg.num-ctas" = 1 : i32, "ttg.num-warps" = 1 : i32, ttg.targ
 // tt.ptr<f32> tensor arguments (e.g. the vector-add tutorial): each pointer
 // argument is paired with a dependent tt.load (INPUT) / tt.store (OUTPUT) used
 // to recover the block tensor type, then converted to a dynamic tensor with a
-// 1x1 single-tile ttnn layout.
+// 1x1 single-tile ttnn layout. TODO: should we update this for the 8x8 grid?
 #blocked = #ttg.blocked<{sizePerThread = [1024], threadsPerWarp = [1], warpsPerCTA = [1], order = [0]}>
-module attributes {"ttg.num-ctas" = 1 : i32, "ttg.num-warps" = 1 : i32, ttg.target = "cpu", "ttg.threads-per-warp" = 1 : i32} {
+module attributes {"ttg.num-ctas" = 1 : i32, "ttg.num-warps" = 1 : i32, ttg.target = "cpu", "ttg.threads-per-warp" = 1 : i32, "tt.device-grid" = #triton_tenstorrent.grid<1, 1>} {
 
   // The flat 1024-element tensor packs into a single 32x32 tile: <1x1> grid,
   // one tile per core.
