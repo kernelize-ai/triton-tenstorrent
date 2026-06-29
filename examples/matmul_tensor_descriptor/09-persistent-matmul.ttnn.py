@@ -256,15 +256,18 @@ def run_test(expect, fn, a, b, label, enabled=True):
 
 def validate(M, N, K, dtype):
     print(f"{M=}, {N=}, {K=}, verification naive vs: ")
-    a = torch.randn((M, K), device="cpu", dtype=torch.float32).to(dtype)
-    b = torch.randn((K, N), device="cpu", dtype=torch.float32).to(dtype)
+    # = torch.randn((M, K), device="cpu", dtype=torch.float32).to(dtype)
+    #b = torch.randn((K, N), device="cpu", dtype=torch.float32).to(dtype)
     #a = torch.arange(M*K, dtype=torch.float32).reshape(M, K)
-    #a = torch.full((M, K), 2.0, device="cpu", dtype=torch.bfloat16).to(dtype)
-    #b = torch.ones((K, N), device="cpu", dtype=torch.float32).to(dtype)
+    a = torch.empty((M, K), dtype=torch.float32)
+    a[:, :32] = 2.0   # K-tile 0  -> 64
+    a[:, 32:] = 3.0   # K-tile 1  -> 96
+    b = torch.ones((K, N), dtype=torch.float32)   # correct = 160
     #b = b.T.contiguous()
 
     naive_result = torch_matmul(a, b.T).to(torch.float32)
     triton_result = matmul_tma(a, b, False)
+    torch.set_printoptions(profile="full")
     print(f"triton_result: {triton_result}")
     print(f"naive_result: {naive_result}")
     torch.testing.assert_allclose(naive_result, triton_result, atol=0.05, rtol=1e-2)
@@ -322,9 +325,11 @@ if __name__ == "__main__":
 
         torch.manual_seed(0)
 
-        validate(32, 32, 32, dtype)
-        validate(64, 32, 32, dtype)
-        validate(64, 64, 32, dtype)
+        validate(32, 32, 128, dtype)
+        #validate(32, 32, 32, dtype)
+        #validate(64, 32, 32, dtype)
+        #validate(64, 64, 32, dtype)
+        #validate(512, 128, 32, dtype)
         
         """
         validate(8192, 8192, args.K_range[0], dtype)
