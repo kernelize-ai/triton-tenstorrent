@@ -85,8 +85,7 @@ struct ConvertTensorDescLoadOp
     assert(opIndices.size() == tileType.getShape().size());
 
     SmallVector<Value> indices;
-    for (auto [elementIndex, t] :
-         llvm::zip(opIndices, tileType.getShape())) {
+    for (auto [elementIndex, t] : llvm::zip(opIndices, tileType.getShape())) {
       // normalize the element index by the tile shape
       Value tileIndex =
           arith::DivSIOp::create(rewriter, loc, elementIndex,
