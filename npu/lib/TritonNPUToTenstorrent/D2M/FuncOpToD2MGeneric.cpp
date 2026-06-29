@@ -111,8 +111,6 @@ struct ArgConversionHelper {
     return ttnn::TTNNLayoutAttr::Builder(context, scalarShape,
                                          perCoreMemRef.getElementType())
         .setBufferType(bufferType)
-        // .setGridShape(gridShape) // DRAM-Interleaved must use a unit grid, so
-        // this is currently ignored/unused
         .setMemoryLayout(
             ttnn::TensorMemoryLayout::Interleaved) // support sharded?
         .build();
