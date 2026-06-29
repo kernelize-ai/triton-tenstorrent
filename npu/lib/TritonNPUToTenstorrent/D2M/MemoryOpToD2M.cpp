@@ -79,10 +79,14 @@ struct ConvertTensorDescLoadOp
         ttcore::MemorySpaceAttr::get(context, ttcore::MemorySpace::DeviceL1));
     auto tileType = cast<ttcore::TileType>(descType.getElementType());
 
+    SmallVector<Value> opIndices = op.getIndices();
+    if (opIndices.size() == 1)
+      opIndices.push_back(arith::createConstantI32(loc, rewriter, 0));
+    assert(opIndices.size() == tileType.getShape().size());
+
     SmallVector<Value> indices;
-    assert(op.getIndices().size() == tileType.getShape().size());
     for (auto [elementIndex, t] :
-         llvm::zip(op.getIndices(), tileType.getShape())) {
+         llvm::zip(opIndices, tileType.getShape())) {
       // normalize the element index by the tile shape
       Value tileIndex =
           arith::DivSIOp::create(rewriter, loc, elementIndex,
@@ -90,8 +94,6 @@ struct ConvertTensorDescLoadOp
       indices.push_back(arith::IndexCastOp::create(
           rewriter, loc, rewriter.getIndexType(), tileIndex));
     }
-    if (indices.size() == 1)
-      indices.push_back(arith::createIndexConstant(loc, rewriter, 0));
 
     // step 3: create the remote load
     d2m::RemoteLoadOp::create(rewriter, loc, {}, allocOp.getResult(), descPtr,
@@ -121,10 +123,13 @@ struct ConvertTensorDescStoreOp
     auto srcMemRef = cast<MemRefType>(src.getType());
     auto tileType = cast<ttcore::TileType>(srcMemRef.getElementType());
 
+    SmallVector<Value> opIndices = op.getIndices();
+    if (opIndices.size() == 1)
+      opIndices.push_back(arith::createConstantI32(loc, rewriter, 0));
+    assert(opIndices.size() == tileType.getShape().size());
+
     SmallVector<Value> indices;
-    assert(op.getIndices().size() == tileType.getShape().size());
-    for (auto [elementIndex, t] :
-         llvm::zip(op.getIndices(), tileType.getShape())) {
+    for (auto [elementIndex, t] : llvm::zip(opIndices, tileType.getShape())) {
       // normalize the element index by the tile shape
       Value tileIndex =
           arith::DivSIOp::create(rewriter, loc, elementIndex,
@@ -132,8 +137,6 @@ struct ConvertTensorDescStoreOp
       indices.push_back(arith::IndexCastOp::create(
           rewriter, loc, rewriter.getIndexType(), tileIndex));
     }
-    if (indices.size() == 1)
-      indices.push_back(arith::createIndexConstant(loc, rewriter, 0));
 
     // local buffer variant of remote store
     d2m::RemoteStoreOp::create(rewriter, loc, /*resultType=*/{}, descPtr,
