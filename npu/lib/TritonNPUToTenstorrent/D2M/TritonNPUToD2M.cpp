@@ -187,7 +187,7 @@ struct ConvertTritonNPUToD2MPass
           // TODO: shard layout or interleaved?
           auto memRefType = MemRefType::get(
               shape, tileType,
-              ttcore::ShardLayoutAttr::get(shardShape, tileType, /*buffers=*/1),
+              ttcore::InterleavedLayoutAttr::get(shardShape, tileType),
               ttcore::MemorySpaceAttr::get(t.getContext(),
                                            ttcore::MemorySpace::DeviceDRAM));
           out.push_back(memRefType);

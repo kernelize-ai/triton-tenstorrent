@@ -8,6 +8,8 @@
 #include "npu/include/Dialect/TritonTenstorrent/IR/Dialect.h"
 #include "llvm/ADT/TypeSwitch.h"
 
+#include "ttmlir/Dialect/TTCore/IR/Utils.h"
+
 #include "npu/include/Dialect/TritonTenstorrent/IR/Dialect.cpp.inc"
 
 #include "npu/include/Dialect/TritonTenstorrent/IR/OpsEnums.cpp.inc"
@@ -22,9 +24,10 @@ using namespace mlir::triton::npu;
 namespace mlir::triton::npu::tt {
 
 GridAttr TritonTenstorrentDialect::getGridAttr(ModuleOp mod) {
-  if (auto attr = mod->getAttrOfType<GridAttr>(AttrGridName))
+  if (auto attr = mod->getAttrOfType<GridAttr>(kAttrGridName))
     return attr;
-  // for now force a 1x1 grid
+
+  // hardcode 1x1 grid for now
   return GridAttr::get(mod.getContext(), {1, 1});
 }
 

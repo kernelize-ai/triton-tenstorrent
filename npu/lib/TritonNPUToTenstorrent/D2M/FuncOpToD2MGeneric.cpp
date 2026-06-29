@@ -4,7 +4,6 @@
 
 #include "triton/Dialect/Triton/IR/Dialect.h"
 #include "triton/Dialect/Triton/IR/Utility.h"
-#include "triton/Tools/StrUtil.h"
 
 #include "ttmlir/Dialect/D2M/IR/D2M.h"
 #include "ttmlir/Dialect/D2M/IR/D2MOps.h"
@@ -98,7 +97,8 @@ struct ArgConversionHelper {
 
   static ttnn::TTNNLayoutAttr
   getTTNNLayoutForMemRef(MemRefType perCoreMemRef,
-                         ArrayRef<int64_t> scalarShape) {
+                         ArrayRef<int64_t> scalarShape,
+                         ArrayRef<int64_t> gridShape) {
     MLIRContext *context = perCoreMemRef.getContext();
     auto memSpaceAttr =
         ttcore::MemorySpaceAttr::get(context, ttcore::MemorySpace::DeviceDRAM);
@@ -111,6 +111,8 @@ struct ArgConversionHelper {
     return ttnn::TTNNLayoutAttr::Builder(context, scalarShape,
                                          perCoreMemRef.getElementType())
         .setBufferType(bufferType)
+        .setGridShape(gridShape) // DRAM-Interleaved must use a unit grid, so
+                                 // this is currently ignored/unused
         .setMemoryLayout(
             ttnn::TensorMemoryLayout::Interleaved) // support sharded?
         .build();
@@ -194,19 +196,20 @@ LogicalResult ArgConversionHelper::convertFunctionArguments(
       auto tile = cast<ttcore::TileType>(perCoreMemRef.getElementType());
       auto scalarShape = tile.getScalarShape(tiledShape);
 
-      auto ttnnLayout = getTTNNLayoutForMemRef(perCoreMemRef, scalarShape);
+      auto ttnnLayout =
+          getTTNNLayoutForMemRef(perCoreMemRef, scalarShape, grid.getShape());
 
       // The triton type converter doesn't have access to the grid shape. CB
       // memrefs don't need the grid shape, but function argument ("ptr")
       // memrefs do need the grid shape as remote load/store ops expect grid
       // shapes on the memref arguments. Add the grid shape to the perCoreMemref
       // here
+      // TODO: push this into type converter?
       SmallVector<int64_t> argShape = llvm::to_vector(grid.getShape());
       argShape.append(tiledShape);
 
       MemRefType functionArgMemRef = MemRefType::get(
-          argShape, tile,
-          ttcore::ShardLayoutAttr::get(tiledShape, tile, /*buffers=*/1),
+          argShape, tile, ttcore::InterleavedLayoutAttr::get(tiledShape, tile),
           ttcore::MemorySpaceAttr::get(context,
                                        ttcore::MemorySpace::DeviceDRAM));
 
@@ -235,8 +238,8 @@ LogicalResult ArgConversionHelper::convertFunctionArguments(
              "expected first expanded tensor desc type to be memref");
       // drop the memref, but populate the rest of the expanded args
       auto perCoreMemRef = cast<MemRefType>(expandedTypes.front());
-      auto ttnnLayout =
-          getTTNNLayoutForMemRef(perCoreMemRef, blockTensorTy.getShape());
+      auto ttnnLayout = getTTNNLayoutForMemRef(
+          perCoreMemRef, blockTensorTy.getShape(), grid.getShape());
 
       auto ioTypeAttr = dyn_cast_or_null<tt::IOTypeAttr>(
           funcOp.getArgAttr(idx, kIOTypeAttrName));
