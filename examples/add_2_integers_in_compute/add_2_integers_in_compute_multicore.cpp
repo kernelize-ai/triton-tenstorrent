@@ -8,6 +8,7 @@
 #include <tt-metalium/bfloat16.hpp>
 #include "tt-metalium/constants.hpp"
 #include <tt-metalium/distributed.hpp>
+#include <tt-metalium/tensor_accessor_args.hpp>
 
 using namespace tt;
 using namespace tt::tt_metal;
@@ -105,6 +106,20 @@ int main() {
     std::vector<uint32_t> compile_args = {static_cast<uint32_t>(CBIndex::c_0),
                                           static_cast<uint32_t>(CBIndex::c_1),
                                           static_cast<uint32_t>(CBIndex::c_16)};
+
+    // Each generated kernel builds a TensorAccessor that reads its (interleaved,
+    // DRAM) layout from compile-time args. We append those args *after* the CB
+    // indices, so they start at compile-time-arg offset 3 -- the generated
+    // kernels must reference them via TensorAccessorArgs<3, 0>() (this is the
+    // cta_base the lowering still needs to emit instead of its current 0).
+    //
+    // All three DRAM buffers (src0, src1, dst) share the same shape and
+    // interleaved-DRAM layout, so a single TensorAccessorArgs block describes
+    // them all; each accessor still receives its own bank_base_address (the
+    // buffer address) from the common runtime args at construction time. The
+    // same compile_args vector is therefore reused by the reader, writer and
+    // compute kernels below.
+    TensorAccessorArgs(src0_dram_buffer).append_to(compile_args);
 
 #ifdef TRITON
     KernelHandle binary_reader_kernel_id = CreateKernel(
