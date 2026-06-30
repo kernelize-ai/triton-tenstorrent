@@ -112,6 +112,44 @@ struct ConvertTritonFunc : public OpConversionPattern<triton::FuncOp> {
         return getArgVal;
       };
 
+      // Build one chained `ttkernel.TensorAccessorArgs` per tensor input (in
+      // input order) at the start of the kernel. The first sits at compile-time
+      // arg offset `ctArgs.size()` (== number of CB ports == number of tensor
+      // inputs); the rest chain via `prev_args` so the runtime resolves their
+      // variable-size offsets. Each is tagged with the common-arg index of its
+      // buffer's base address so the memory-op lowering can look up the right
+      // accessor when building the `TensorAccessor` for a load/store.
+      // The compute thread reads from CBs, never communicates via semaphores,
+      // and never issues NOC tile reads, so it has no use for TensorAccessors.
+      const bool isComputeThread =
+          getThreadTypeFromFunctionName(funcOp.getName()) ==
+          tt::ttkernel::ThreadType::Compute;
+      Value prevAccessorArgs = nullptr;
+      auto buildAccessorArgs = [&](unsigned baseArgIdx) {
+        if (isComputeThread)
+          return;
+        ttkernel::TensorAccessorArgsOp argsOp;
+        if (!prevAccessorArgs) {
+          Value ctaBase = arith::createConstantI32(
+              loc, rewriter, static_cast<int32_t>(ctArgs.size()));
+          Value crtaBase = arith::createConstantI32(loc, rewriter, 0);
+          argsOp = ttkernel::TensorAccessorArgsOp::create(
+              rewriter, loc, ttkernel::TensorAccessorArgsType::get(context),
+              /*cta_base=*/ctaBase, /*crta_base=*/crtaBase,
+              /*prev_args=*/Value(), /*cta_expr=*/StringAttr(),
+              /*crta_expr=*/StringAttr());
+        } else {
+          argsOp = ttkernel::TensorAccessorArgsOp::create(
+              rewriter, loc, ttkernel::TensorAccessorArgsType::get(context),
+              /*cta_base=*/Value(), /*crta_base=*/Value(),
+              /*prev_args=*/prevAccessorArgs, /*cta_expr=*/StringAttr(),
+              /*crta_expr=*/StringAttr());
+        }
+        argsOp->setAttr(kAccessorBaseArgIndexAttr,
+                        rewriter.getI32IntegerAttr(baseArgIdx));
+        prevAccessorArgs = argsOp.getResult();
+      };
+
       unsigned idx = 0;
       for (auto arg : oldEntry.getArguments()) {
         Type oldType = arg.getType();
@@ -120,6 +158,7 @@ struct ConvertTritonFunc : public OpConversionPattern<triton::FuncOp> {
           assert(typeConverter->convertType(oldType, unpacked).succeeded() &&
                  "failed to convert tensor descriptor type");
           ptrArgIndices.push_back(idx);
+          buildAccessorArgs(idx);
 
           SmallVector<Value> unpackedValues;
           unpackedValues.reserve(unpacked.size());
@@ -134,8 +173,10 @@ struct ConvertTritonFunc : public OpConversionPattern<triton::FuncOp> {
                              .getResult(0);
           argReplacements.push_back(packed);
         } else {
-          if (isa<PointerType>(oldType))
+          if (isa<PointerType>(oldType)) {
             ptrArgIndices.push_back(idx);
+            buildAccessorArgs(idx);
+          }
           Type newType = typeConverter->convertType(oldType);
 
           LDBG("Replacing arg " << idx << " of type " << oldType

@@ -90,34 +90,61 @@ static Value applyLinearLayout(ConversionPatternRewriter &rewriter,
   return offset;
 }
 
-// Build a TensorAccessor for an interleaved DRAM buffer. This replaces the
-// deprecated GetInterleavedAddrGenFast (removed upstream in tt-mlir#8802): the
-// DRAM flag and data format are no longer passed inline. Instead a
-// TensorAccessor reads its interleaved/sharding/DRAM configuration from
-// compile-time args that the host pushes via TensorAccessorArgs.
-//
-// cta_base/crta_base are the offsets into the compile-time / common-runtime arg
-// arrays where this buffer's accessor args live. The driver program (e.g.
-// examples/matmul_tensor_descriptor/matmul_multi_core_tma.cpp) must append this
-// buffer's accessor args at a matching offset.
-//
-// TODO: thread a real per-buffer CT-arg offset. 0 is a placeholder for the
-// hand-written-driver case; a multi-buffer kernel needs distinct offsets (or
-// prev_args chaining) that match the order the driver binds accessor args.
-static Value
-createInterleavedTensorAccessor(ConversionPatternRewriter &rewriter,
-                                Location loc, Value baseAddr, Value pageSize) {
-  auto *ctx = rewriter.getContext();
-  Value ctaBase = arith::createConstantI32(loc, rewriter, 3);
-  Value crtaBase = arith::createConstantI32(loc, rewriter, 0);
-  Value args = ttkernel::TensorAccessorArgsOp::create(
-      rewriter, loc, ttkernel::TensorAccessorArgsType::get(ctx),
-      /*cta_base=*/ctaBase, /*crta_base=*/crtaBase,
-      /*prev_args=*/Value(), /*cta_expr=*/StringAttr(),
-      /*crta_expr=*/StringAttr());
+// A buffer's base address is materialized by the func conversion as a
+// `ttkernel.get_common_arg_val(idx)`; recover `idx` so we can match the buffer
+// to the `TensorAccessorArgs` built for it at function entry.
+static std::optional<int64_t> getBaseCommonArgIndex(Value baseAddr) {
+  auto getArg = baseAddr.getDefiningOp<ttkernel::GetCommonArgValOp>();
+  if (!getArg)
+    return std::nullopt;
+  auto cst = getArg.getArgIndex().getDefiningOp<arith::ConstantOp>();
+  if (!cst)
+    return std::nullopt;
+  if (auto intAttr = dyn_cast<IntegerAttr>(cst.getValue()))
+    return intAttr.getInt();
+  return std::nullopt;
+}
+
+// Find the chained `TensorAccessorArgs` that the func conversion built at the
+// enclosing kernel's entry for the buffer whose base address has the given
+// common-arg index (tagged with kAccessorBaseArgIndexAttr). See
+// TritonFuncOpToFuncOp.cpp.
+static Value findAccessorArgsForBuffer(Operation *op, int64_t baseArgIndex) {
+  auto funcOp = op->getParentOfType<func::FuncOp>();
+  if (!funcOp)
+    return nullptr;
+  Value result;
+  funcOp.walk([&](ttkernel::TensorAccessorArgsOp argsOp) {
+    auto attr = argsOp->getAttrOfType<IntegerAttr>(kAccessorBaseArgIndexAttr);
+    if (attr && attr.getInt() == baseArgIndex) {
+      result = argsOp.getResult();
+      return WalkResult::interrupt();
+    }
+    return WalkResult::advance();
+  });
+  return result;
+}
+
+// Build a TensorAccessor for a load/store by pairing the buffer's runtime base
+// address + page size with the chained `TensorAccessorArgs` reserved for that
+// buffer at function entry. This replaces the deprecated
+// GetInterleavedAddrGenFast (removed upstream in tt-mlir#8802); the
+// interleaved/sharding/DRAM config now travels in compile-time args the host
+// pushes via TensorAccessorArgs.
+static Value createTensorAccessor(ConversionPatternRewriter &rewriter,
+                                  Location loc, Operation *op, Value baseAddr,
+                                  Value pageSize) {
+  std::optional<int64_t> argIdx = getBaseCommonArgIndex(baseAddr);
+  assert(argIdx &&
+         "expected buffer base address to come from get_common_arg_val");
+  Value accessorArgs = findAccessorArgsForBuffer(op, *argIdx);
+  assert(
+      accessorArgs &&
+      "no TensorAccessorArgs found for buffer; expected the func-entry chain "
+      "built in TritonFuncOpToFuncOp");
   return ttkernel::TensorAccessorOp::create(
-      rewriter, loc, ttkernel::TensorAccessorType::get(ctx), args, baseAddr,
-      pageSize);
+      rewriter, loc, ttkernel::TensorAccessorType::get(rewriter.getContext()),
+      accessorArgs, baseAddr, pageSize);
 }
 
 // The OO TensorAccessor EmitC path (tt-mlir#8802) requires a *statically known*
@@ -175,8 +202,7 @@ struct ConvertLoadOp : public OpConversionPattern<triton::LoadOp> {
 
     auto pageSize = ttkernel::GetTileSizeOp::create(rewriter, loc, cb);
 
-    Value addrGen =
-        createInterleavedTensorAccessor(rewriter, loc, baseAddr, pageSize);
+    Value addrGen = createTensorAccessor(rewriter, loc, op, baseAddr, pageSize);
 
     rewriter.restoreInsertionPoint(opInsertionPt);
 
@@ -295,8 +321,7 @@ struct ConvertTensorDescLoadOp
     ttkernel::CBReserveBackOp::create(rewriter, loc, cb, numPages);
 
     Value baseAddr = desc.getPtr();
-    Value addrGen =
-        createInterleavedTensorAccessor(rewriter, loc, baseAddr, pageSize);
+    Value addrGen = createTensorAccessor(rewriter, loc, op, baseAddr, pageSize);
 
     auto offsets = op.getIndices();
 
@@ -418,8 +443,7 @@ struct ConvertStoreOp : public OpConversionPattern<triton::StoreOp> {
 
     auto pageSize = ttkernel::GetTileSizeOp::create(rewriter, loc, cb);
 
-    Value addrGen =
-        createInterleavedTensorAccessor(rewriter, loc, baseAddr, pageSize);
+    Value addrGen = createTensorAccessor(rewriter, loc, op, baseAddr, pageSize);
 
     rewriter.restoreInsertionPoint(opInsertionPt);
 
@@ -612,8 +636,7 @@ struct ConvertTensorDescStoreOp
     auto pageSize = ttkernel::GetTileSizeOp::create(rewriter, loc, cb);
 
     Value baseAddr = desc.getPtr();
-    Value addrGen =
-        createInterleavedTensorAccessor(rewriter, loc, baseAddr, pageSize);
+    Value addrGen = createTensorAccessor(rewriter, loc, op, baseAddr, pageSize);
 
     rewriter.restoreInsertionPoint(opInsertionPt);
 
