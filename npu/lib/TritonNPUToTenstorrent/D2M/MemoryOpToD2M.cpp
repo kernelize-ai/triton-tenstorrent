@@ -79,20 +79,40 @@ struct ConvertTensorDescLoadOp
         ttcore::MemorySpaceAttr::get(context, ttcore::MemorySpace::DeviceL1));
     auto tileType = cast<ttcore::TileType>(descType.getElementType());
 
-    SmallVector<Value> opIndices = op.getIndices();
-    if (opIndices.size() == 1)
-      opIndices.push_back(arith::createConstantI32(loc, rewriter, 0));
-    assert(opIndices.size() == tileType.getShape().size());
+    // The descriptor memref is interleaved with a 1x1 grid, so remote_load
+    // addresses it by a single flat *page* index, not per-dimension tile
+    // coords. Linearize: flat = tileRow * tilesPerRow + tileCol, where
+    // tilesPerRow is the tensor width in tiles (cols / tileWidth).
+    auto tileDims = tileType.getShape();
+    assert(op.getIndices().size() == 2 && tileDims.size() == 2 &&
+           "flat-index linearization currently supports rank-2 descriptors");
 
-    SmallVector<Value> indices;
-    for (auto [elementIndex, t] : llvm::zip(opIndices, tileType.getShape())) {
-      // normalize the element index by the tile shape
-      Value tileIndex =
-          arith::DivSIOp::create(rewriter, loc, elementIndex,
-                                 arith::createConstantI32(loc, rewriter, t));
-      indices.push_back(arith::IndexCastOp::create(
-          rewriter, loc, rewriter.getIndexType(), tileIndex));
-    }
+    // desc expansion (from the TensorDescType converter) is
+    //   [memref, shape0, shape1, stride0, stride1, padding]
+    // so the column count (shape[1], in elements) is desc[2].
+    assert(desc.size() > 2 && "descriptor missing shape operands");
+
+    Value tensorCols = desc[2];
+    Value tilesPerRow = arith::CeilDivSIOp::create(
+        rewriter, loc, tensorCols,
+        arith::createConstantI32(loc, rewriter, tileDims[1]));
+
+    Value tileRow = arith::DivSIOp::create(
+        rewriter, loc, op.getIndices()[0],
+        arith::createConstantI32(loc, rewriter, tileDims[0]));
+    Value tileCol = arith::DivSIOp::create(
+        rewriter, loc, op.getIndices()[1],
+        arith::createConstantI32(loc, rewriter, tileDims[1]));
+
+    // flat = tileRow * tilesPerRow + tileCol
+    Value flat = arith::AddIOp::create(
+        rewriter, loc,
+        arith::MulIOp::create(rewriter, loc, tileRow, tilesPerRow), tileCol);
+
+    SmallVector<Value> indices = {
+        arith::IndexCastOp::create(rewriter, loc, rewriter.getIndexType(),
+                                   flat),
+        arith::createIndexConstant(loc, rewriter, 0)};
 
     // step 3: create the remote load
     d2m::RemoteLoadOp::create(rewriter, loc, {}, allocOp.getResult(), descPtr,
@@ -122,20 +142,35 @@ struct ConvertTensorDescStoreOp
     auto srcMemRef = cast<MemRefType>(src.getType());
     auto tileType = cast<ttcore::TileType>(srcMemRef.getElementType());
 
-    SmallVector<Value> opIndices = op.getIndices();
-    if (opIndices.size() == 1)
-      opIndices.push_back(arith::createConstantI32(loc, rewriter, 0));
-    assert(opIndices.size() == tileType.getShape().size());
+    // Same flat-page linearization as the load: the output descriptor is an
+    // interleaved 1x1-grid memref, addressed by a single flat page index
+    // = tileRow * tilesPerRow + tileCol.
+    auto tileDims = tileType.getShape();
+    assert(op.getIndices().size() == 2 && tileDims.size() == 2 &&
+           "flat-index linearization currently supports rank-2 descriptors");
 
-    SmallVector<Value> indices;
-    for (auto [elementIndex, t] : llvm::zip(opIndices, tileType.getShape())) {
-      // normalize the element index by the tile shape
-      Value tileIndex =
-          arith::DivSIOp::create(rewriter, loc, elementIndex,
-                                 arith::createConstantI32(loc, rewriter, t));
-      indices.push_back(arith::IndexCastOp::create(
-          rewriter, loc, rewriter.getIndexType(), tileIndex));
-    }
+    // desc layout: [memref, shape0, shape1, stride0, stride1, padding].
+    assert(desc.size() > 2 && "descriptor missing shape operands");
+    Value tensorCols = desc[2];
+    Value tilesPerRow = arith::CeilDivSIOp::create(
+        rewriter, loc, tensorCols,
+        arith::createConstantI32(loc, rewriter, tileDims[1]));
+
+    Value tileRow = arith::DivSIOp::create(
+        rewriter, loc, op.getIndices()[0],
+        arith::createConstantI32(loc, rewriter, tileDims[0]));
+    Value tileCol = arith::DivSIOp::create(
+        rewriter, loc, op.getIndices()[1],
+        arith::createConstantI32(loc, rewriter, tileDims[1]));
+
+    Value flat = arith::AddIOp::create(
+        rewriter, loc,
+        arith::MulIOp::create(rewriter, loc, tileRow, tilesPerRow), tileCol);
+
+    SmallVector<Value> indices = {
+        arith::IndexCastOp::create(rewriter, loc, rewriter.getIndexType(),
+                                   flat),
+        arith::createIndexConstant(loc, rewriter, 0)};
 
     // local buffer variant of remote store
     d2m::RemoteStoreOp::create(rewriter, loc, /*resultType=*/{}, descPtr,

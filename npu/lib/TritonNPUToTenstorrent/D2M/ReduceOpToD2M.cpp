@@ -193,7 +193,7 @@ struct ConvertReduceOp : public OpConversionPattern<triton::ReduceOp> {
     // Allocate the output buffer. TODO: must we manually zero-initialise these
     // CBs or can we rely on hardware zeroing?
     auto outCBLayout = ttcore::CBLayoutAttr::get(outShape, tileType,
-                                                 /*buffers=*/outShape.size());
+                                                 /*buffers=*/2);
     auto outMemRefType = MemRefType::get(outShape, tileType, outCBLayout,
                                          srcMemRefType.getMemorySpace());
     Value outMemRef =

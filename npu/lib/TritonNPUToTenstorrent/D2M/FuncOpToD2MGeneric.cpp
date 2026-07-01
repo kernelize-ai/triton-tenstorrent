@@ -111,8 +111,6 @@ struct ArgConversionHelper {
     return ttnn::TTNNLayoutAttr::Builder(context, scalarShape,
                                          perCoreMemRef.getElementType())
         .setBufferType(bufferType)
-        .setGridShape(gridShape) // DRAM-Interleaved must use a unit grid, so
-                                 // this is currently ignored/unused
         .setMemoryLayout(
             ttnn::TensorMemoryLayout::Interleaved) // support sharded?
         .build();
@@ -205,7 +203,8 @@ LogicalResult ArgConversionHelper::convertFunctionArguments(
       // shapes on the memref arguments. Add the grid shape to the perCoreMemref
       // here
       // TODO: push this into type converter?
-      SmallVector<int64_t> argShape = llvm::to_vector(grid.getShape());
+      SmallVector<int64_t> argShape(grid.getShape().size(),
+                                    1); // interleaved layout requires unit grid
       argShape.append(tiledShape);
 
       MemRefType functionArgMemRef = MemRefType::get(
