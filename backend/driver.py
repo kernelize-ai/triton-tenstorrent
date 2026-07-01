@@ -67,13 +67,15 @@ class TTUtils(object):
 
     def load_binary(self, name, kernel, shared_mem, device_id):
         device = self.driver.get_device(device_id)
+        print(f"LoadBinary {name}:")
+        print(kernel)
         lib = device.load_library(kernel, len(kernel))
         kernel = lib.get_kernel(name)
         return (lib, kernel, 1, shared_mem, 2**12)
 
     def get_device_properties(self, *args):
-        import nexus
-        core_count = self.driver.get_device().get_property_int(nexus.property.Size)
+        import knexus
+        core_count = self.driver.get_device().get_property_int(knexus.property.Size)
         return {
             "max_num_regs": core_count * 4, "max_shared_mem": 1024 * 1024 * 1024, "multiprocessor_count": core_count,
             "warpSize": 1
@@ -94,7 +96,7 @@ class TTLauncher(object):
         self.signature = {idx: value for idx, value in src.signature.items()}
 
     def __call__(self, gridX, gridY, gridZ, stream, function, *args):
-        import nexus
+        import knexus
         import torch
 
         kernel_metadata = args[0]
@@ -126,14 +128,14 @@ class TTLauncher(object):
 
         def add_const(arg):
             nonlocal cb_idx
-            self.command.set_const(cb_idx, cb_depth, "CB", nexus.get_data_type(arg))
+            self.command.set_const(cb_idx, cb_depth, "CB", knexus.get_data_type(arg))
             cb_idx += 1
 
         for i, arg in enumerate(args[4:]):
             ty = sig_types[i]
             if ty == "constexpr":
                 continue
-            if isinstance(arg, torch.Tensor) or isinstance(arg, nexus.Buffer):
+            if isinstance(arg, torch.Tensor) or isinstance(arg, knexus.Buffer):
                 add_const(arg)
                 add_arg(arg)
             elif isinstance(arg, TensorDescriptor):
@@ -159,6 +161,7 @@ class TTLauncher(object):
             else:
                 add_arg(arg)
 
+        return
         self.command.finalize([gridX, gridY, gridZ], [num_warps, 1, 1], shared_memory)
 
         if launch_enter_hook is not None:
@@ -223,11 +226,13 @@ class TTDeviceInterface:
         return TTDeviceInterface.TimerEvent()
 
 
+print(f"TTDriver.is_active()")
 class TTDriver(DriverBase):
 
     @staticmethod
     def is_active():
         # Always active so the off-line compiler doesn't complain
+        print(f"TTDriver.is_active()")
         try:
             import torch
             import torch_nexus
@@ -266,7 +271,8 @@ class TTDriver(DriverBase):
 
     def get_active_torch_device(self):
         import torch
-        return torch.device("nexus", self.get_current_device())
+        import torch_nexus
+        return torch.device('nexus')
 
     def map_python_to_cpp_type(self, ty: str) -> str:
         return ty
