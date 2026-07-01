@@ -152,12 +152,12 @@ static Value createTensorAccessor(ConversionPatternRewriter &rewriter,
 // noc_async_read used the implicit `noc_index` global, but the new `Noc` object
 // is constructed with an explicit compile-time index.
 //
-// Every NoC op in a kernel runs on *that kernel's* NoC, regardless of whether it
-// is a read or a write: the reader kernel runs on RISCV_1 (NOC 1) and the writer
-// on RISCV_0 (NOC 0). In particular a read issued from the writer (e.g. the
-// matmul writer loading an input tile) must still use NOC 0 -- issuing it on
-// NOC 1 from RISCV_0 leaves the read outstanding forever and hangs the barrier.
-// The driver's DataMovementConfig must match (reader .noc =
+// Every NoC op in a kernel runs on *that kernel's* NoC, regardless of whether
+// it is a read or a write: the reader kernel runs on RISCV_1 (NOC 1) and the
+// writer on RISCV_0 (NOC 0). In particular a read issued from the writer (e.g.
+// the matmul writer loading an input tile) must still use NOC 0 -- issuing it
+// on NOC 1 from RISCV_0 leaves the read outstanding forever and hangs the
+// barrier. The driver's DataMovementConfig must match (reader .noc =
 // NOC::RISCV_1_default, writer .noc = NOC::RISCV_0_default).
 static constexpr int64_t kReaderNocIndex = 1;
 static constexpr int64_t kWriterNocIndex = 0;
@@ -945,6 +945,8 @@ struct ConvertMulticastOp : public OpConversionPattern<npu::tt::MulticastOp> {
         cast<ttkernel::CBType>(cb.getType()).getNumTiles();
     Value numPages = arith::createConstantI32(loc, rewriter, numCbTiles);
 
+    Value nocId = createNocId(rewriter, loc, getKernelNocIndex(multicastOp));
+
     scf::IfOp isSender =
         scf::IfOp::create(rewriter, loc, ValueRange{}, isSenderBool);
     scf::IfOp::ensureTerminator(isSender.getThenRegion(), rewriter, loc);
@@ -989,10 +991,10 @@ struct ConvertMulticastOp : public OpConversionPattern<npu::tt::MulticastOp> {
           numDests, convertVirtualToPhysicalIndex(senderIndexX, true),
           convertVirtualToPhysicalIndex(senderIndexY, false),
           convertVirtualToPhysicalIndex(mcastEndX, true),
-          convertVirtualToPhysicalIndex(mcastEndY, false), l1BaseAddr, nullptr,
+          convertVirtualToPhysicalIndex(mcastEndY, false), l1BaseAddr, nocId,
           nullptr);
 
-      ttkernel::NocAsyncWriteBarrierOp::create(rewriter, loc);
+      ttkernel::NocAsyncWriteBarrierOp::create(rewriter, loc, nocId);
 
       // signal multicast completion using the receiver data ready semaphore
       // set the local value for the semaphore first
@@ -1010,9 +1012,9 @@ struct ConvertMulticastOp : public OpConversionPattern<npu::tt::MulticastOp> {
           convertVirtualToPhysicalIndex(senderIndexY, false),
           convertVirtualToPhysicalIndex(mcastEndX, true),
           convertVirtualToPhysicalIndex(mcastEndY, false), receiverSemaphore,
-          nullptr);
+          nocId);
       ttkernel::NocSemaphoreSetMulticastOp::create(
-          rewriter, loc, l1ReceiverAddr, mcastCompleteAddr, numDests,
+          rewriter, loc, receiverSemaphore, mcastCompleteAddr, numDests,
           /*linked=*/nullptr);
     }
 
@@ -1026,10 +1028,11 @@ struct ConvertMulticastOp : public OpConversionPattern<npu::tt::MulticastOp> {
       // first, notify the sender that we are ready to receive
       auto remoteNocAddr = ttkernel::GetNocAddrOp::create(
           rewriter, loc, convertVirtualToPhysicalIndex(senderIndexX, true),
-          convertVirtualToPhysicalIndex(senderIndexY, false), senderSemaphore);
+          convertVirtualToPhysicalIndex(senderIndexY, false), senderSemaphore,
+          nocId);
       ttkernel::NocSemaphoreIncOp::create(
           rewriter, loc, remoteNocAddr,
-          arith::createIndexConstant(loc, rewriter, 1), nullptr);
+          arith::createIndexConstant(loc, rewriter, 1), nocId);
       // cast the receiver semaphore to the L1 ptr
       auto l1ReceiverAddr = ttkernel::CastToL1PtrOp::create(
           rewriter, loc,
