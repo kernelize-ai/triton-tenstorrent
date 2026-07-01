@@ -977,14 +977,7 @@ struct ConvertMulticastOp : public OpConversionPattern<npu::tt::MulticastOp> {
           rewriter, loc, l1SenderAddr,
           arith::createIndexConstant(loc, rewriter, 0));
 
-      // get the multicast addresses
-#if 0
-      auto mcastAddr = ttkernel::GetNocMulticastAddrOp::create(
-          rewriter, loc, convertVirtualToPhysicalIndex(senderIndexX, true),
-          convertVirtualToPhysicalIndex(senderIndexY, false),
-          convertVirtualToPhysicalIndex(mcastEndX, true),
-          convertVirtualToPhysicalIndex(mcastEndY, false), l1BaseAddr, nullptr);
-#endif
+      // emit the multicast write
       ttkernel::NocAsyncWriteMulticastOp::create(
           rewriter, loc, l1BaseAddr,
           arith::createConstantI32(loc, rewriter, cbPageSize * numCbTiles),
