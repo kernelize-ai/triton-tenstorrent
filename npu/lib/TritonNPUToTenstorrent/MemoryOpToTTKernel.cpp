@@ -150,10 +150,15 @@ static Value createTensorAccessor(ConversionPatternRewriter &rewriter,
 // The OO TensorAccessor EmitC path (tt-mlir#8802) requires a *statically known*
 // NoC index on the tile read/write ops and their barriers. The old
 // noc_async_read used the implicit `noc_index` global, but the new `Noc` object
-// is constructed with an explicit compile-time index. By convention the reader
-// kernel runs on RISCV_1 (NOC 1) and the writer on RISCV_0 (NOC 0); the driver
-// program's DataMovementConfig must match (reader .noc = NOC::RISCV_1_default,
-// writer .noc = NOC::RISCV_0_default).
+// is constructed with an explicit compile-time index.
+//
+// Every NoC op in a kernel runs on *that kernel's* NoC, regardless of whether it
+// is a read or a write: the reader kernel runs on RISCV_1 (NOC 1) and the writer
+// on RISCV_0 (NOC 0). In particular a read issued from the writer (e.g. the
+// matmul writer loading an input tile) must still use NOC 0 -- issuing it on
+// NOC 1 from RISCV_0 leaves the read outstanding forever and hangs the barrier.
+// The driver's DataMovementConfig must match (reader .noc =
+// NOC::RISCV_1_default, writer .noc = NOC::RISCV_0_default).
 static constexpr int64_t kReaderNocIndex = 1;
 static constexpr int64_t kWriterNocIndex = 0;
 
@@ -161,6 +166,14 @@ static Value createNocId(ConversionPatternRewriter &rewriter, Location loc,
                          int64_t nocIndex) {
   return arith::ConstantOp::create(rewriter, loc,
                                    rewriter.getI8IntegerAttr(nocIndex));
+}
+
+// Resolve the NoC index for a data-movement op from its enclosing kernel func.
+static int64_t getKernelNocIndex(Operation *op) {
+  auto funcOp = op->getParentOfType<func::FuncOp>();
+  assert(funcOp && "expected data-movement op inside a kernel func");
+  return funcOp.getSymName().ends_with("__writer") ? kWriterNocIndex
+                                                   : kReaderNocIndex;
 }
 
 struct ConvertLoadOp : public OpConversionPattern<triton::LoadOp> {
@@ -229,7 +242,7 @@ struct ConvertLoadOp : public OpConversionPattern<triton::LoadOp> {
 
       ttkernel::NocAsyncReadTileOp::create(
           rewriter, loc, crtTileIndex, addrGen, crtL1Address,
-          createNocId(rewriter, loc, kReaderNocIndex));
+          createNocId(rewriter, loc, getKernelNocIndex(op)));
       Value nextL1Address =
           arith::AddIOp::create(rewriter, loc, crtL1Address, pageSize);
       Value nextTileIndex =
@@ -241,7 +254,7 @@ struct ConvertLoadOp : public OpConversionPattern<triton::LoadOp> {
 
     rewriter.setInsertionPointAfter(loadTileLoop);
     ttkernel::NocAsyncReadBarrierOp::create(
-        rewriter, loc, createNocId(rewriter, loc, kReaderNocIndex));
+        rewriter, loc, createNocId(rewriter, loc, getKernelNocIndex(op)));
 
     rewriter.eraseOp(op);
     return success();
@@ -397,12 +410,12 @@ struct ConvertTensorDescLoadOp
         // issue the read
         ttkernel::NocAsyncReadTileOp::create(
             rewriter, loc, crtIndex, addrGen, crtL1Address,
-            createNocId(rewriter, loc, kReaderNocIndex));
+            createNocId(rewriter, loc, getKernelNocIndex(op)));
       }
     }
 
     ttkernel::NocAsyncReadBarrierOp::create(
-        rewriter, loc, createNocId(rewriter, loc, kReaderNocIndex));
+        rewriter, loc, createNocId(rewriter, loc, getKernelNocIndex(op)));
     rewriter.eraseOp(op);
     return success();
   }
@@ -471,7 +484,7 @@ struct ConvertStoreOp : public OpConversionPattern<triton::StoreOp> {
 
       ttkernel::NocAsyncWriteTileOp::create(
           rewriter, loc, crtTileIndex, addrGen, crtL1Address,
-          createNocId(rewriter, loc, kWriterNocIndex));
+          createNocId(rewriter, loc, getKernelNocIndex(op)));
 
       Value nextL1Address =
           arith::AddIOp::create(rewriter, loc, crtL1Address, pageSize);
@@ -484,7 +497,7 @@ struct ConvertStoreOp : public OpConversionPattern<triton::StoreOp> {
     rewriter.setInsertionPointAfter(storeTileLoop);
 
     ttkernel::NocAsyncWriteBarrierOp::create(
-        rewriter, loc, createNocId(rewriter, loc, kWriterNocIndex));
+        rewriter, loc, createNocId(rewriter, loc, getKernelNocIndex(op)));
     ttkernel::CBPopFrontOp::create(rewriter, loc, cb, numPages);
 
     rewriter.eraseOp(op);
@@ -738,12 +751,12 @@ struct ConvertTensorDescStoreOp
         // issue the write
         ttkernel::NocAsyncWriteTileOp::create(
             rewriter, loc, crtIndex, addrGen, crtL1Address,
-            createNocId(rewriter, loc, kWriterNocIndex));
+            createNocId(rewriter, loc, getKernelNocIndex(op)));
       }
     }
 
     ttkernel::NocAsyncWriteBarrierOp::create(
-        rewriter, loc, createNocId(rewriter, loc, kWriterNocIndex));
+        rewriter, loc, createNocId(rewriter, loc, getKernelNocIndex(op)));
     ttkernel::CBPopFrontOp::create(rewriter, loc, cb, numPages);
 
     rewriter.eraseOp(op);
