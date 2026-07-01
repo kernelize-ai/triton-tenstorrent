@@ -121,10 +121,11 @@ struct ConvertTritonFunc : public OpConversionPattern<triton::FuncOp> {
       // vector in the driver -- otherwise the writer (no multicast) would put
       // its accessors where the reader's semaphores live.
       //
-      // TODO: Match by op-name string (`triton_tenstorrent.multicast`) rather than
-      // the C++ type to avoid including the TritonTenstorrent dialect header
-      // here, which would pull the `mlir::triton::npu::tt` namespace into scope
-      // and shadow the `tt::ttkernel` references throughout this file.
+      // TODO: Match by op-name string (`triton_tenstorrent.multicast`) rather
+      // than the C++ type to avoid including the TritonTenstorrent dialect
+      // header here, which would pull the `mlir::triton::npu::tt` namespace
+      // into scope and shadow the `tt::ttkernel` references throughout this
+      // file.
       unsigned numReservedSemaphoreArgs = 0;
       if (auto moduleOp = funcOp->getParentOfType<ModuleOp>())
         moduleOp.walk([&](Operation *op) {
