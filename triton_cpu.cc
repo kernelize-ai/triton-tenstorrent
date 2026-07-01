@@ -145,7 +145,6 @@ void init_triton_npu_passes_tenstorrent(py::module &&m) {
 
   // ttkernel
   m.def("add_ttkernel_hoist_inits", [](mlir::PassManager &pm) {
-    // ttkernel-hoist-inits is anchored on func::FuncOp; nest it.
     mlir::OpPassManager &funcPm = pm.nest<mlir::func::FuncOp>();
     funcPm.addPass(mlir::tt::ttkernel::createTTKernelHoistInits());
   });
