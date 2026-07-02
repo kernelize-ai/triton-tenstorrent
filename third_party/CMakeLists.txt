@@ -92,7 +92,25 @@ ExternalProject_Add_Step(tt_mlir_env track_env_inputs
   ALWAYS OFF
 )
 
-add_custom_target(build_tt_mlir
+# Hash the current tt-mlir commit and all uncommitted changes into tt-mlir.hash. Caveat: only a
+# change to _tracked_ files will modify the hash file, triggering a rebuild.
+execute_process(
+    COMMAND sh -c "( git rev-parse HEAD; git diff HEAD) | git hash-object --stdin"
+    WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/tt-mlir"
+    OUTPUT_VARIABLE TTMLIR_HASH
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+)
+configure_file(
+    ${CMAKE_CURRENT_SOURCE_DIR}/tt-mlir.hash.in
+    ${CMAKE_BINARY_DIR}/tt-mlir.hash
+    @ONLY
+)
+
+# Rebuild tt-mlir if tt-mlir.hash changes; maintain a tt-mlir.stamp file to keep file modification
+# times consistent for CMake.
+add_custom_command(
+  OUTPUT ${CMAKE_BINARY_DIR}/tt-mlir.stamp
+  DEPENDS ${CMAKE_BINARY_DIR}/tt-mlir.hash
   COMMAND ${CMAKE_COMMAND} -E env
           CC=${CLANG_BIN}
           CXX=${CLANGXX_BIN}
@@ -102,10 +120,14 @@ add_custom_target(build_tt_mlir
           TTMLIR_TOOLCHAIN_DIR=${TTMLIR_TOOLCHAIN_DIR}
           NO_TTMLIR_RUNTIME=${NO_TTMLIR_RUNTIME}
           bash ${CMAKE_CURRENT_SOURCE_DIR}/../scripts/build-tt-mlir.sh
+  COMMAND ${CMAKE_COMMAND} -E touch ${CMAKE_BINARY_DIR}/tt-mlir.stamp
   BYPRODUCTS ${TTMLIR_LIB_PATHS}
   WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/../
   USES_TERMINAL
   COMMENT "Building tt-mlir via scripts/build-tt-mlir.sh"
+)
+add_custom_target(build_tt_mlir
+    DEPENDS ${CMAKE_BINARY_DIR}/tt-mlir.stamp
 )
 
 add_dependencies(build_tt_mlir tt_mlir_env)
