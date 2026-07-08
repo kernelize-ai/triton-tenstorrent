@@ -154,7 +154,7 @@ def matmul_tma(a, b, warp_specialize: bool = False):
     K, N = b.shape 
     dtype = a.dtype
 
-    c = torch.empty((M, N), device=a.device, dtype=dtype)
+    c = torch.zeros((M, N), device=a.device, dtype=dtype)
 
     # A dummy block value that will [maybe?] be overwritten when we have the real block size
     dummy_block = [32, 32]
