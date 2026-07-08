@@ -161,7 +161,6 @@ class TTLauncher(object):
             else:
                 add_arg(arg)
 
-        return
         self.command.finalize([gridX, gridY, gridZ], [num_warps, 1, 1], shared_memory)
 
         if launch_enter_hook is not None:
