@@ -224,41 +224,54 @@ class TTDeviceInterface:
             return TTDeviceInterface.HooksTimeAccessor(self)
         return TTDeviceInterface.TimerEvent()
 
-
-print(f"TTDriver.is_active()")
 class TTDriver(DriverBase):
+    torch_device = None
 
     @staticmethod
-    def is_active():
-        # Always active so the off-line compiler doesn't complain
-        print(f"TTDriver.is_active()")
+    def get_torch_runtime():
+        if TTDriver.torch_device is not None:
+            return TTDriver.torch_device
         try:
             import torch
             import torch_nexus
-            return bool(torch.nexus.set_runtime("tt-metal"))
+            TTDriver.torch_device = torch.nexus
+            TTDriver.torch_device.set_runtime("tt-metal")
         except Exception as e:
-            # TODO: Fix the off-line compiler
-            return True
+            TTDriver.torch_device = None
+        return TTDriver.torch_device
+
+    @staticmethod
+    def is_active():
+        return TTDriver.get_torch_runtime() is not None
 
     def __init__(self):
-        import torch
-        try:
-            import torch_nexus
-            torch.nexus.set_runtime("tt-metal")
-            self.device = torch.nexus.get_device()
-            #self.stream = torch.nexus.get_stream()
-            self.torch_device = torch.nexus
-            self.get_device = self.torch_device.get_device
-            self.set_current_device = self.torch_device.set_device
-            self.get_current_device = self.torch_device.current_device
-            self.get_current_stream = lambda idx: torch.cpu.Stream()
-        except Exception as e:
-            # TODO: Fix the off-line compiler
-            self.device = None
-            self.torch_device = None
-        #self.get_current_stream = 0
+        self.device = None
         self.utils = TTUtils(self)
         self.launcher_cls = TTLauncher
+
+    def get_device(self):
+        runtime = TTDriver.get_torch_runtime()
+        if runtime is None:
+            return None
+        return runtime.get_device()
+
+    def get_current_device(self):
+        runtime = TTDriver.get_torch_runtime()
+        if runtime is None:
+            return None
+        return runtime.current_device()
+
+    def set_current_device(self, device):
+        runtime = TTDriver.get_torch_runtime()
+        if runtime is None:
+            return None
+        runtime.set_device(device)
+
+    def get_current_stream(self):
+        runtime = TTDriver.get_torch_runtime()
+        if runtime is None:
+            return None
+        return runtime.get_stream()
 
     def get_device_interface(self):
         return TTDeviceInterface()

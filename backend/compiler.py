@@ -11,7 +11,7 @@ from triton.backends.compiler import BaseBackend, GPUTarget, Language
 from triton._C.libtriton import ir, passes, llvm, cpu
 from triton import knobs
 from triton.runtime.build import _build
-import triton.backends.cpu.driver as cpu_driver
+from triton.backends.cpu.driver import TTDriver
 
 from dataclasses import dataclass
 from typing import Dict
@@ -49,6 +49,9 @@ class TTBackend(BaseBackend):
     @staticmethod
     def supports_target(target: GPUTarget):
         return target.backend == "tenstorrent"
+
+    def get_driver(self):
+        return TTDriver()
 
     def get_target_name(self, options) -> str:
         return "tenstorrent"
