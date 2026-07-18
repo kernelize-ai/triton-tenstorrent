@@ -249,11 +249,11 @@ class TTDriver(DriverBase):
         self.utils = TTUtils(self)
         self.launcher_cls = TTLauncher
 
-    def get_device(self):
+    def get_device(self, device_id=0):
         runtime = TTDriver.get_torch_runtime()
         if runtime is None:
             return None
-        return runtime.get_device()
+        return runtime.get_device(device_id)
 
     def get_current_device(self):
         runtime = TTDriver.get_torch_runtime()
@@ -267,7 +267,7 @@ class TTDriver(DriverBase):
             return None
         runtime.set_device(device)
 
-    def get_current_stream(self):
+    def get_current_stream(self, device_id=None):
         runtime = TTDriver.get_torch_runtime()
         if runtime is None:
             return None
