@@ -23,8 +23,9 @@ To build the flatbuffer call:
     scripts/build-d2m-kernel.sh matmul_tma.py \
         --kernel-name matmul_kernel_tma \
         --num-warps 1 --num-stages 2 \
-        --grid "(M/128)*(N/128),1,1" \
-        --signature "tensordesc<fp16[32,32]>, tensordesc<fp16[32,32]>, tensordesc<fp16[32,32]>, 32, 32, 32, 8, 0, 0"
+        --grid "(M/32)*(N/32),1,1" \
+        --signature "tensordesc<bf16[32,32]>, tensordesc<bf16[32,32]>, tensordesc<bf16[32,32]>, 32, 32, 32, 8" \
+        --out-dir kernel_matmul_tma
 
 """
 
@@ -44,42 +45,34 @@ def matmul_get_configs(pre_hook=None):
     return [
         triton.Config({'BLOCK_SIZE_M': BM, 'BLOCK_SIZE_N': BN, "BLOCK_SIZE_K": BK, "GROUP_SIZE_M": 1}, num_stages=s,
                       num_warps=w, pre_hook=pre_hook)
-        for BM in [64]
-        for BN in [64]
-        for BK in [64]
+        for BM in [32]
+        for BN in [32]
+        for BK in [32]
         for s in ([1])
         for w in [1]
     ]
 
 def matmul_tma_set_block_size_hook(nargs):
-    EPILOGUE_SUBTILE = nargs.get("EPILOGUE_SUBTILE", False)
     BLOCK_M = nargs["BLOCK_SIZE_M"]
     BLOCK_N = nargs["BLOCK_SIZE_N"]
     BLOCK_K = nargs["BLOCK_SIZE_K"]
     nargs["a_desc"].block_shape = [BLOCK_M, BLOCK_K]
     nargs["b_desc"].block_shape = [BLOCK_K, BLOCK_N]
-    if EPILOGUE_SUBTILE:
-        nargs["c_desc"].block_shape = [BLOCK_M, BLOCK_N // 2]
-    else:
-        nargs["c_desc"].block_shape = [BLOCK_M, BLOCK_N]
+    nargs["c_desc"].block_shape = [BLOCK_M, BLOCK_N]
 
-#@triton.autotune(
-#    configs=matmul_get_configs(pre_hook=matmul_tma_set_block_size_hook),
-#    key=["M", "N", "K", "WARP_SPECIALIZE"],
-#)
+@triton.autotune(
+    configs=matmul_get_configs(pre_hook=matmul_tma_set_block_size_hook),
+    key=["M", "N", "K"],
+)
 @triton.jit
 def matmul_kernel_tma(a_desc, b_desc, c_desc,  #
-                      BLOCK_SIZE_M: tl.constexpr,  #
-                      BLOCK_SIZE_N: tl.constexpr,  #
-                      BLOCK_SIZE_K: tl.constexpr,  #
                       GROUP_SIZE_M: tl.constexpr,  #
-                      FP8_OUTPUT: tl.constexpr,  #
-                      WARP_SPECIALIZE: tl.constexpr,  #
                       ):
     M, K = a_desc.shape
     K, N = b_desc.shape
-
-    dtype = tl.float8e4nv if FP8_OUTPUT else tl.float16
+    BLOCK_SIZE_M: tl.constexpr = a_desc.block_shape[0]
+    BLOCK_SIZE_K: tl.constexpr = a_desc.block_shape[1]
+    BLOCK_SIZE_N: tl.constexpr = b_desc.block_shape[1]
 
     pid = tl.program_id(axis=0)
     num_pid_m = tl.cdiv(M, BLOCK_SIZE_M)
@@ -98,20 +91,22 @@ def matmul_kernel_tma(a_desc, b_desc, c_desc,  #
 
     accumulator = tl.zeros((BLOCK_SIZE_M, BLOCK_SIZE_N), dtype=tl.float32)
 
-    for k in tl.range(k_tiles, warp_specialize=WARP_SPECIALIZE):
-        offs_k = k * BLOCK_SIZE_K
+    for k in tl.range(k_tiles):
+        offs_k = k * a_desc.block_shape[1]
         a = a_desc.load([offs_am, offs_k])
         b = b_desc.load([offs_k, offs_bn])
         accumulator = tl.dot(a, b, accumulator) # removed transpose 
 
-    c = accumulator.to(dtype)
-
     offs_cm = pid_m * BLOCK_SIZE_M
     offs_cn = pid_n * BLOCK_SIZE_N
-    c_desc.store([offs_cm, offs_cn], c)
+    c_desc.store([offs_cm, offs_cn], accumulator)
 
 
-def matmul_tma(a, b, warp_specialize: bool = False):
+## Get kernel function from autotuner
+matmul_tma_jit = matmul_kernel_tma.fn
+
+
+def matmul_tma(a, b):
     # Check constraints.
     assert a.dtype == b.dtype, "Incompatible dtypes"
     assert a.shape[1] == b.shape[0], "Incompatible dimensions"
@@ -130,13 +125,10 @@ def matmul_tma(a, b, warp_specialize: bool = False):
     def grid(META):
         BLOCK_M = META["BLOCK_SIZE_M"]
         BLOCK_N = META["BLOCK_SIZE_N"]
-        print(f"GRID: {triton.cdiv(M, BLOCK_M) * triton.cdiv(N, BLOCK_N)}")
         return (triton.cdiv(M, BLOCK_M) * triton.cdiv(N, BLOCK_N), )
 
     matmul_kernel_tma[grid](
         a_desc, b_desc, c_desc,  #
-        FP8_OUTPUT=dtype == torch.float8_e4m3fn,  #
-        WARP_SPECIALIZE=warp_specialize,  #
     )
     return c
 

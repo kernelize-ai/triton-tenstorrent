@@ -47,6 +47,7 @@ NUM_STAGES="3"
 OUT_DIR=""
 KERNEL_SRC=""
 TRITON_DIR="${TRITON_DIR:-}"
+set -x
 
 usage() {
     sed -n '2,37p' "$0" | sed 's/^# \{0,1\}//'
@@ -73,7 +74,7 @@ done
 [[ $# -gt 0 && -z "$KERNEL_SRC" ]] && { KERNEL_SRC="$1"; shift; }
 
 # ---- resolve paths ---------------------------------------------------------
-REPO_ROOT="$(git -C "$(dirname "${BASH_SOURCE[0]}")" rev-parse --show-toplevel)"
+REPO_ROOT="$(dirname $(dirname $(realpath "${BASH_SOURCE[0]}")))"
 
 # Default kernel source: the D2M vector-add tutorial shipped in this repo.
 if [[ -z "$KERNEL_SRC" ]]; then
