@@ -134,6 +134,25 @@ static Op findLoadStoreOpForTensorArg(BlockArgument arg,
   return ret;
 }
 
+// Like findLoadStoreOpForTensorArg, but for tensor-descriptor based access
+// (tt.descriptor_load / tt.descriptor_store). These ops reference the argument
+// through a tt.make_tensor_descriptor built from the pointer argument, so we
+// trace via getDesc() instead of getPtr().
+template <typename Op>
+static Op findDescriptorOpForTensorArg(BlockArgument arg,
+                                       triton::FuncOp funcOp) {
+  Op ret;
+  funcOp.walk([&](Op op) {
+    BlockArgument funcArg = traceToFuncArg(op.getDesc(), funcOp);
+    if (funcArg && funcArg == arg) {
+      ret = op;
+      return WalkResult::interrupt();
+    }
+    return WalkResult::advance();
+  });
+  return ret;
+}
+
 // Convert function arguments - for tensor arguments, we convert to dynamic
 // shape tensors with ttnn layouts. For tensor descriptor arguments, we
 // convert the tensor descriptor to dynamic shape tensors with ttnn layouts
@@ -162,18 +181,29 @@ LogicalResult ArgConversionHelper::convertFunctionArguments(
         return funcOp.emitError("missing IOType attribute on tensor argument");
 
       if (ioTypeAttr.getValue() == tt::IOType::INPUT) {
-        auto loadOp =
-            findLoadStoreOpForTensorArg<triton::LoadOp>(oldArg, funcOp);
-        assert(
-            loadOp &&
-            "expected to find dependent load for INPUT type function argument");
-        tritonType = cast<RankedTensorType>(loadOp.getType());
+        if (auto loadOp =
+                findLoadStoreOpForTensorArg<triton::LoadOp>(oldArg, funcOp)) {
+          tritonType = cast<RankedTensorType>(loadOp.getType());
+        } else if (auto descLoad =
+                       findDescriptorOpForTensorArg<triton::DescriptorLoadOp>(
+                           oldArg, funcOp)) {
+          tritonType = cast<RankedTensorType>(descLoad.getType());
+        } else {
+          llvm_unreachable("expected to find dependent load or descriptor_load "
+                           "for INPUT type function argument");
+        }
       } else if (ioTypeAttr.getValue() == tt::IOType::OUTPUT) {
-        auto storeOp =
-            findLoadStoreOpForTensorArg<triton::StoreOp>(oldArg, funcOp);
-        assert(storeOp && "expected to find dependent store for OUTPUT type "
-                          "function argument");
-        tritonType = cast<RankedTensorType>(storeOp.getPtr().getType());
+        if (auto storeOp =
+                findLoadStoreOpForTensorArg<triton::StoreOp>(oldArg, funcOp)) {
+          tritonType = cast<RankedTensorType>(storeOp.getPtr().getType());
+        } else if (auto descStore =
+                       findDescriptorOpForTensorArg<triton::DescriptorStoreOp>(
+                           oldArg, funcOp)) {
+          tritonType = cast<RankedTensorType>(descStore.getSrc().getType());
+        } else {
+          llvm_unreachable("expected to find dependent store or "
+                           "descriptor_store for OUTPUT type function argument");
+        }
       } else {
         llvm_unreachable("unexpected IOTypeAttr for function argument");
       }
