@@ -201,8 +201,9 @@ LogicalResult ArgConversionHelper::convertFunctionArguments(
                            oldArg, funcOp)) {
           tritonType = cast<RankedTensorType>(descStore.getSrc().getType());
         } else {
-          llvm_unreachable("expected to find dependent store or "
-                           "descriptor_store for OUTPUT type function argument");
+          llvm_unreachable(
+              "expected to find dependent store or "
+              "descriptor_store for OUTPUT type function argument");
         }
       } else {
         llvm_unreachable("unexpected IOTypeAttr for function argument");
