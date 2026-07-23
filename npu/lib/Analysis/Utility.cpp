@@ -25,6 +25,8 @@ BlockArgument traceToFuncArg(Value v, triton::FuncOp funcOp) {
                 [](auto splatOp) { return splatOp.getSrc(); })
             .Case<triton::BroadcastOp, triton::ExpandDimsOp, triton::ReshapeOp,
                   triton::BitcastOp>([](auto o) { return o->getOperand(0); })
+            .Case<triton::MakeTensorDescOp>(
+                [](auto makeDescOp) { return makeDescOp.getBase(); })
             .Default([](Operation *) { return Value(); });
 
     if (!v)
