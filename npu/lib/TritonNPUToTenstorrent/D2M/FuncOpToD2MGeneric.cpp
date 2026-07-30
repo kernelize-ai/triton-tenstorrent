@@ -122,7 +122,8 @@ static Op findLoadStoreOpForTensorArg(BlockArgument arg,
                                       triton::FuncOp funcOp) {
   Op ret;
   funcOp.walk([&](Op op) {
-    BlockArgument funcArg = traceToFuncArg(op.getPtr(), funcOp);
+    BlockArgument funcArg =
+        traceToBlock(op.getPtr(), &funcOp.getBody().front());
     if (funcArg && funcArg == arg) {
       // TODO: do we care if there are multiple loads for the same ptr?
       // probably...

@@ -4,6 +4,7 @@
 
 #include "triton/Dialect/Triton/IR/Dialect.h"
 
+#include "npu/include/Analysis/Utility.h"
 #include "npu/include/Dialect/TritonTenstorrent/IR/Attributes.h"
 #include "npu/include/Dialect/TritonTenstorrent/IR/Dialect.h"
 
@@ -207,16 +208,14 @@ static LogicalResult populateOperands(cpu::GenericOp generic, GenericPlan &plan,
     operand.boundaryOp = boundaryOp;
     operand.elementType = valueTy.getElementType();
 
-    // TODO: trace `ptr` back to the kernel argument. Two legs:
-    //   1. inside the body, walk addptr/splat/broadcast back to a body
-    //      BlockArgument -- TagInputOutputs.cpp:23 already has this half;
-    //   2. map that block arg to an `ins` operand via
-    //      argIndex - generic.getInsArgOffset(), then walk that operand out to
-    //      the enclosing triton::FuncOp BlockArgument.
-    operand.funcArg = BlockArgument();
+    BlockArgument genericBlockArg =
+        traceToBlock(ptr, &generic.getBody().front());
+    Value genericOperand = generic.getOperand(genericBlockArg.getArgNumber() -
+                                              generic.getNumInductionVars());
+    operand.funcArg = traceToBlock(genericOperand, &funcOp.getBody().front());
     if (!operand.funcArg)
       return boundaryOp->emitOpError(
-          "TODO: pointer-to-kernel-argument tracing is not implemented");
+          "failed to trace ptr operand to kernel func block argument");
 
     FailureOr<SmallVector<int64_t>> logicalShape =
         readLogicalShape(funcOp, operand.funcArg.getArgNumber(), boundaryOp);

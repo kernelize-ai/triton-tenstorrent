@@ -8,7 +8,7 @@ namespace mlir {
 namespace triton {
 namespace npu {
 
-BlockArgument traceToFuncArg(Value v, triton::FuncOp funcOp);
+BlockArgument traceToBlock(Value v, Block *parentBlock);
 
 }
 } // namespace triton
