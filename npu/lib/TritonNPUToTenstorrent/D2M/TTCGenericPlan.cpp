@@ -10,6 +10,8 @@
 
 #include "ttmlir/Dialect/TTCore/IR/TTCoreOpsTypes.h"
 
+#include "triton/Tools/StrUtil.h"
+
 #include "mlir/Analysis/SliceAnalysis.h"
 #include "llvm/ADT/TypeSwitch.h"
 
@@ -257,6 +259,46 @@ static LogicalResult populateOperands(cpu::GenericOp generic, GenericPlan &plan,
   return success();
 }
 
+//===--------------------------------------------------------------------===//
+// Printing
+//
+// Every helper below tolerates an unpopulated field so the plan can be printed
+// mid-build.
+//===--------------------------------------------------------------------===//
+
+static constexpr StringLiteral kUnset = "<unset>";
+
+/// triton::join, but an empty container renders as "<unset>" rather than "".
+template <typename C, typename... Fn>
+static std::string joinOrUnset(const C &container, StringRef sep, Fn &&...fn) {
+  if (container.empty())
+    return kUnset.str();
+  return triton::join(container, sep, std::forward<Fn>(fn)...);
+}
+
+/// Print an op on one line. Regions are skipped.
+static void printOpBrief(llvm::raw_ostream &os, Operation *op) {
+  if (!op) {
+    os << kUnset;
+    return;
+  }
+  op->print(os, OpPrintingFlags().skipRegions().elideLargeElementsAttrs());
+}
+
+/// "parallel", falling back to the raw attribute if it is not the iterator-type
+/// attribute we expect.
+static std::string iteratorTypeName(Attribute attr) {
+  if (auto it = dyn_cast_or_null<ttcore::IteratorTypeAttr>(attr))
+    return ttcore::stringifyIteratorType(it.getValue()).str();
+  std::string s;
+  llvm::raw_string_ostream os(s);
+  if (attr)
+    os << attr;
+  else
+    os << kUnset;
+  return s;
+}
+
 // Largest `d` such that `d` divides `n` and `d <= limit`. Always >= 1.
 static int64_t largestDivisorAtMost(int64_t n, int64_t limit) {
   for (int64_t d = std::min(n, limit); d > 1; --d)
@@ -266,6 +308,52 @@ static int64_t largestDivisorAtMost(int64_t n, int64_t limit) {
 }
 
 } // namespace
+
+void GenericPlan::print(llvm::raw_ostream &os) const {
+  os << "GenericPlan\n";
+
+  os << "  iteration space\n";
+  os << "    grid           = " << joinOrUnset(gridShape, "x") << "\n";
+  os << "    block_factors  = [" << joinOrUnset(blockFactors, ", ") << "]\n";
+  os << "    iterator_types = ["
+     << joinOrUnset(iteratorTypes, ", ", iteratorTypeName) << "]\n";
+
+  // numInputs is set only once every input has been added, so derive the output
+  // count defensively: a plan captured mid-populateOperands can have operands
+  // with numInputs still 0.
+  const size_t numOutputs =
+      operands.size() > numInputs ? operands.size() - numInputs : 0;
+  os << "  operands (" << numInputs << " in, " << numOutputs << " out)\n";
+  for (auto [index, operand] : llvm::enumerate(operands)) {
+    os << "    #" << index << (index < numInputs ? " in " : " out");
+    if (operand.funcArg)
+      os << "  arg#" << operand.funcArg.getArgNumber();
+    else
+      os << "  arg" << kUnset;
+    os << "  logical " << joinOrUnset(operand.logicalShape, "x");
+    os << "  tiles " << joinOrUnset(operand.tensorTiles, "x");
+    os << "  elt ";
+    if (operand.elementType)
+      os << operand.elementType;
+    else
+      os << kUnset;
+    os << "  map ";
+    if (operand.indexingMap)
+      os << operand.indexingMap;
+    else
+      os << kUnset;
+    os << "\n       <- ";
+    printOpBrief(os, operand.boundaryOp);
+    os << "\n";
+  }
+
+  os << "  data ops (" << dataOps.size() << ")\n";
+  for (Operation *op : dataOps) {
+    os << "    ";
+    printOpBrief(os, op);
+    os << "\n";
+  }
+}
 
 LogicalResult GenericPlan::setIterationSpace(ArrayRef<int64_t> workerGrid,
                                              Operation *diagnosticAnchorOp) {

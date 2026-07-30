@@ -6,6 +6,7 @@
 #include "llvm/ADT/DenseSet.h"
 #include "llvm/ADT/SetVector.h"
 #include "llvm/ADT/SmallVector.h"
+#include "llvm/Support/raw_ostream.h"
 
 namespace mlir {
 namespace triton {
@@ -16,7 +17,7 @@ struct GenericPlan {
   GenericPlan() = default;
 
   struct Operand {
-    Operation *boundaryOp; // the tt.load / tt.store consumer
+    Operation *boundaryOp = nullptr; // the tt.load / tt.store consumer
     BlockArgument funcArg;
     SmallVector<int64_t> logicalShape;
     SmallVector<int64_t> tensorTiles;
@@ -50,7 +51,15 @@ struct GenericPlan {
                                   Operation *diagnosticAnchorOp);
 
   static mlir::FailureOr<GenericPlan> build(cpu::GenericOp);
+
+  void print(llvm::raw_ostream &os) const;
 };
+
+inline llvm::raw_ostream &operator<<(llvm::raw_ostream &os,
+                                     const GenericPlan &plan) {
+  plan.print(os);
+  return os;
+}
 
 } // namespace npu
 } // namespace triton

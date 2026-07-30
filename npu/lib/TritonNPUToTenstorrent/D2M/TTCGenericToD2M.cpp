@@ -57,12 +57,14 @@ struct ConvertTTCGenericToD2MPass
       func.walk([&](cpu::GenericOp generic) {
         auto planResult = GenericPlan::build(generic);
         if (failed(planResult)) {
+          LDBG("Failed to build generic plan for generic "
+               << generic.getHeader());
           signalPassFailure();
           return;
         }
 
         plans.push_back(*planResult);
-        llvm::errs() << "generic = " << generic.getHeader() << "\n";
+        LDBG("plan for " << generic.getHeader() << "\n" << *planResult);
       });
       tritonFunc = func;
     });
