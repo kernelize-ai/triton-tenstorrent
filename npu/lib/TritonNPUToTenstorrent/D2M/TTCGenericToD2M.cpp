@@ -23,7 +23,40 @@ namespace npu {
 #define DBGS() (llvm::dbgs() << "[" DEBUG_TYPE "]: ")
 #define LDBG(X) LLVM_DEBUG(DBGS() << X << "\n")
 
-namespace {}
+namespace {
+
+struct OperandTypes {
+  ttcore::MetalLayoutAttr layout;
+  RankedTensorType funcArg;
+  RankedTensorType cast;
+  RankedTensorType view;
+  RankedTensorType shard;
+};
+
+static OperandTypes computeOperandTypes(GenericPlan::Operand &operand,
+                                        triton::FuncOp tritonFunc,
+                                        ArrayRef<int64_t> gridShape,
+                                        IRRewriter &rewriter) {
+  OperandTypes ret;
+
+  auto tileShape = ttcore::TileType::getDefaultShape();
+  auto tileTy = ttcore::TileType::get(operand.elementType, tileShape);
+
+  ret.layout = ttcore::MetalLayoutAttr::get(
+      rewriter.getContext(), operand.logicalShape,
+      ttcore::MemorySpace::DeviceDRAM, ttcore::TensorMemoryLayout::Interleaved);
+  // ret.funcArg is built during TTNN layout conversion in the function
+  // signature conversion
+  ret.cast = RankedTensorType::get(ret.layout.getDeviceShape({1, 1}, tileShape),
+                                   tileTy, ret.layout);
+  ret.view = RankedTensorType::get(
+      ret.layout.getDeviceShape(gridShape, tileShape), tileTy, ret.layout);
+  ret.shard = RankedTensorType::get(ret.layout.getShardShape(ret.view), tileTy);
+
+  return ret;
+}
+
+} // namespace
 
 struct ConvertTTCGenericToD2MPass
     : public impl::ConvertTTCGenericToD2MBase<ConvertTTCGenericToD2MPass> {
@@ -33,7 +66,19 @@ struct ConvertTTCGenericToD2MPass
                              IRRewriter &rewriter) {
     rewriter.setInsertionPoint(tritonFunc);
 
-    llvm::errs() << "TODO\n";
+    if (plans.size() != 1) {
+      return tritonFunc.emitError("expected only one generic plan for "
+                                  "ttc.generic -> D2M.generic lowering");
+    }
+
+    auto &plan = plans.front();
+
+    SmallVector<OperandTypes> operandTypes;
+    for (auto &operand : plan.operands) {
+      operandTypes.push_back(
+          computeOperandTypes(operand, tritonFunc, plan.gridShape, rewriter));
+    }
+
     return failure();
   }
 

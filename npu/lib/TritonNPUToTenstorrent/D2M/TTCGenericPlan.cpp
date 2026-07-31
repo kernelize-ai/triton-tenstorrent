@@ -208,6 +208,7 @@ static LogicalResult populateOperands(cpu::GenericOp generic, GenericPlan &plan,
                         RankedTensorType valueTy) -> LogicalResult {
     GenericPlan::Operand operand;
     operand.boundaryOp = boundaryOp;
+    operand.tensorType = valueTy;
     operand.elementType = valueTy.getElementType();
 
     BlockArgument genericBlockArg =
@@ -332,6 +333,11 @@ void GenericPlan::print(llvm::raw_ostream &os) const {
       os << "  arg" << kUnset;
     os << "  logical " << joinOrUnset(operand.logicalShape, "x");
     os << "  tiles " << joinOrUnset(operand.tensorTiles, "x");
+    os << "  tensor type ";
+    if (operand.tensorType)
+      os << operand.tensorType;
+    else
+      os << kUnset;
     os << "  elt ";
     if (operand.elementType)
       os << operand.elementType;

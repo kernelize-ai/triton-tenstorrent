@@ -22,6 +22,7 @@ struct GenericPlan {
     SmallVector<int64_t> logicalShape;
     SmallVector<int64_t> tensorTiles;
     AffineMap indexingMap;
+    RankedTensorType tensorType;
     Type elementType;
   };
 
