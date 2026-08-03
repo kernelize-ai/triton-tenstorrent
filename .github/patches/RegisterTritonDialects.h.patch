@@ -1,5 +1,5 @@
 diff --git a/bin/RegisterTritonDialects.h b/bin/RegisterTritonDialects.h
-index 48049f0268..4524198078 100644
+index 48049f0268..3046c300df 100644
 --- a/bin/RegisterTritonDialects.h
 +++ b/bin/RegisterTritonDialects.h
 @@ -39,6 +39,21 @@
@@ -24,7 +24,7 @@ index 48049f0268..4524198078 100644
  #include "mlir/Conversion/ArithToLLVM/ArithToLLVM.h"
  #include "mlir/Conversion/ControlFlowToLLVM/ControlFlowToLLVM.h"
  #include "mlir/Conversion/MathToLLVM/MathToLLVM.h"
-@@ -136,6 +151,27 @@ inline void registerTritonDialects(mlir::DialectRegistry &registry) {
+@@ -136,6 +151,28 @@ inline void registerTritonDialects(mlir::DialectRegistry &registry) {
    mlir::triton::proton::gpu::registerScheduleBufferStorePass();
    mlir::triton::proton::gpu::registerAddSchedBarriersPass();
  
@@ -43,6 +43,7 @@ index 48049f0268..4524198078 100644
 +  mlir::triton::npu::registerTritonTenstorrentTagInputOutputs();
 +  mlir::triton::npu::registerConvertTritonNPUToTTKernel();
 +  mlir::triton::npu::registerConvertTritonNPUToD2M();
++  mlir::triton::npu::registerConvertTTCGenericToD2M();
 +  mlir::triton::npu::registerTritonTenstorrentRemoveRedundantMasks();
 +  mlir::triton::npu::registerTritonTenstorrentCanonicalizeMatmulLoops();
 +  mlir::triton::npu::registerTritonTenstorrentMaterializeMulticasts();
@@ -52,7 +53,7 @@ index 48049f0268..4524198078 100644
    registry.insert<
        mlir::triton::TritonDialect, mlir::cf::ControlFlowDialect,
        mlir::triton::nvidia_gpu::TritonNvidiaGPUDialect,
-@@ -147,5 +183,9 @@ inline void registerTritonDialects(mlir::DialectRegistry &registry) {
+@@ -147,5 +184,9 @@ inline void registerTritonDialects(mlir::DialectRegistry &registry) {
        mlir::triton::amdgpu::TritonAMDGPUDialect,
        mlir::triton::proton::ProtonDialect,
        mlir::triton::proton::gpu::ProtonGPUDialect, mlir::ROCDL::ROCDLDialect,
