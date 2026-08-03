@@ -28,7 +28,9 @@ def ConvertTTCGenericToD2M : Pass<"convert-ttc-generic-to-d2m", "mlir::ModuleOp"
         // TODO
     }];
 
-    let dependentDialects = ["mlir::d2m::D2MDialect"];
+    let dependentDialects = [
+                            "mlir::triton::npu::tt::TritonTenstorrentDialect",
+                            "mlir::d2m::D2MDialect"];
 }
 
 def TensorizeScalars : Pass<"tensorize-scalars", "mlir::ModuleOp"> {
