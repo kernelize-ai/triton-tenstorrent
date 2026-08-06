@@ -217,6 +217,7 @@ class TTRTUtils(object):
             "warpSize": 1
         }
 
+
 class TTRTLauncher(object):
 
     def __init__(self, src, metadata):
@@ -439,6 +440,7 @@ class TTDeviceInterface:
         if self.use_hooks:
             return TTDeviceInterface.HooksTimeAccessor(self)
         return TTDeviceInterface.TimerEvent()
+
 
 class TTDriver(DriverBase):
     torch_device = None
