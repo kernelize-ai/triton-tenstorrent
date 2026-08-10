@@ -237,30 +237,36 @@ class CPUBackend(BaseBackend):
             cpu.passes.tenstorrent.add_ttcore_register_device_pass(pm, sys_desc_path)
 
             cpu.passes.tenstorrent.add_ttc_generic_to_d2m(pm)
+            passes.common.add_canonicalizer(pm)
+        else:
+            cpu.passes.tenstorrent.add_accelerate_matmul(pm)
+            passes.ttgpuir.add_remove_layout_conversions(pm)
+            cpu.passes.tenstorrent.add_convert_compute_ops(pm)
+            cpu.passes.tenstorrent.add_remove_dot_load_layout_conversions(pm)
+            passes.ttgpuir.add_remove_layout_conversions(pm)
+            cpu.passes.tenstorrent.remove_redundant_masks(pm)
+            passes.common.add_canonicalizer(pm)
 
-        cpu.passes.tenstorrent.add_accelerate_matmul(pm)
-        passes.ttgpuir.add_remove_layout_conversions(pm)
-        cpu.passes.tenstorrent.add_convert_compute_ops(pm)
-        cpu.passes.tenstorrent.add_remove_dot_load_layout_conversions(pm)
-        passes.ttgpuir.add_remove_layout_conversions(pm)
-        cpu.passes.tenstorrent.remove_redundant_masks(pm)
-        passes.common.add_canonicalizer(pm)
+            passes.common.add_symbol_dce(pm)
+            passes.common.add_sccp(pm)
+            passes.common.add_cse(pm)
+            passes.common.add_canonicalizer(pm)
 
-        passes.common.add_symbol_dce(pm)
-        passes.common.add_sccp(pm)
-        passes.common.add_cse(pm)
-        passes.common.add_canonicalizer(pm)
+            cpu.passes.tenstorrent.add_tag_ios(pm)
 
-        cpu.passes.tenstorrent.add_tag_ios(pm)
+            sys_desc_path = os.getenv("TT_SYSTEM_DESC_PATH", "")
+            cpu.passes.tenstorrent.add_ttcore_register_device_pass(pm, sys_desc_path)
 
-        sys_desc_path = os.getenv("TT_SYSTEM_DESC_PATH", "")
-        cpu.passes.tenstorrent.add_ttcore_register_device_pass(pm, sys_desc_path)
-
-        cpu.passes.tenstorrent.add_to_d2m_dialect(pm)
+            cpu.passes.tenstorrent.add_to_d2m_dialect(pm)
 
         # D2M pipeline from createTTIRToTTMetalMiddleendPipeline
         cpu.passes.d2m.add_generic_fusion(pm)
         passes.common.add_canonicalizer(pm)
+
+        if options.tile_and_fuse:
+            cpu.passes.d2m.add_one_shot_bufferize(pm)
+            cpu.passes.d2m.add_generate_outer_loops(pm)
+            cpu.passes.d2m.add_mark_synchronized_buffers(pm)
 
         cpu.passes.d2m.add_allocate(pm)
         cpu.passes.d2m.add_lower_multicast_loads(pm)

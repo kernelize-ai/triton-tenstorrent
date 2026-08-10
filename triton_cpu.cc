@@ -26,8 +26,14 @@
 #include "ttmlir/Dialect/TTCore/Transforms/Passes.h"
 #include "ttmlir/Dialect/TTKernel/IR/TTKernel.h"
 #include "ttmlir/Dialect/TTKernel/Transforms/Passes.h"
+
+#include "mlir/Dialect/Bufferization/Transforms/FuncBufferizableOpInterfaceImpl.h"
+#include "mlir/Dialect/Linalg/Transforms/BufferizableOpInterfaceImpl.h"
+#include "mlir/Dialect/Tensor/Transforms/BufferizableOpInterfaceImpl.h"
 #include "ttmlir/Target/TTKernel/TTKernelToCpp.h"
 #include "ttmlir/Target/TTNN/TTNNToFlatbuffer.h"
+
+#include "mlir/Dialect/Bufferization/Transforms/Passes.h"
 
 #include <pybind11/pybind11.h>
 
@@ -158,6 +164,24 @@ void init_tenstorrent_d2m_passes(py::module &&m) {
 
   // essentially a copy of
   // D2MPipelines::createD2MFrontendPipeline starting from the middle
+  m.def("add_one_shot_bufferize", [](mlir::PassManager &pm) {
+    mlir::bufferization::OneShotBufferizePassOptions bufferizePassOptions;
+    bufferizePassOptions.allowUnknownOps = true;
+    bufferizePassOptions.bufferizeFunctionBoundaries = false;
+    bufferizePassOptions.functionBoundaryTypeConversion =
+        mlir::bufferization::LayoutMapOption::IdentityLayoutMap;
+    bufferizePassOptions.unknownTypeConversion =
+        mlir::bufferization::LayoutMapOption::IdentityLayoutMap;
+    pm.addPass(
+        mlir::bufferization::createOneShotBufferizePass(bufferizePassOptions));
+  });
+  m.def("add_generate_outer_loops", [](mlir::PassManager &pm) {
+    pm.addPass(d2m::createD2MGenerateOuterLoops());
+  });
+  m.def("add_mark_synchronized_buffers", [](mlir::PassManager &pm) {
+    d2m::D2MMarkSynchronizedBuffersOptions markSyncBuffersOptions;
+    pm.addPass(d2m::createD2MMarkSynchronizedBuffers(markSyncBuffersOptions));
+  });
 
   m.def("add_generic_fusion", [](mlir::PassManager &pm) {
     d2m::D2MGenericFusionOptions fusionOptions;
@@ -363,19 +387,34 @@ void init_triton_cpu(py::module &&m) {
     return py::bytes(buffer);
   });
 
-  m.def("load_dialects",
-        [](mlir::MLIRContext &context, const std::string &device) {
-          mlir::DialectRegistry registry;
-          registry.insert<mlir::triton::cpu::TritonCPUDialect>();
+  m.def("load_dialects", [](mlir::MLIRContext &context,
+                            const std::string &device) {
+    mlir::DialectRegistry registry;
+    registry.insert<mlir::triton::cpu::TritonCPUDialect>();
 
-          if (device == "Tenstorrent") {
-            // register tenstorrent dialects
-            registry.insert<mlir::tt::ttkernel::TTKernelDialect>();
-          }
+    if (device == "Tenstorrent") {
+      // register tenstorrent dialects
+      registry.insert<mlir::tt::ttkernel::TTKernelDialect>();
 
-          context.appendDialectRegistry(registry);
-          context.loadAllAvailableDialects();
-        });
+      // OneShotBufferize resolves BufferizableOpInterface through
+      // external models. tensor/linalg/func only *promise* the interface,
+      // so without these the pass aborts with "promised by dialect
+      // 'tensor' but never implemented". The d2m ops declare the
+      // interface directly and need no registration here.
+      //
+      // Registered individually rather than via
+      // mlir::tt::registerAllExtensions: that lives in
+      // TTMLIRCompilerStatic, which the plugin does not link, and it also
+      // registers inliner extensions that Triton may already own.
+      mlir::tensor::registerBufferizableOpInterfaceExternalModels(registry);
+      mlir::linalg::registerBufferizableOpInterfaceExternalModels(registry);
+      mlir::bufferization::func_ext::
+          registerBufferizableOpInterfaceExternalModels(registry);
+    }
+
+    context.appendDialectRegistry(registry);
+    context.loadAllAvailableDialects();
+  });
 
   m.def("get_default_target_triple",
         []() { return getDefaultTargerOrProcessTriple(); });
