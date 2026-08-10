@@ -31,6 +31,7 @@ def ConvertTTCGenericToD2M : Pass<"convert-ttc-generic-to-d2m", "mlir::ModuleOp"
     let dependentDialects = [
                             "mlir::triton::npu::tt::TritonTenstorrentDialect",
                             "mlir::tt::ttnn::TTNNDialect",
+                            "mlir::tt::ttir::TTIRDialect",
                             "mlir::d2m::D2MDialect"];
 }
 

@@ -6,6 +6,7 @@
 
 #include "ttmlir/Dialect/D2M/IR/D2M.h"
 #include "ttmlir/Dialect/D2M/IR/D2MOps.h"
+#include "ttmlir/Dialect/TTIR/IR/TTIROps.h"
 #include "ttmlir/Dialect/TTNN/IR/TTNNOpsAttrs.h"
 #include "ttmlir/FunctionTypes.h"
 
@@ -78,8 +79,8 @@ static OperandTypes computeOperandTypes(GenericPlan::Operand &operand,
                                       ttnnLayout);
   ret.cast = RankedTensorType::get(ret.layout.getDeviceShape({1, 1}, tileShape),
                                    tileTy, ret.layout);
-  ret.view = RankedTensorType::get(
-      ret.layout.getDeviceShape(gridShape, tileShape), tileTy, ret.layout);
+  ret.view = cast<RankedTensorType>(
+      d2m::utils::reblockShapedType(ret.cast, gridShape));
   ret.shard = RankedTensorType::get(ret.layout.getShardShape(ret.view), tileTy);
 
   return ret;
@@ -140,6 +141,17 @@ emitSignature(triton::FuncOp tritonFunc, const GenericPlan &plan,
   return newFunc;
 }
 
+// Converts kernel function arguments into the form the implicit form of the
+// d2m.generic op consumes
+static Value materializeOperand(BlockArgument funcArg,
+                                const OperandTypes &types,
+                                IRRewriter &rewriter) {
+  Location loc = funcArg.getLoc();
+  Value cast =
+      ttir::TTNNMetalLayoutCastOp::create(rewriter, loc, types.cast, funcArg);
+  return d2m::ViewLayoutOp::create(rewriter, loc, types.view, cast);
+}
+
 } // namespace
 
 struct ConvertTTCGenericToD2MPass
@@ -167,9 +179,16 @@ struct ConvertTTCGenericToD2MPass
         emitSignature(tritonFunc, plan, operandTypes, rewriter);
     if (failed(funcSigResult))
       return funcSigResult;
+    func::FuncOp newFunc = *funcSigResult;
 
-    // TODO
-    llvm::errs() << "new func = " << funcSigResult << "\n";
+    rewriter.setInsertionPointToStart(&newFunc.getBody().front());
+    SmallVector<Value> operandViews;
+    for (auto [operand, types] : llvm::zip(plan.operands, operandTypes)) {
+      BlockArgument newArg =
+          newFunc.getArgument(operand.funcArg.getArgNumber());
+      operandViews.push_back(materializeOperand(newArg, types, rewriter));
+    }
+    llvm::errs() << "new func = " << newFunc << "\n";
 
     return failure();
   }
