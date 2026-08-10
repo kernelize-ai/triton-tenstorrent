@@ -473,7 +473,10 @@ mlir::FailureOr<GenericPlan> GenericPlan::build(cpu::GenericOp generic) {
   if (failed(plan.setIterationSpace(workerGrid, generic)))
     return failure();
 
-  // TODO: indexingMap per operand, plus the persistent-loop mapping.
+  // Set the indexing maps per operand based on the overall iteration space
+  for (GenericPlan::Operand &operand : plan.operands)
+    operand.indexingMap = AffineMap::getMultiDimIdentityMap(
+        plan.iteratorTypes.size(), generic.getContext());
 
   return plan;
 }

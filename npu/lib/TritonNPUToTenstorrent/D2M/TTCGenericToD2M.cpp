@@ -5,10 +5,15 @@
 #include "cpu/include/Dialect/TritonCPU/IR/Dialect.h" // ttc.GenericOp
 
 #include "ttmlir/Dialect/D2M/IR/D2M.h"
+#include "ttmlir/Dialect/D2M/IR/D2MGenericRegionOps.h"
 #include "ttmlir/Dialect/D2M/IR/D2MOps.h"
+
 #include "ttmlir/Dialect/TTIR/IR/TTIROps.h"
 #include "ttmlir/Dialect/TTNN/IR/TTNNOpsAttrs.h"
 #include "ttmlir/FunctionTypes.h"
+
+#include "mlir/Dialect/Linalg/IR/Linalg.h"
+#include "llvm/ADT/TypeSwitch.h"
 
 #include "SPMDArgs.h"
 #include "TTCGenericPlan.h"
@@ -152,6 +157,125 @@ static Value materializeOperand(BlockArgument funcArg,
   return d2m::ViewLayoutOp::create(rewriter, loc, types.view, cast);
 }
 
+static d2m::GenericOp emitGeneric(Location loc, const GenericPlan &plan,
+                                  ArrayRef<Value> operands,
+                                  IRRewriter &rewriter) {
+  ArrayRef<Value> ins = operands.take_front(plan.numInputs);
+  ArrayRef<Value> outs = operands.drop_front(plan.numInputs);
+
+  SmallVector<AffineMap> indexingMaps;
+  indexingMaps.reserve(plan.operands.size());
+  for (const GenericPlan::Operand &operand : plan.operands)
+    indexingMaps.push_back(operand.indexingMap);
+
+  return d2m::GenericOp::create(
+      rewriter, loc, ins, outs, /*additionalArgs=*/ValueRange(),
+      rewriter.getAffineMapArrayAttr(indexingMaps),
+      rewriter.getArrayAttr(plan.iteratorTypes), d2m::ThreadType::Unified,
+      ttcore::GridAttr::get(rewriter.getContext(), plan.gridShape),
+      plan.blockFactors);
+}
+
+static Value emitTileOp(Operation *op, ValueRange operands, Location loc,
+                        OpBuilder &builder) {
+  return TypeSwitch<Operation *, Value>(op)
+      .Case<arith::AddFOp>([&](auto) {
+        return d2m::TileAddOp::create(builder, loc, operands[0].getType(),
+                                      operands[0], operands[1]);
+      })
+      .Default([](Operation *) { return Value(); });
+}
+
+static bool isTranslatableDataOp(Operation *op) {
+  return isa<arith::AddFOp>(op);
+}
+
+static LogicalResult emitGenericRegion(const GenericPlan &plan,
+                                       d2m::GenericOp generic,
+                                       ArrayRef<OperandTypes> operandTypes,
+                                       IRRewriter &rewriter) {
+  // validate maps in the data plane have a supported d2m translation target
+  for (Operation *op : plan.dataOps)
+    if (!isTranslatableDataOp(op))
+      return op->emitOpError("has no d2m tile-op equivalent");
+
+  Block *entry = rewriter.createBlock(&generic.getRegion(0));
+  rewriter.setInsertionPointToStart(entry);
+
+  const unsigned numInputs = plan.numInputs;
+  SmallVector<Value> linalgIns, linalgOuts;
+  for (unsigned i = 0; i < plan.operands.size(); ++i) {
+    Location loc = plan.operands[i].funcArg.getLoc();
+    RankedTensorType shardTy = operandTypes[i].shard;
+    Value buffer = tensor::EmptyOp::create(rewriter, loc, shardTy.getShape(),
+                                           shardTy.getElementType());
+    if (i >= numInputs) {
+      linalgOuts.push_back(buffer);
+      continue;
+    }
+    SmallVector<Value> indices =
+        d2m::utils::buildGridIndices(rewriter, loc, generic.getIndexingMap(i));
+    linalgIns.push_back(
+        d2m::RemoteLoadOp::create(rewriter, loc, shardTy, buffer,
+                                  generic->getOperand(i), indices)
+            .getResult());
+  }
+
+  SmallVector<AffineMap> linalgMaps;
+  for (const GenericPlan::Operand &operand : plan.operands)
+    linalgMaps.push_back(operand.indexingMap);
+
+  SmallVector<mlir::utils::IteratorType> linalgIterators;
+  for (Attribute attr : plan.iteratorTypes)
+    linalgIterators.push_back(cast<ttcore::IteratorTypeAttr>(attr).getValue() ==
+                                      ttcore::IteratorType::Parallel
+                                  ? mlir::utils::IteratorType::parallel
+                                  : mlir::utils::IteratorType::reduction);
+
+  auto buildBody = [&](OpBuilder &b, Location bodyLoc, ValueRange bbArgs) {
+    // Seed from the boundary ops: each tt.load's result becomes the matching
+    // linalg block argument
+    IRMapping mapping;
+    for (unsigned i = 0; i < numInputs; ++i)
+      mapping.map(plan.operands[i].boundaryOp->getResult(0), bbArgs[i]);
+
+    for (Operation *op : plan.dataOps) {
+      SmallVector<Value> tileOperands;
+      for (Value operand : op->getOperands()) {
+        Value mapped = mapping.lookupOrNull(operand);
+        // classify() rejects any op that is in neither the data nor the control
+        // plane, so a data op's operands are always load results or the results
+        // of earlier data ops -- both already mapped.
+        assert(mapped && "data op operand escaped plane classification");
+        tileOperands.push_back(mapped);
+      }
+      mapping.map(op->getResult(0), emitTileOp(op, tileOperands, bodyLoc, b));
+    }
+
+    auto store = cast<triton::StoreOp>(plan.operands.back().boundaryOp);
+    linalg::YieldOp::create(b, bodyLoc, mapping.lookup(store.getValue()));
+  };
+
+  auto linalgOp = linalg::GenericOp::create(
+      rewriter, generic.getLoc(), /*resultTypes=*/TypeRange(linalgOuts),
+      linalgIns, linalgOuts, linalgMaps, linalgIterators, buildBody);
+
+  SmallVector<Value> storeResults;
+  for (unsigned i = numInputs; i < plan.operands.size(); ++i) {
+    Location loc = plan.operands[i].funcArg.getLoc();
+    SmallVector<Value> indices =
+        d2m::utils::buildGridIndices(rewriter, loc, generic.getIndexingMap(i));
+    Value view = generic->getOperand(i);
+    storeResults.push_back(
+        d2m::RemoteStoreOp::create(rewriter, loc, view.getType(), view, indices,
+                                   linalgOp->getResult(i - numInputs))
+            .getResult());
+  }
+  d2m::YieldOp::create(rewriter, generic.getLoc(), storeResults);
+
+  return success();
+}
+
 } // namespace
 
 struct ConvertTTCGenericToD2MPass
@@ -188,9 +312,22 @@ struct ConvertTTCGenericToD2MPass
           newFunc.getArgument(operand.funcArg.getArgNumber());
       operandViews.push_back(materializeOperand(newArg, types, rewriter));
     }
-    llvm::errs() << "new func = " << newFunc << "\n";
 
-    return failure();
+    // emit the generic op and fill the generic op region
+    auto d2mGeneric =
+        emitGeneric(newFunc.getLoc(), plan, operandViews, rewriter);
+
+    if (failed(emitGenericRegion(plan, d2mGeneric, operandTypes, rewriter)))
+      return failure();
+
+    rewriter.setInsertionPointAfter(d2mGeneric);
+    Value result = ttir::TTNNMetalLayoutCastOp::create(
+        rewriter, newFunc.getLoc(), newFunc.getFunctionType().getResult(0),
+        d2mGeneric->getResult(0));
+    func::ReturnOp::create(rewriter, newFunc.getLoc(), result);
+    llvm::errs() << "func = " << newFunc << "\n";
+
+    return success();
   }
 
   void runOnOperation() override {
