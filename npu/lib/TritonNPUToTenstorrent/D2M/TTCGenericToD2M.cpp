@@ -62,6 +62,7 @@ static ttnn::TTNNLayoutAttr getTTNNLayoutTensor(MLIRContext *context,
       .build();
 }
 
+// TODO: remove gridShape (now unused)
 static OperandTypes computeOperandTypes(GenericPlan::Operand &operand,
                                         triton::FuncOp tritonFunc,
                                         ArrayRef<int64_t> gridShape,
@@ -85,7 +86,7 @@ static OperandTypes computeOperandTypes(GenericPlan::Operand &operand,
   ret.cast = RankedTensorType::get(ret.layout.getDeviceShape({1, 1}, tileShape),
                                    tileTy, ret.layout);
   ret.view = cast<RankedTensorType>(
-      d2m::utils::reblockShapedType(ret.cast, gridShape));
+      d2m::utils::reblockShapedType(ret.cast, operand.tensorTiles));
   ret.shard = RankedTensorType::get(ret.layout.getShardShape(ret.view), tileTy);
 
   return ret;
@@ -325,7 +326,6 @@ struct ConvertTTCGenericToD2MPass
         rewriter, newFunc.getLoc(), newFunc.getFunctionType().getResult(0),
         d2mGeneric->getResult(0));
     func::ReturnOp::create(rewriter, newFunc.getLoc(), result);
-    llvm::errs() << "func = " << newFunc << "\n";
 
     return success();
   }
@@ -371,6 +371,8 @@ struct ConvertTTCGenericToD2MPass
     IRRewriter rewriter(context);
     if (failed(emitFunction(tritonFunc, plans, rewriter)))
       signalPassFailure();
+
+    rewriter.eraseOp(tritonFunc);
   }
 };
 
