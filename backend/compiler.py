@@ -36,6 +36,7 @@ class CPUOptions:
     min_dot_size: int = 1
     enable_dot_op_multicast: bool = False
     ttmlir_target: str = os.environ.get("TRITON_TTMLIR_TARGET", "ttkernel")
+    tile_and_fuse: bool = os.environ.get("TRITON_CPU_ENABLE_TILE_AND_FUSE", "0") == "1"
 
     def hash(self):
         hash_dict = dict(self.__dict__)
@@ -45,6 +46,7 @@ class CPUOptions:
 
 class CPUBackend(BaseBackend):
     instrumentation = None  # TODO: intra-kernel instrumentation not yet supported
+    supports_native_tensor_specialization = False
 
     @staticmethod
     def supports_target(target: GPUTarget):
@@ -92,13 +94,25 @@ class CPUBackend(BaseBackend):
         cpu.load_dialects(ctx, self.device)
 
     @staticmethod
+    def get_tensor_specialization(arg, **kwargs):
+        ret = BaseBackend.get_tensor_specialization(arg, **kwargs)
+        shape = getattr(arg, "shape", None)
+        # TODO: apply this for tile and fuse only?
+        if shape:
+            ret += "|" + "x".join(str(int(d)) for d in shape)
+        return ret
+
+    @staticmethod
     def parse_attr(desc):
+        desc, _, shape = desc.partition("|")
         ret = []
         if "D" in desc:
             ret += [["tt.divisibility", 8]]
-        # pop D from desc
-        desc = desc.replace("D", "")
-        ret += BaseBackend.parse_attr(desc)
+        ret += BaseBackend.parse_attr(desc.replace("D", ""))
+        if shape:
+            dims = [int(d) for d in shape.split("x")]
+            ret += [["tt.tensor_rank", len(dims)]]
+            ret += [[f"tt.tensor_shape_{i}", d] for i, d in enumerate(dims)]
         return ret
 
     @staticmethod
@@ -212,29 +226,47 @@ class CPUBackend(BaseBackend):
         pm = ir.pass_manager(mod.context)
         pm.enable_debug()
 
-        cpu.passes.tenstorrent.add_accelerate_matmul(pm)
-        passes.ttgpuir.add_remove_layout_conversions(pm)
-        cpu.passes.tenstorrent.add_convert_compute_ops(pm)
-        cpu.passes.tenstorrent.add_remove_dot_load_layout_conversions(pm)
-        passes.ttgpuir.add_remove_layout_conversions(pm)
-        cpu.passes.tenstorrent.remove_redundant_masks(pm)
-        passes.common.add_canonicalizer(pm)
+        if options.tile_and_fuse:
+            cpu.passes.ttgpuir.add_tile_and_fuse(pm)
+            passes.common.add_canonicalizer(pm)
+            passes.common.add_sccp(pm)
+            passes.common.add_cse(pm)
+            passes.common.add_canonicalizer(pm)
 
-        passes.common.add_symbol_dce(pm)
-        passes.common.add_sccp(pm)
-        passes.common.add_cse(pm)
-        passes.common.add_canonicalizer(pm)
+            sys_desc_path = os.getenv("TT_SYSTEM_DESC_PATH", "")
+            cpu.passes.tenstorrent.add_ttcore_register_device_pass(pm, sys_desc_path)
 
-        cpu.passes.tenstorrent.add_tag_ios(pm)
+            cpu.passes.tenstorrent.add_ttc_generic_to_d2m(pm)
+            passes.common.add_canonicalizer(pm)
+        else:
+            cpu.passes.tenstorrent.add_accelerate_matmul(pm)
+            passes.ttgpuir.add_remove_layout_conversions(pm)
+            cpu.passes.tenstorrent.add_convert_compute_ops(pm)
+            cpu.passes.tenstorrent.add_remove_dot_load_layout_conversions(pm)
+            passes.ttgpuir.add_remove_layout_conversions(pm)
+            cpu.passes.tenstorrent.remove_redundant_masks(pm)
+            passes.common.add_canonicalizer(pm)
 
-        sys_desc_path = os.getenv("TT_SYSTEM_DESC_PATH", "")
-        cpu.passes.tenstorrent.add_ttcore_register_device_pass(pm, sys_desc_path)
+            passes.common.add_symbol_dce(pm)
+            passes.common.add_sccp(pm)
+            passes.common.add_cse(pm)
+            passes.common.add_canonicalizer(pm)
 
-        cpu.passes.tenstorrent.add_to_d2m_dialect(pm)
+            cpu.passes.tenstorrent.add_tag_ios(pm)
+
+            sys_desc_path = os.getenv("TT_SYSTEM_DESC_PATH", "")
+            cpu.passes.tenstorrent.add_ttcore_register_device_pass(pm, sys_desc_path)
+
+            cpu.passes.tenstorrent.add_to_d2m_dialect(pm)
 
         # D2M pipeline from createTTIRToTTMetalMiddleendPipeline
         cpu.passes.d2m.add_generic_fusion(pm)
         passes.common.add_canonicalizer(pm)
+
+        if options.tile_and_fuse:
+            cpu.passes.d2m.add_one_shot_bufferize(pm)
+            cpu.passes.d2m.add_generate_outer_loops(pm)
+            cpu.passes.d2m.add_mark_synchronized_buffers(pm)
 
         cpu.passes.d2m.add_allocate(pm)
         cpu.passes.d2m.add_lower_multicast_loads(pm)
