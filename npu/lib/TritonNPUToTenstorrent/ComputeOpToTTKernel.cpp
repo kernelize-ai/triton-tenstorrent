@@ -40,8 +40,8 @@ struct TiledComputeLayout {
   int32_t numTiles;
 };
 
-static TiledComputeLayout
-getTiledComputeLayout(MLIRContext *context, RankedTensorType operandType) {
+static TiledComputeLayout getTiledComputeLayout(MLIRContext *context,
+                                                RankedTensorType operandType) {
   auto tiledEncoding =
       dyn_cast<npu::tt::TiledEncodingAttr>(operandType.getEncoding());
   if (!tiledEncoding) {
@@ -71,8 +71,8 @@ getTiledComputeLayout(MLIRContext *context, RankedTensorType operandType) {
       result.layout.sublayout({S("register"), S("tile")},
                               llvm::to_vector(result.layout.getOutDimNames()));
 
-  result.tilesPerCore = llvm::map_to_vector(
-      result.layout.getOutDimSizes(), [](auto v) { return v / 32; });
+  result.tilesPerCore = llvm::map_to_vector(result.layout.getOutDimSizes(),
+                                            [](auto v) { return v / 32; });
 
   result.numTiles = result.layout.getInDimSize(S("tile"));
   return result;
@@ -83,8 +83,7 @@ getTiledComputeLayout(MLIRContext *context, RankedTensorType operandType) {
 static int32_t computeTileSlot(MLIRContext *context,
                                const TiledComputeLayout &tl,
                                int32_t tileIndex) {
-  auto crtIndex =
-      tl.layout.apply({{S("tile"), tileIndex}, {S("register"), 0}});
+  auto crtIndex = tl.layout.apply({{S("tile"), tileIndex}, {S("register"), 0}});
   LLVM_DEBUG({
     DBGS() << "Tile " << tileIndex << " has start index: ";
     for (auto [dim, idx] : crtIndex) {

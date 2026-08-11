@@ -141,8 +141,8 @@ struct RewriteUnaryComputeOp : OpRewritePattern<OpType> {
     auto origResultType = cast<RankedTensorType>(op->getResult(0).getType());
     auto resultType = operandType.clone(origResultType.getElementType());
 
-    auto newOp = npu::tt::UnaryComputeOp::create(
-        rewriter, op.getLoc(), resultType, operand, opcode);
+    auto newOp = npu::tt::UnaryComputeOp::create(rewriter, op.getLoc(),
+                                                 resultType, operand, opcode);
     rewriter.replaceOp(op, newOp.getResults());
 
     return success();
