@@ -66,7 +66,8 @@ private:
       return;
     Value result = op->getResult(0);
     // ComputeOps, tt.dot,
-    if (isa<tt::BinaryComputeOp, arith::TruncIOp, arith::TruncFOp>(op)) {
+    if (isa<tt::BinaryComputeOp, tt::UnaryComputeOp, arith::TruncIOp,
+            arith::TruncFOp>(op)) {
       for (auto operand : op->getOperands()) {
         int tiles = getNumTiles(operand.getType());
         LDBG("AddExpBuffers: " << op->getName() << " operand (" << tiles

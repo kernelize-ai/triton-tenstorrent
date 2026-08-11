@@ -64,7 +64,78 @@ struct ConvertBinaryComputeOp
       return d2m::TileMulOp::create(b, l, t, a, c);
     if (kind == "arith.subf")
       return d2m::TileSubOp::create(b, l, t, a, c);
+    if (kind == "arith.maximumf")
+      return d2m::TileMaximumOp::create(b, l, t, a, c);
+    if (kind == "arith.minimumf")
+      return d2m::TileMinimumOp::create(b, l, t, a, c);
     llvm_unreachable("unhandled binary_compute kind");
+  }
+};
+
+struct ConvertUnaryComputeOp
+    : public OpConversionPattern<npu::tt::UnaryComputeOp> {
+  using OpConversionPattern<npu::tt::UnaryComputeOp>::OpConversionPattern;
+  LogicalResult
+  matchAndRewrite(npu::tt::UnaryComputeOp op, OpAdaptor adaptor,
+                  ConversionPatternRewriter &rewriter) const override {
+    Location loc = op.getLoc();
+
+    Value input = adaptor.getOperand();
+    auto cbType = cast<MemRefType>(input.getType());
+
+    // The result element type may differ from the operand's (e.g. truncf /
+    // trunci narrow the bitwidth), so the output CB must be allocated with
+    // the converted result type rather than assumed to match the input.
+    Type outType = getTypeConverter()->convertType(op->getResult(0).getType());
+    auto outMemRefType = cast<MemRefType>(outType);
+    Value out = memref::AllocOp::create(rewriter, loc, outMemRefType);
+
+    unsigned rank = cbType.getRank();
+    AffineMap id = rewriter.getMultiDimIdentityMap(rank);
+    SmallVector<AffineMap> indexingMaps(/*1 in + 1 out=*/2, id);
+    SmallVector<utils::IteratorType> iterators(rank,
+                                               utils::IteratorType::parallel);
+
+    linalg::GenericOp::create(
+        rewriter, loc, /*resultTensorTypes=*/TypeRange{},
+        /*inputs=*/ValueRange{input},
+        /*outputs=*/ValueRange{out}, indexingMaps, iterators,
+        [&](OpBuilder &b, Location l, ValueRange tiles) {
+          Value res =
+              emitTileOp(b, l, op.getOpcode(), tiles[0], tiles[1].getType());
+          linalg::YieldOp::create(b, l, res);
+        });
+    rewriter.replaceOp(op, out);
+
+    return success();
+  }
+
+  static Value emitTileOp(OpBuilder &b, Location l, StringRef kind, Value a,
+                          Type resultType) {
+    if (kind == "arith.truncf" || kind == "arith.trunci")
+      return d2m::TileTypecastOp::create(b, l, resultType, a);
+    Type t = a.getType(); // !ttcore.tile
+    if (kind == "math.absf")
+      return d2m::TileAbsOp::create(b, l, t, a);
+    if (kind == "math.ceil")
+      return d2m::TileCeilOp::create(b, l, t, a);
+    if (kind == "math.floor")
+      return d2m::TileFloorOp::create(b, l, t, a);
+    if (kind == "math.exp")
+      return d2m::TileExpOp::create(b, l, t, a);
+    if (kind == "math.exp2")
+      return d2m::TileExp2Op::create(b, l, t, a);
+    if (kind == "math.log")
+      return d2m::TileLogOp::create(b, l, t, a);
+    if (kind == "math.rsqrt")
+      return d2m::TileRsqrtOp::create(b, l, t, a);
+    if (kind == "math.sqrt")
+      return d2m::TileSqrtOp::create(b, l, t, a);
+    if (kind == "math.sin")
+      return d2m::TileSinOp::create(b, l, t, a);
+    if (kind == "math.cos")
+      return d2m::TileCosOp::create(b, l, t, a);
+    llvm_unreachable("unhandled unary_compute kind");
   }
 };
 
@@ -73,7 +144,8 @@ struct ConvertBinaryComputeOp
 void populateComputeOpConversionPattern(TypeConverter &typeConverter,
                                         RewritePatternSet &patterns,
                                         PatternBenefit benefit) {
-  patterns.add<ConvertBinaryComputeOp>(typeConverter, patterns.getContext());
+  patterns.add<ConvertBinaryComputeOp, ConvertUnaryComputeOp>(
+      typeConverter, patterns.getContext());
 }
 
 } // namespace experimental
