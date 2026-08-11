@@ -31,6 +31,32 @@ module attributes {"ttg.num-ctas" = 1 : i32, "ttg.num-warps" = 1 : i32, ttg.targ
 
 // -----
 
+#blocked = #ttg.blocked<{sizePerThread = [1024], threadsPerWarp = [1], warpsPerCTA = [1], order = [0]}>
+module attributes {"ttg.num-ctas" = 1 : i32, "ttg.num-warps" = 1 : i32, ttg.target = "cpu", "ttg.threads-per-warp" = 1 : i32} {
+  // CHECK: @abs_kernel
+  tt.func public @abs_kernel__compute(%arg0: !tt.ptr<f32> {tt.divisibility = 8 : i32}, %arg1: !tt.ptr<f32> {tt.divisibility = 8 : i32}, %arg2: i32 {tt.divisibility = 8 : i32}) attributes {noinline = false} {
+    %0 = tt.make_range {end = 1024 : i32, start = 0 : i32} : tensor<1024xi32, #blocked>
+    // CHECK: %[[X_PTR:.*]] = tt.splat %arg0
+    %1 = tt.splat %arg0 : !tt.ptr<f32> -> tensor<1024x!tt.ptr<f32>, #blocked>
+    // CHECK: %[[X_PTR_OFFSET:.*]] = tt.addptr %[[X_PTR]],
+    %2 = tt.addptr %1, %0 : tensor<1024x!tt.ptr<f32>, #blocked>, tensor<1024xi32, #blocked>
+    // COM: The unary_compute operand should get an explicit register buffer, same as binary_compute operands.
+    // CHECK: %[[X:.*]] = tt.load %[[X_PTR_OFFSET]] {triton_tenstorrent.alloc_offset = 0 : i32, triton_tenstorrent.alloc_size = 1 : i32}
+    %3 = tt.load %2 : tensor<1024x!tt.ptr<f32>, #blocked>
+    // COM: Make sure the unary_compute op uses the new load op and not an intermediate cvt
+    // CHECK: %[[OUTPUT:.*]] = triton_tenstorrent.unary_compute["math.absf"] %[[X]] {triton_tenstorrent.alloc_offset = 0 : i32, triton_tenstorrent.alloc_size = 1 : i32}
+    %4 = triton_tenstorrent.unary_compute["math.absf"] %3 : (tensor<1024xf32, #blocked>) -> tensor<1024xf32, #blocked>
+    %5 = tt.splat %arg1 : !tt.ptr<f32> -> tensor<1024x!tt.ptr<f32>, #blocked>
+    %6 = tt.addptr %5, %0 : tensor<1024x!tt.ptr<f32>, #blocked>, tensor<1024xi32, #blocked>
+    // COM: Make sure the store type is propagated to the unary compute op without a cvt by checking for direct use of %OUTPUT
+    // CHECK: tt.store {{.*}} %[[OUTPUT]]
+    tt.store %6, %4 : tensor<1024x!tt.ptr<f32>, #blocked>
+    tt.return
+  }
+}
+
+// -----
+
 #blocked = #ttg.blocked<{sizePerThread = [1, 32], threadsPerWarp = [1, 1], warpsPerCTA = [1, 1], order = [1, 0]}>
 #blocked1 = #ttg.blocked<{sizePerThread = [1, 8], threadsPerWarp = [1, 1], warpsPerCTA = [1, 1], order = [1, 0]}>
 #blocked2 = #ttg.blocked<{sizePerThread = [4, 4], threadsPerWarp = [1, 1], warpsPerCTA = [1, 1], order = [1, 0]}>

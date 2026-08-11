@@ -59,6 +59,331 @@ module attributes {"ttg.num-ctas" = 1 : i32, "ttg.num-warps" = 1 : i32, ttg.targ
 #shared = #ttg.padded_shared<[1:+1] {order = [0], shape = [1024]}>
 #smem = #ttg.shared_memory
 module attributes {"ttg.num-ctas" = 1 : i32, "ttg.num-warps" = 1 : i32, ttg.target = "cpu", "ttg.threads-per-warp" = 1 : i32} {
+  // CHECK: func.func public @max_kernel__compute
+  tt.func public @max_kernel__compute(%x_ptr: !tt.ptr<f32> {tt.divisibility = 8 : i32}, %y_ptr: !tt.ptr<f32> {tt.divisibility = 8 : i32}, %output_ptr: !tt.ptr<f32> {tt.divisibility = 8 : i32}, %n_elements: i32 {tt.divisibility = 8 : i32}) attributes {noinline = false} {
+
+    // CHECK-DAG: %[[c0_i32:.*]] = arith.constant 0 : i32
+    // CHECK-DAG: %[[c1_i32:.*]] = arith.constant 1 : i32
+    // CHECK-DAG: %[[c2_i32:.*]] = arith.constant 2 : i32
+
+    // CHECK-DAG: %[[c0_index:.*]] = arith.constant 0 : index
+    // CHECK-DAG: %[[c1_index:.*]] = arith.constant 1 : index
+    // CHECK-DAG: %[[c2_index:.*]] = arith.constant 2 : index
+
+    // CHECK-DAG: %[[X:.*]] = ttkernel.get_compile_time_arg_val(0)
+    // CHECK-DAG: %[[Y:.*]] = ttkernel.get_compile_time_arg_val(1)
+    // CHECK-DAG: %[[OUTPUT:.*]] = ttkernel.get_compile_time_arg_val(2)
+    // CHECK: ttkernel.init_sfpu(%[[X]], %[[OUTPUT]])
+    // CHECK: ttkernel.tile_regs_acquire
+    %0 = ttg.local_alloc {alloc_idx = 2 : i32} : () -> !ttg.memdesc<1024xf32, #shared, #smem, mutable>
+    %y = ttg.local_alloc {alloc_idx = 1 : i32} : () -> !ttg.memdesc<1024xf32, #shared, #smem, mutable>
+    %x = ttg.local_alloc {alloc_idx = 0 : i32} : () -> !ttg.memdesc<1024xf32, #shared, #smem, mutable>
+    %x_0 = ttg.local_load %x {triton_tenstorrent.alloc_offset = 0 : i32, triton_tenstorrent.alloc_size = 1 : i32} : !ttg.memdesc<1024xf32, #shared, #smem, mutable> -> tensor<1024xf32, #blocked>
+    %y_1 = ttg.local_load %y {triton_tenstorrent.alloc_offset = 1 : i32, triton_tenstorrent.alloc_size = 1 : i32} : !ttg.memdesc<1024xf32, #shared, #smem, mutable> -> tensor<1024xf32, #blocked>
+    // CHECK: ttkernel.cb_wait_front(%[[X]], %[[c1_i32]])
+
+    // CHECK: ttkernel.copy_tile_init(%[[X]])
+    // CHECK: ttkernel.copy_tile(%[[X]], %[[c0_index]], %[[c0_index]])
+    // CHECK: ttkernel.cb_pop_front(%[[X]], %[[c1_i32]])
+
+    // CHECK-DAG: ttkernel.cb_wait_front(%[[Y]], %[[c1_i32]])
+    // CHECK: ttkernel.copy_tile_init(%[[Y]])
+    // CHECK: ttkernel.copy_tile(%[[Y]], %[[c0_index]], %[[c1_index]])
+    // CHECK: ttkernel.cb_pop_front(%[[Y]], %[[c1_i32]])
+
+    // CHECK: ttkernel.binary_max_tile_init()
+    // CHECK: ttkernel.binary_max_tile(%[[c0_index]], %[[c1_index]], %[[c2_index]])
+    %output = triton_tenstorrent.binary_compute["arith.maximumf"] %x_0, %y_1 {triton_tenstorrent.alloc_offset = 2 : i32, triton_tenstorrent.alloc_size = 1 : i32} : (tensor<1024xf32, #blocked>, tensor<1024xf32, #blocked>) -> tensor<1024xf32, #blocked>
+
+    // CHECK-DAG: ttkernel.cb_reserve_back(%[[OUTPUT]], %[[c1_i32]])
+    // CHECK: ttkernel.tile_regs_commit()
+    // CHECK: ttkernel.tile_regs_wait()
+    // CHECK: ttkernel.pack_tile(%[[c2_i32]], %[[OUTPUT]], %[[c0_i32]], true)
+    // CHECK: ttkernel.tile_regs_release()
+    // CHECK: ttkernel.cb_push_back(%[[OUTPUT]], %[[c1_i32]])
+    ttg.local_store %output, %0 : tensor<1024xf32, #blocked> -> !ttg.memdesc<1024xf32, #shared, #smem, mutable>
+    // CHECK: return
+    tt.return
+  }
+}
+
+// -----
+
+#blocked = #ttg.blocked<{sizePerThread = [1024], threadsPerWarp = [1], warpsPerCTA = [1], order = [0]}>
+#shared = #ttg.padded_shared<[1:+1] {order = [0], shape = [1024]}>
+#smem = #ttg.shared_memory
+module attributes {"ttg.num-ctas" = 1 : i32, "ttg.num-warps" = 1 : i32, ttg.target = "cpu", "ttg.threads-per-warp" = 1 : i32} {
+  // CHECK: func.func public @min_kernel__compute
+  tt.func public @min_kernel__compute(%x_ptr: !tt.ptr<f32> {tt.divisibility = 8 : i32}, %y_ptr: !tt.ptr<f32> {tt.divisibility = 8 : i32}, %output_ptr: !tt.ptr<f32> {tt.divisibility = 8 : i32}, %n_elements: i32 {tt.divisibility = 8 : i32}) attributes {noinline = false} {
+
+    // CHECK-DAG: %[[c0_i32:.*]] = arith.constant 0 : i32
+    // CHECK-DAG: %[[c1_i32:.*]] = arith.constant 1 : i32
+    // CHECK-DAG: %[[c2_i32:.*]] = arith.constant 2 : i32
+
+    // CHECK-DAG: %[[c0_index:.*]] = arith.constant 0 : index
+    // CHECK-DAG: %[[c1_index:.*]] = arith.constant 1 : index
+    // CHECK-DAG: %[[c2_index:.*]] = arith.constant 2 : index
+
+    // CHECK-DAG: %[[X:.*]] = ttkernel.get_compile_time_arg_val(0)
+    // CHECK-DAG: %[[Y:.*]] = ttkernel.get_compile_time_arg_val(1)
+    // CHECK-DAG: %[[OUTPUT:.*]] = ttkernel.get_compile_time_arg_val(2)
+    // CHECK: ttkernel.init_sfpu(%[[X]], %[[OUTPUT]])
+    // CHECK: ttkernel.tile_regs_acquire
+    %0 = ttg.local_alloc {alloc_idx = 2 : i32} : () -> !ttg.memdesc<1024xf32, #shared, #smem, mutable>
+    %y = ttg.local_alloc {alloc_idx = 1 : i32} : () -> !ttg.memdesc<1024xf32, #shared, #smem, mutable>
+    %x = ttg.local_alloc {alloc_idx = 0 : i32} : () -> !ttg.memdesc<1024xf32, #shared, #smem, mutable>
+    %x_0 = ttg.local_load %x {triton_tenstorrent.alloc_offset = 0 : i32, triton_tenstorrent.alloc_size = 1 : i32} : !ttg.memdesc<1024xf32, #shared, #smem, mutable> -> tensor<1024xf32, #blocked>
+    %y_1 = ttg.local_load %y {triton_tenstorrent.alloc_offset = 1 : i32, triton_tenstorrent.alloc_size = 1 : i32} : !ttg.memdesc<1024xf32, #shared, #smem, mutable> -> tensor<1024xf32, #blocked>
+    // CHECK: ttkernel.cb_wait_front(%[[X]], %[[c1_i32]])
+
+    // CHECK: ttkernel.copy_tile_init(%[[X]])
+    // CHECK: ttkernel.copy_tile(%[[X]], %[[c0_index]], %[[c0_index]])
+    // CHECK: ttkernel.cb_pop_front(%[[X]], %[[c1_i32]])
+
+    // CHECK-DAG: ttkernel.cb_wait_front(%[[Y]], %[[c1_i32]])
+    // CHECK: ttkernel.copy_tile_init(%[[Y]])
+    // CHECK: ttkernel.copy_tile(%[[Y]], %[[c0_index]], %[[c1_index]])
+    // CHECK: ttkernel.cb_pop_front(%[[Y]], %[[c1_i32]])
+
+    // CHECK: ttkernel.binary_min_tile_init()
+    // CHECK: ttkernel.binary_min_tile(%[[c0_index]], %[[c1_index]], %[[c2_index]])
+    %output = triton_tenstorrent.binary_compute["arith.minimumf"] %x_0, %y_1 {triton_tenstorrent.alloc_offset = 2 : i32, triton_tenstorrent.alloc_size = 1 : i32} : (tensor<1024xf32, #blocked>, tensor<1024xf32, #blocked>) -> tensor<1024xf32, #blocked>
+
+    // CHECK-DAG: ttkernel.cb_reserve_back(%[[OUTPUT]], %[[c1_i32]])
+    // CHECK: ttkernel.tile_regs_commit()
+    // CHECK: ttkernel.tile_regs_wait()
+    // CHECK: ttkernel.pack_tile(%[[c2_i32]], %[[OUTPUT]], %[[c0_i32]], true)
+    // CHECK: ttkernel.tile_regs_release()
+    // CHECK: ttkernel.cb_push_back(%[[OUTPUT]], %[[c1_i32]])
+    ttg.local_store %output, %0 : tensor<1024xf32, #blocked> -> !ttg.memdesc<1024xf32, #shared, #smem, mutable>
+    // CHECK: return
+    tt.return
+  }
+}
+
+// -----
+
+// COM: A compute function built from a single unary math op only, with the same
+// COM: register offset for its operand and its result. copy_dest_values should be
+// COM: skipped since the SFPU op can run directly in-place. ttkernel.init_sfpu should
+// COM: still be emitted, since requiresSFPUInit() checks for TTKernelSFPUOpTrait (which
+// COM: unary SFPU ops carry too), not just TTKernelBinaryOpTrait.
+#blocked = #ttg.blocked<{sizePerThread = [1024], threadsPerWarp = [1], warpsPerCTA = [1], order = [0]}>
+#shared = #ttg.padded_shared<[1:+1] {order = [0], shape = [1024]}>
+#smem = #ttg.shared_memory
+module attributes {"ttg.num-ctas" = 1 : i32, "ttg.num-warps" = 1 : i32, ttg.target = "cpu", "ttg.threads-per-warp" = 1 : i32} {
+  // CHECK: func.func public @abs_kernel__compute
+  tt.func public @abs_kernel__compute(%x_ptr: !tt.ptr<f32> {tt.divisibility = 8 : i32}, %output_ptr: !tt.ptr<f32> {tt.divisibility = 8 : i32}, %n_elements: i32 {tt.divisibility = 8 : i32}) attributes {noinline = false} {
+
+    // CHECK-DAG: %[[c0_i32:.*]] = arith.constant 0 : i32
+    // CHECK-DAG: %[[c1_i32:.*]] = arith.constant 1 : i32
+
+    // CHECK-DAG: %[[c0_index:.*]] = arith.constant 0 : index
+
+    // CHECK-DAG: %[[X:.*]] = ttkernel.get_compile_time_arg_val(0)
+    // CHECK-DAG: %[[OUTPUT:.*]] = ttkernel.get_compile_time_arg_val(1)
+    // CHECK: ttkernel.init_sfpu(%[[X]], %[[OUTPUT]])
+    // CHECK: ttkernel.tile_regs_acquire
+    %0 = ttg.local_alloc {alloc_idx = 1 : i32} : () -> !ttg.memdesc<1024xf32, #shared, #smem, mutable>
+    %x = ttg.local_alloc {alloc_idx = 0 : i32} : () -> !ttg.memdesc<1024xf32, #shared, #smem, mutable>
+    %x_0 = ttg.local_load %x {triton_tenstorrent.alloc_offset = 0 : i32, triton_tenstorrent.alloc_size = 1 : i32} : !ttg.memdesc<1024xf32, #shared, #smem, mutable> -> tensor<1024xf32, #blocked>
+    // CHECK: ttkernel.cb_wait_front(%[[X]], %[[c1_i32]])
+    // CHECK: ttkernel.copy_tile_init(%[[X]])
+    // CHECK: ttkernel.copy_tile(%[[X]], %[[c0_index]], %[[c0_index]])
+    // CHECK: ttkernel.cb_pop_front(%[[X]], %[[c1_i32]])
+
+    // CHECK-NOT: ttkernel.copy_dest_values
+    // CHECK: ttkernel.abs_tile_init()
+    // CHECK: ttkernel.abs_tile(%[[c0_index]])
+    %output = triton_tenstorrent.unary_compute["math.absf"] %x_0 {triton_tenstorrent.alloc_offset = 0 : i32, triton_tenstorrent.alloc_size = 1 : i32} : (tensor<1024xf32, #blocked>) -> tensor<1024xf32, #blocked>
+
+    // CHECK-DAG: ttkernel.cb_reserve_back(%[[OUTPUT]], %[[c1_i32]])
+    // CHECK: ttkernel.tile_regs_commit()
+    // CHECK: ttkernel.tile_regs_wait()
+    // CHECK: ttkernel.pack_tile(%[[c0_i32]], %[[OUTPUT]], %[[c0_i32]], true)
+    // CHECK: ttkernel.tile_regs_release()
+    // CHECK: ttkernel.cb_push_back(%[[OUTPUT]], %[[c1_i32]])
+    ttg.local_store %output, %0 : tensor<1024xf32, #blocked> -> !ttg.memdesc<1024xf32, #shared, #smem, mutable>
+    // CHECK: return
+    tt.return
+  }
+}
+
+// -----
+
+// COM: A unary op consuming the result of a binary op that lives in a different
+// COM: register: copy_dest_values must run before the SFPU op can execute in-place,
+// COM: and ttkernel.init_sfpu is emitted because the function also contains a binary op.
+#blocked = #ttg.blocked<{sizePerThread = [1024], threadsPerWarp = [1], warpsPerCTA = [1], order = [0]}>
+#shared = #ttg.padded_shared<[1:+1] {order = [0], shape = [1024]}>
+#smem = #ttg.shared_memory
+module attributes {"ttg.num-ctas" = 1 : i32, "ttg.num-warps" = 1 : i32, ttg.target = "cpu", "ttg.threads-per-warp" = 1 : i32} {
+  // CHECK: func.func public @abs_after_add_kernel__compute
+  tt.func public @abs_after_add_kernel__compute(%x_ptr: !tt.ptr<f32> {tt.divisibility = 8 : i32}, %y_ptr: !tt.ptr<f32> {tt.divisibility = 8 : i32}, %output_ptr: !tt.ptr<f32> {tt.divisibility = 8 : i32}, %n_elements: i32 {tt.divisibility = 8 : i32}) attributes {noinline = false} {
+
+    // CHECK-DAG: %[[c0_i32:.*]] = arith.constant 0 : i32
+    // CHECK-DAG: %[[c1_i32:.*]] = arith.constant 1 : i32
+    // CHECK-DAG: %[[c3_i32:.*]] = arith.constant 3 : i32
+
+    // CHECK-DAG: %[[c0_index:.*]] = arith.constant 0 : index
+    // CHECK-DAG: %[[c1_index:.*]] = arith.constant 1 : index
+    // CHECK-DAG: %[[c2_index:.*]] = arith.constant 2 : index
+    // CHECK-DAG: %[[c3_index:.*]] = arith.constant 3 : index
+
+    // CHECK-DAG: %[[X:.*]] = ttkernel.get_compile_time_arg_val(0)
+    // CHECK-DAG: %[[Y:.*]] = ttkernel.get_compile_time_arg_val(1)
+    // CHECK-DAG: %[[OUTPUT:.*]] = ttkernel.get_compile_time_arg_val(2)
+    // CHECK: ttkernel.init_sfpu(%[[X]], %[[OUTPUT]])
+    // CHECK: ttkernel.tile_regs_acquire
+    %0 = ttg.local_alloc {alloc_idx = 2 : i32} : () -> !ttg.memdesc<1024xf32, #shared, #smem, mutable>
+    %y = ttg.local_alloc {alloc_idx = 1 : i32} : () -> !ttg.memdesc<1024xf32, #shared, #smem, mutable>
+    %x = ttg.local_alloc {alloc_idx = 0 : i32} : () -> !ttg.memdesc<1024xf32, #shared, #smem, mutable>
+    %x_0 = ttg.local_load %x {triton_tenstorrent.alloc_offset = 0 : i32, triton_tenstorrent.alloc_size = 1 : i32} : !ttg.memdesc<1024xf32, #shared, #smem, mutable> -> tensor<1024xf32, #blocked>
+    %y_1 = ttg.local_load %y {triton_tenstorrent.alloc_offset = 1 : i32, triton_tenstorrent.alloc_size = 1 : i32} : !ttg.memdesc<1024xf32, #shared, #smem, mutable> -> tensor<1024xf32, #blocked>
+    // CHECK: ttkernel.cb_wait_front(%[[X]], %[[c1_i32]])
+    // CHECK: ttkernel.copy_tile_init(%[[X]])
+    // CHECK: ttkernel.copy_tile(%[[X]], %[[c0_index]], %[[c0_index]])
+    // CHECK: ttkernel.cb_pop_front(%[[X]], %[[c1_i32]])
+
+    // CHECK-DAG: ttkernel.cb_wait_front(%[[Y]], %[[c1_i32]])
+    // CHECK: ttkernel.copy_tile_init(%[[Y]])
+    // CHECK: ttkernel.copy_tile(%[[Y]], %[[c0_index]], %[[c1_index]])
+    // CHECK: ttkernel.cb_pop_front(%[[Y]], %[[c1_i32]])
+
+    // CHECK: ttkernel.add_binary_tile_init()
+    // CHECK: ttkernel.add_binary_tile(%[[c0_index]], %[[c1_index]], %[[c2_index]])
+    %sum = triton_tenstorrent.binary_compute["arith.addf"] %x_0, %y_1 {triton_tenstorrent.alloc_offset = 2 : i32, triton_tenstorrent.alloc_size = 1 : i32} : (tensor<1024xf32, #blocked>, tensor<1024xf32, #blocked>) -> tensor<1024xf32, #blocked>
+
+    // CHECK: ttkernel.copy_dest_values_init()
+    // CHECK: ttkernel.copy_dest_values(%[[c2_index]], %[[c3_index]], <f32>)
+    // CHECK: ttkernel.abs_tile_init()
+    // CHECK: ttkernel.abs_tile(%[[c3_index]])
+    %output = triton_tenstorrent.unary_compute["math.absf"] %sum {triton_tenstorrent.alloc_offset = 3 : i32, triton_tenstorrent.alloc_size = 1 : i32} : (tensor<1024xf32, #blocked>) -> tensor<1024xf32, #blocked>
+
+    // CHECK-DAG: ttkernel.cb_reserve_back(%[[OUTPUT]], %[[c1_i32]])
+    // CHECK: ttkernel.tile_regs_commit()
+    // CHECK: ttkernel.tile_regs_wait()
+    // CHECK: ttkernel.pack_tile(%[[c3_i32]], %[[OUTPUT]], %[[c0_i32]], true)
+    // CHECK: ttkernel.tile_regs_release()
+    // CHECK: ttkernel.cb_push_back(%[[OUTPUT]], %[[c1_i32]])
+    ttg.local_store %output, %0 : tensor<1024xf32, #blocked> -> !ttg.memdesc<1024xf32, #shared, #smem, mutable>
+    // CHECK: return
+    tt.return
+  }
+}
+
+// -----
+
+// COM: Exercise the opcode -> ttkernel op mapping for every supported unary math op by
+// COM: chaining them together, each writing back into the same in-place register.
+#blocked = #ttg.blocked<{sizePerThread = [1024], threadsPerWarp = [1], warpsPerCTA = [1], order = [0]}>
+#shared = #ttg.padded_shared<[1:+1] {order = [0], shape = [1024]}>
+#smem = #ttg.shared_memory
+module attributes {"ttg.num-ctas" = 1 : i32, "ttg.num-warps" = 1 : i32, ttg.target = "cpu", "ttg.threads-per-warp" = 1 : i32} {
+  // CHECK: func.func public @unary_chain_kernel__compute
+  tt.func public @unary_chain_kernel__compute(%x_ptr: !tt.ptr<f32> {tt.divisibility = 8 : i32}, %output_ptr: !tt.ptr<f32> {tt.divisibility = 8 : i32}, %n_elements: i32 {tt.divisibility = 8 : i32}) attributes {noinline = false} {
+    // CHECK-DAG: %[[c0_index:.*]] = arith.constant 0 : index
+    %0 = ttg.local_alloc {alloc_idx = 1 : i32} : () -> !ttg.memdesc<1024xf32, #shared, #smem, mutable>
+    %x = ttg.local_alloc {alloc_idx = 0 : i32} : () -> !ttg.memdesc<1024xf32, #shared, #smem, mutable>
+    %x_0 = ttg.local_load %x {triton_tenstorrent.alloc_offset = 0 : i32, triton_tenstorrent.alloc_size = 1 : i32} : !ttg.memdesc<1024xf32, #shared, #smem, mutable> -> tensor<1024xf32, #blocked>
+
+    // CHECK: ttkernel.abs_tile_init()
+    // CHECK: ttkernel.abs_tile(%[[c0_index]])
+    %v0 = triton_tenstorrent.unary_compute["math.absf"] %x_0 {triton_tenstorrent.alloc_offset = 0 : i32, triton_tenstorrent.alloc_size = 1 : i32} : (tensor<1024xf32, #blocked>) -> tensor<1024xf32, #blocked>
+    // CHECK: ttkernel.rounding_op_tile_init()
+    // CHECK: ttkernel.ceil_tile(%[[c0_index]])
+    %v1 = triton_tenstorrent.unary_compute["math.ceil"] %v0 {triton_tenstorrent.alloc_offset = 0 : i32, triton_tenstorrent.alloc_size = 1 : i32} : (tensor<1024xf32, #blocked>) -> tensor<1024xf32, #blocked>
+    // CHECK: ttkernel.rounding_op_tile_init()
+    // CHECK: ttkernel.floor_tile(%[[c0_index]])
+    %v2 = triton_tenstorrent.unary_compute["math.floor"] %v1 {triton_tenstorrent.alloc_offset = 0 : i32, triton_tenstorrent.alloc_size = 1 : i32} : (tensor<1024xf32, #blocked>) -> tensor<1024xf32, #blocked>
+    // CHECK: ttkernel.exp_tile_init()
+    // CHECK: ttkernel.exp_tile(%[[c0_index]])
+    %v3 = triton_tenstorrent.unary_compute["math.exp"] %v2 {triton_tenstorrent.alloc_offset = 0 : i32, triton_tenstorrent.alloc_size = 1 : i32} : (tensor<1024xf32, #blocked>) -> tensor<1024xf32, #blocked>
+    // CHECK: ttkernel.exp2_tile_init()
+    // CHECK: ttkernel.exp2_tile(%[[c0_index]])
+    %v4 = triton_tenstorrent.unary_compute["math.exp2"] %v3 {triton_tenstorrent.alloc_offset = 0 : i32, triton_tenstorrent.alloc_size = 1 : i32} : (tensor<1024xf32, #blocked>) -> tensor<1024xf32, #blocked>
+    // CHECK: ttkernel.log_tile_init()
+    // CHECK: ttkernel.log_tile(%[[c0_index]])
+    %v5 = triton_tenstorrent.unary_compute["math.log"] %v4 {triton_tenstorrent.alloc_offset = 0 : i32, triton_tenstorrent.alloc_size = 1 : i32} : (tensor<1024xf32, #blocked>) -> tensor<1024xf32, #blocked>
+    // CHECK: ttkernel.sqrt_tile_init()
+    // CHECK: ttkernel.sqrt_tile(%[[c0_index]])
+    %v6 = triton_tenstorrent.unary_compute["math.sqrt"] %v5 {triton_tenstorrent.alloc_offset = 0 : i32, triton_tenstorrent.alloc_size = 1 : i32} : (tensor<1024xf32, #blocked>) -> tensor<1024xf32, #blocked>
+    // CHECK: ttkernel.rsqrt_tile_init()
+    // CHECK: ttkernel.rsqrt_tile(%[[c0_index]])
+    %v7 = triton_tenstorrent.unary_compute["math.rsqrt"] %v6 {triton_tenstorrent.alloc_offset = 0 : i32, triton_tenstorrent.alloc_size = 1 : i32} : (tensor<1024xf32, #blocked>) -> tensor<1024xf32, #blocked>
+    // CHECK: ttkernel.sin_tile_init()
+    // CHECK: ttkernel.sin_tile(%[[c0_index]])
+    %v8 = triton_tenstorrent.unary_compute["math.sin"] %v7 {triton_tenstorrent.alloc_offset = 0 : i32, triton_tenstorrent.alloc_size = 1 : i32} : (tensor<1024xf32, #blocked>) -> tensor<1024xf32, #blocked>
+    // CHECK: ttkernel.cos_tile_init()
+    // CHECK: ttkernel.cos_tile(%[[c0_index]])
+    %v9 = triton_tenstorrent.unary_compute["math.cos"] %v8 {triton_tenstorrent.alloc_offset = 0 : i32, triton_tenstorrent.alloc_size = 1 : i32} : (tensor<1024xf32, #blocked>) -> tensor<1024xf32, #blocked>
+
+    ttg.local_store %v9, %0 : tensor<1024xf32, #blocked> -> !ttg.memdesc<1024xf32, #shared, #smem, mutable>
+    // CHECK: return
+    tt.return
+  }
+}
+
+// -----
+
+// COM: arith.truncf lowers through unary_compute to ttkernel.typecast_tile,
+// COM: using DataType attrs derived from the operand's dtype (f32) and the
+// COM: narrower result dtype (f16), rather than assuming the same dtype on
+// COM: both sides like the same-type unary math ops above.
+#blocked = #ttg.blocked<{sizePerThread = [1024], threadsPerWarp = [1], warpsPerCTA = [1], order = [0]}>
+#shared = #ttg.padded_shared<[1:+1] {order = [0], shape = [1024]}>
+#smem = #ttg.shared_memory
+module attributes {"ttg.num-ctas" = 1 : i32, "ttg.num-warps" = 1 : i32, ttg.target = "cpu", "ttg.threads-per-warp" = 1 : i32} {
+  // CHECK: func.func public @truncf_kernel__compute
+  tt.func public @truncf_kernel__compute(%x_ptr: !tt.ptr<f32> {tt.divisibility = 8 : i32}, %output_ptr: !tt.ptr<f16> {tt.divisibility = 8 : i32}, %n_elements: i32 {tt.divisibility = 8 : i32}) attributes {noinline = false} {
+    // CHECK-DAG: %[[c0_index:.*]] = arith.constant 0 : index
+    %0 = ttg.local_alloc {alloc_idx = 1 : i32} : () -> !ttg.memdesc<1024xf16, #shared, #smem, mutable>
+    %x = ttg.local_alloc {alloc_idx = 0 : i32} : () -> !ttg.memdesc<1024xf32, #shared, #smem, mutable>
+    %x_0 = ttg.local_load %x {triton_tenstorrent.alloc_offset = 0 : i32, triton_tenstorrent.alloc_size = 1 : i32} : !ttg.memdesc<1024xf32, #shared, #smem, mutable> -> tensor<1024xf32, #blocked>
+
+    // CHECK-NOT: ttkernel.copy_dest_values
+    // CHECK: ttkernel.typecast_tile_init(<f32>, <f16>)
+    // CHECK: ttkernel.typecast_tile(%[[c0_index]], <f32>, <f16>)
+    %v0 = triton_tenstorrent.unary_compute["arith.truncf"] %x_0 {triton_tenstorrent.alloc_offset = 0 : i32, triton_tenstorrent.alloc_size = 1 : i32} : (tensor<1024xf32, #blocked>) -> tensor<1024xf16, #blocked>
+
+    ttg.local_store %v0, %0 : tensor<1024xf16, #blocked> -> !ttg.memdesc<1024xf16, #shared, #smem, mutable>
+    // CHECK: return
+    tt.return
+  }
+}
+
+// -----
+
+// COM: arith.trunci lowers the same way, using the integer DataType attrs (si32 /
+// COM: u16) derived from the operand/result element types.
+#blocked = #ttg.blocked<{sizePerThread = [1024], threadsPerWarp = [1], warpsPerCTA = [1], order = [0]}>
+#shared = #ttg.padded_shared<[1:+1] {order = [0], shape = [1024]}>
+#smem = #ttg.shared_memory
+module attributes {"ttg.num-ctas" = 1 : i32, "ttg.num-warps" = 1 : i32, ttg.target = "cpu", "ttg.threads-per-warp" = 1 : i32} {
+  // CHECK: func.func public @trunci_kernel__compute
+  tt.func public @trunci_kernel__compute(%x_ptr: !tt.ptr<i32> {tt.divisibility = 8 : i32}, %output_ptr: !tt.ptr<i16> {tt.divisibility = 8 : i32}, %n_elements: i32 {tt.divisibility = 8 : i32}) attributes {noinline = false} {
+    // CHECK-DAG: %[[c0_index:.*]] = arith.constant 0 : index
+    %0 = ttg.local_alloc {alloc_idx = 1 : i32} : () -> !ttg.memdesc<1024xi16, #shared, #smem, mutable>
+    %x = ttg.local_alloc {alloc_idx = 0 : i32} : () -> !ttg.memdesc<1024xi32, #shared, #smem, mutable>
+    %x_0 = ttg.local_load %x {triton_tenstorrent.alloc_offset = 0 : i32, triton_tenstorrent.alloc_size = 1 : i32} : !ttg.memdesc<1024xi32, #shared, #smem, mutable> -> tensor<1024xi32, #blocked>
+
+    // CHECK-NOT: ttkernel.copy_dest_values
+    // CHECK: ttkernel.typecast_tile_init(<si32>, <u16>)
+    // CHECK: ttkernel.typecast_tile(%[[c0_index]], <si32>, <u16>)
+    %v0 = triton_tenstorrent.unary_compute["arith.trunci"] %x_0 {triton_tenstorrent.alloc_offset = 0 : i32, triton_tenstorrent.alloc_size = 1 : i32} : (tensor<1024xi32, #blocked>) -> tensor<1024xi16, #blocked>
+
+    ttg.local_store %v0, %0 : tensor<1024xi16, #blocked> -> !ttg.memdesc<1024xi16, #shared, #smem, mutable>
+    // CHECK: return
+    tt.return
+  }
+}
+
+// -----
+
+#blocked = #ttg.blocked<{sizePerThread = [1024], threadsPerWarp = [1], warpsPerCTA = [1], order = [0]}>
+#shared = #ttg.padded_shared<[1:+1] {order = [0], shape = [1024]}>
+#smem = #ttg.shared_memory
+module attributes {"ttg.num-ctas" = 1 : i32, "ttg.num-warps" = 1 : i32, ttg.target = "cpu", "ttg.threads-per-warp" = 1 : i32} {
   // CHECK: func.func public @add_kernel__reader()
   tt.func public @add_kernel__reader(%x_ptr: !tt.ptr<f32> {tt.divisibility = 8 : i32}, %y_ptr: !tt.ptr<f32> {tt.divisibility = 8 : i32}, %output_ptr: !tt.ptr<f32> {tt.divisibility = 8 : i32}, %n_elements: i32 {tt.divisibility = 8 : i32}) attributes {noinline = false} {
     %c1024_i32 = arith.constant 1024 : i32

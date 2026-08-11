@@ -52,7 +52,7 @@ inline bool isCBOp(Operation *op) {
 inline bool requiresSFPUInit(func::FuncOp funcOp) {
   bool requiresInit = false;
   funcOp.walk([&](Operation *op) {
-    if (op->hasTrait<ttkernel::TTKernelBinaryOpTrait>()) {
+    if (op->hasTrait<ttkernel::TTKernelSFPUOpTrait>()) {
       requiresInit = true;
       return;
     }

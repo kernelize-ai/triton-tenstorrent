@@ -1,5 +1,6 @@
 #include "npu/include/Dialect/TritonTenstorrent/Transforms/Passes.h"
 
+#include "mlir/Dialect/Math/IR/Math.h"
 #include "mlir/IR/PatternMatch.h"
 #include "mlir/Pass/Pass.h"
 #include "mlir/Transforms/GreedyPatternRewriteDriver.h"
@@ -86,6 +87,68 @@ struct RewriteBinaryComputeOp : OpRewritePattern<OpType> {
   }
 };
 
+template <typename OpType>
+struct RewriteUnaryComputeOp : OpRewritePattern<OpType> {
+  using OpRewritePattern<OpType>::OpRewritePattern;
+
+  LogicalResult matchAndRewrite(OpType op,
+                                PatternRewriter &rewriter) const override {
+    if (op->getNumOperands() != 1 || op->getNumResults() < 1)
+      return failure();
+
+    if (!isa<RankedTensorType>(op->getOperand(0).getType()))
+      return failure();
+
+    auto opcode = rewriter.getStringAttr(op->getName().getStringRef());
+    LDBG("Rewriting unary compute op: " << opcode);
+
+    // TODO: create a TiledEncodingAttr builder and unify with AccelerateMatmul
+    auto rowMajorOrder = SmallVector<unsigned>{1, 0};
+    static constexpr std::array<unsigned, 2> tileSize = {32, 32};
+
+    // if the operand is loaded from a DescriptorLoadOp, we can use tiled
+    // encoding
+    Value operand = op->getOperand(0);
+    auto definingOp = operand.getDefiningOp();
+    const bool canUseTiledEncoding =
+        definingOp && isa<triton::DescriptorLoadOp>(definingOp);
+
+    if (canUseTiledEncoding) {
+      auto vType = cast<RankedTensorType>(operand.getType());
+      auto vShape = vType.getShape();
+      assert(vShape.size() <= 2 &&
+             "expected <= rank 2 tensor for unary compute op conversion");
+
+      SmallVector<unsigned> tiledShape(vShape.size());
+      for (auto [idx, dim] : llvm::enumerate(vShape)) {
+        tiledShape[idx] = static_cast<unsigned>(dim / tileSize[idx]);
+      }
+
+      auto tiledEncoding = npu::tt::TiledEncodingAttr::get(
+          operand.getContext(), tiledShape, rowMajorOrder,
+          /*tileShape=*/ArrayRef<unsigned>{tileSize[0], tileSize[1]});
+      auto newVType = vType.cloneWithEncoding(tiledEncoding);
+      operand =
+          gpu::ConvertLayoutOp::create(rewriter, op.getLoc(), newVType, operand)
+              .getResult();
+    }
+
+    // The result element type may differ from the operand's (e.g.
+    // truncf/trunci narrow the bitwidth), so clone the (possibly
+    // tiled-encoding-converted) operand type with the original result's
+    // element type rather than assuming they match.
+    auto operandType = cast<RankedTensorType>(operand.getType());
+    auto origResultType = cast<RankedTensorType>(op->getResult(0).getType());
+    auto resultType = operandType.clone(origResultType.getElementType());
+
+    auto newOp = npu::tt::UnaryComputeOp::create(
+        rewriter, op.getLoc(), resultType, operand, opcode);
+    rewriter.replaceOp(op, newOp.getResults());
+
+    return success();
+  }
+};
+
 } // namespace
 
 class TritonTenstorrentConvertComputeOpsPass
@@ -100,6 +163,23 @@ public:
     patterns.add<RewriteBinaryComputeOp<arith::SubFOp>>(context);
     patterns.add<RewriteBinaryComputeOp<arith::MulFOp>>(context);
     patterns.add<RewriteBinaryComputeOp<arith::DivFOp>>(context);
+    patterns.add<RewriteBinaryComputeOp<arith::MaximumFOp>>(context);
+    patterns.add<RewriteBinaryComputeOp<arith::MinimumFOp>>(context);
+
+    patterns.add<RewriteUnaryComputeOp<math::AbsFOp>>(context);
+    patterns.add<RewriteUnaryComputeOp<math::CeilOp>>(context);
+    patterns.add<RewriteUnaryComputeOp<math::ExpOp>>(context);
+    patterns.add<RewriteUnaryComputeOp<math::Exp2Op>>(context);
+    patterns.add<RewriteUnaryComputeOp<math::FloorOp>>(context);
+    patterns.add<RewriteUnaryComputeOp<math::LogOp>>(context);
+    patterns.add<RewriteUnaryComputeOp<math::Log2Op>>(context);
+    patterns.add<RewriteUnaryComputeOp<math::RsqrtOp>>(context);
+    patterns.add<RewriteUnaryComputeOp<math::SqrtOp>>(context);
+    patterns.add<RewriteUnaryComputeOp<math::SinOp>>(context);
+    patterns.add<RewriteUnaryComputeOp<math::CosOp>>(context);
+
+    patterns.add<RewriteUnaryComputeOp<arith::TruncFOp>>(context);
+    patterns.add<RewriteUnaryComputeOp<arith::TruncIOp>>(context);
 
     if (failed(applyPatternsGreedily(getOperation(), std::move(patterns))))
       signalPassFailure();

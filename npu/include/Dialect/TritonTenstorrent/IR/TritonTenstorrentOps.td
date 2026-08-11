@@ -17,6 +17,27 @@ class TTTS_Op<string mnemonic, list<Trait> traits = []> :
        !listconcat(traits, [])> {
 }
 
+def TTTS_UnaryComputeOp : TTTS_Op<"unary_compute", [Pure, SameOperandsAndResultShape, SameOperandsAndResultEncoding]> {
+  let summary = "Unary compute operation in Tenstorrent compute kernel.";
+
+  let arguments = (ins AnyRankedTensor:$operand,
+                          StrAttr:$opcode);
+
+  let results = (outs Variadic<AnyType>:$result);
+
+  let description = [{
+    Wrapper operation for unary compute ops in Tenstorrent compute kernels. `UnaryComputeOp` allows for easy
+    identification of candidate compute ops prior to splitting the Triton kernel into data movement/compute functions
+    and lowering to TTKernel. The existing operation on tensors will be replaced with this generic compute op prior
+    to lowering to TTKernel. In TTKernel, UnaryComputeOp is lowered to the appropriate Tenstorrent tiled compute
+    instruction using the `opcode` attribute.
+  }];
+
+  let assemblyFormat = [{
+    `[` $opcode `]` $operand attr-dict `:` functional-type(operands, results)
+  }];
+}
+
 def TTTS_BinaryComputeOp : TTTS_Op<"binary_compute", [Pure, SameOperandsAndResultShape, SameOperandsAndResultEncoding]> {
   let summary = "Binary compute operation in Tenstorrent compute kernel.";
 
