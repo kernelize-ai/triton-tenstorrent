@@ -1,6 +1,7 @@
 #include "Utility.h"
 
 #include "mlir/Dialect/Arith/IR/Arith.h"
+#include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "triton/Conversion/MLIRTypes.h"
 
 #include "npu/include/Dialect/TritonTenstorrent/IR/Dialect.h"
@@ -11,6 +12,7 @@
 #include "ttmlir/Dialect/TTKernel/IR/TTKernelOps.h"
 
 using namespace mlir;
+using namespace mlir::tt;
 
 namespace mlir::arith {
 
@@ -51,3 +53,63 @@ Value createIndexConstant(Location loc, OpBuilder &builder, int64_t value) {
 }
 
 } // namespace mlir::arith
+
+namespace mlir::triton::npu {
+
+Value createNocId(ConversionPatternRewriter &rewriter, Location loc,
+                  int64_t nocIndex) {
+  return arith::ConstantOp::create(rewriter, loc,
+                                   rewriter.getI8IntegerAttr(nocIndex));
+}
+
+int64_t getKernelNocIndex(Operation *op) {
+  auto funcOp = op->getParentOfType<func::FuncOp>();
+  assert(funcOp && "expected data-movement op inside a kernel func");
+  return funcOp.getSymName().ends_with("__writer") ? kWriterNocIndex
+                                                   : kReaderNocIndex;
+}
+
+std::optional<int64_t> getBaseCommonArgIndex(Value baseAddr) {
+  auto getArg = baseAddr.getDefiningOp<ttkernel::GetCommonArgValOp>();
+  if (!getArg)
+    return std::nullopt;
+  auto cst = getArg.getArgIndex().getDefiningOp<arith::ConstantOp>();
+  if (!cst)
+    return std::nullopt;
+  if (auto intAttr = dyn_cast<IntegerAttr>(cst.getValue()))
+    return intAttr.getInt();
+  return std::nullopt;
+}
+
+Value findAccessorArgsForBuffer(Operation *op, int64_t baseArgIndex) {
+  auto funcOp = op->getParentOfType<func::FuncOp>();
+  if (!funcOp)
+    return nullptr;
+  Value result;
+  funcOp.walk([&](ttkernel::TensorAccessorArgsOp argsOp) {
+    auto attr = argsOp->getAttrOfType<IntegerAttr>(kAccessorBaseArgIndexAttr);
+    if (attr && attr.getInt() == baseArgIndex) {
+      result = argsOp.getResult();
+      return WalkResult::interrupt();
+    }
+    return WalkResult::advance();
+  });
+  return result;
+}
+
+Value createTensorAccessor(ConversionPatternRewriter &rewriter, Location loc,
+                           Operation *op, Value baseAddr, Value pageSize) {
+  std::optional<int64_t> argIdx = getBaseCommonArgIndex(baseAddr);
+  assert(argIdx &&
+         "expected buffer base address to come from get_common_arg_val");
+  Value accessorArgs = findAccessorArgsForBuffer(op, *argIdx);
+  assert(
+      accessorArgs &&
+      "no TensorAccessorArgs found for buffer; expected the func-entry chain "
+      "built in TritonFuncOpToFuncOp");
+  return ttkernel::TensorAccessorOp::create(
+      rewriter, loc, ttkernel::TensorAccessorType::get(rewriter.getContext()),
+      accessorArgs, baseAddr, pageSize);
+}
+
+} // namespace mlir::triton::npu

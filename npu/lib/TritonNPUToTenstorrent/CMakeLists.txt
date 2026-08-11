@@ -1,6 +1,7 @@
 add_subdirectory(D2M)
 
 add_triton_library(TritonNPUToTenstorrent
+    AtomicOpToTTKernel.cpp
     ComputeOpToTTKernel.cpp
     DotOpToTTKernel.cpp
     DropFunctionPass.cpp

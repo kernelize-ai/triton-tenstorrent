@@ -35,6 +35,14 @@ inline Value traceToBaseAddress(Value ptr) {
   opt.omitBlockArguments = true;
   opt.filter = [](Operation *op) { return !isa<ttkernel::GetArgValOp>(op); };
   (void)getBackwardSlice(ptr, &baseAddrSlice, opt);
+  // getBackwardSlice collects ptr's *ancestors*, not ptr's own defining op.
+  // For a pointer used with no intervening arithmetic (e.g. a bare
+  // `tl.atomic_add(ptr, 1)` with no addptr chain), ptr's defining op *is*
+  // the single-integer-operand node we're looking for, so make sure it's a
+  // candidate too. Appended last so it only wins as a fallback -- longer
+  // chains already resolve via an earlier match in the slice.
+  if (Operation *ptrDefOp = ptr.getDefiningOp())
+    baseAddrSlice.insert(ptrDefOp);
   LLVM_DEBUG(for (Operation *op : baseAddrSlice) {
     DBGS() << "backward slice op: " << *op << "\n";
   });
@@ -68,6 +76,18 @@ PointerInfoAnalysis::PointerInfoAnalysis(mlir::Operation *root) {
     assert(ptrInfo.try_emplace(storeOp, PointerInfo{baseAddr}).second &&
            "expected unique store op in pointer info analysis");
     LDBG("store op base address: " << baseAddr << "\n");
+  });
+  root->walk([&](triton::AtomicRMWOp atomicOp) {
+    LDBG("pointer analysis for atomic rmw op : " << *atomicOp << "\n");
+    Value baseAddr = traceToBaseAddress(atomicOp.getPtr());
+    assert(ptrInfo.try_emplace(atomicOp, PointerInfo{baseAddr}).second &&
+           "expected unique atomic rmw op in pointer info analysis");
+  });
+  root->walk([&](triton::AtomicCASOp atomicOp) {
+    LDBG("pointer analysis for atomic cas op : " << *atomicOp << "\n");
+    Value baseAddr = traceToBaseAddress(atomicOp.getPtr());
+    assert(ptrInfo.try_emplace(atomicOp, PointerInfo{baseAddr}).second &&
+           "expected unique atomic cas op in pointer info analysis");
   });
 }
 

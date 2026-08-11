@@ -90,67 +90,15 @@ static Value applyLinearLayout(ConversionPatternRewriter &rewriter,
   return offset;
 }
 
-// A buffer's base address is materialized by the func conversion as a
-// `ttkernel.get_common_arg_val(idx)`; recover `idx` so we can match the buffer
-// to the `TensorAccessorArgs` built for it at function entry.
-static std::optional<int64_t> getBaseCommonArgIndex(Value baseAddr) {
-  auto getArg = baseAddr.getDefiningOp<ttkernel::GetCommonArgValOp>();
-  if (!getArg)
-    return std::nullopt;
-  auto cst = getArg.getArgIndex().getDefiningOp<arith::ConstantOp>();
-  if (!cst)
-    return std::nullopt;
-  if (auto intAttr = dyn_cast<IntegerAttr>(cst.getValue()))
-    return intAttr.getInt();
-  return std::nullopt;
-}
-
-// Find the chained `TensorAccessorArgs` that the func conversion built at the
-// enclosing kernel's entry for the buffer whose base address has the given
-// common-arg index (tagged with kAccessorBaseArgIndexAttr). See
-// TritonFuncOpToFuncOp.cpp.
-static Value findAccessorArgsForBuffer(Operation *op, int64_t baseArgIndex) {
-  auto funcOp = op->getParentOfType<func::FuncOp>();
-  if (!funcOp)
-    return nullptr;
-  Value result;
-  funcOp.walk([&](ttkernel::TensorAccessorArgsOp argsOp) {
-    auto attr = argsOp->getAttrOfType<IntegerAttr>(kAccessorBaseArgIndexAttr);
-    if (attr && attr.getInt() == baseArgIndex) {
-      result = argsOp.getResult();
-      return WalkResult::interrupt();
-    }
-    return WalkResult::advance();
-  });
-  return result;
-}
-
-// Build a TensorAccessor for a load/store by pairing the buffer's runtime base
-// address + page size with the chained `TensorAccessorArgs` reserved for that
-// buffer at function entry. This replaces the deprecated
-// GetInterleavedAddrGenFast (removed upstream in tt-mlir#8802); the
-// interleaved/sharding/DRAM config now travels in compile-time args the host
-// pushes via TensorAccessorArgs.
-static Value createTensorAccessor(ConversionPatternRewriter &rewriter,
-                                  Location loc, Operation *op, Value baseAddr,
-                                  Value pageSize) {
-  std::optional<int64_t> argIdx = getBaseCommonArgIndex(baseAddr);
-  assert(argIdx &&
-         "expected buffer base address to come from get_common_arg_val");
-  Value accessorArgs = findAccessorArgsForBuffer(op, *argIdx);
-  assert(
-      accessorArgs &&
-      "no TensorAccessorArgs found for buffer; expected the func-entry chain "
-      "built in TritonFuncOpToFuncOp");
-  return ttkernel::TensorAccessorOp::create(
-      rewriter, loc, ttkernel::TensorAccessorType::get(rewriter.getContext()),
-      accessorArgs, baseAddr, pageSize);
-}
-
-// The OO TensorAccessor EmitC path (tt-mlir#8802) requires a *statically known*
-// NoC index on the tile read/write ops and their barriers. The old
-// noc_async_read used the implicit `noc_index` global, but the new `Noc` object
-// is constructed with an explicit compile-time index.
+// createTensorAccessor, createNocId, getKernelNocIndex,
+// getBaseCommonArgIndex, findAccessorArgsForBuffer, and the kReaderNocIndex /
+// kWriterNocIndex constants now live in Utility.h/.cpp, shared with
+// AtomicOpToTTKernel.cpp.
+//
+// The OO TensorAccessor EmitC path (tt-mlir#8802) requires a *statically
+// known* NoC index on the tile read/write ops and their barriers. The old
+// noc_async_read used the implicit `noc_index` global, but the new `Noc`
+// object is constructed with an explicit compile-time index.
 //
 // Every NoC op in a kernel runs on *that kernel's* NoC, regardless of whether
 // it is a read or a write: the reader kernel runs on RISCV_1 (NOC 1) and the
@@ -159,22 +107,6 @@ static Value createTensorAccessor(ConversionPatternRewriter &rewriter,
 // on NOC 1 from RISCV_0 leaves the read outstanding forever and hangs the
 // barrier. The driver's DataMovementConfig must match (reader .noc =
 // NOC::RISCV_1_default, writer .noc = NOC::RISCV_0_default).
-static constexpr int64_t kReaderNocIndex = 1;
-static constexpr int64_t kWriterNocIndex = 0;
-
-static Value createNocId(ConversionPatternRewriter &rewriter, Location loc,
-                         int64_t nocIndex) {
-  return arith::ConstantOp::create(rewriter, loc,
-                                   rewriter.getI8IntegerAttr(nocIndex));
-}
-
-// Resolve the NoC index for a data-movement op from its enclosing kernel func.
-static int64_t getKernelNocIndex(Operation *op) {
-  auto funcOp = op->getParentOfType<func::FuncOp>();
-  assert(funcOp && "expected data-movement op inside a kernel func");
-  return funcOp.getSymName().ends_with("__writer") ? kWriterNocIndex
-                                                   : kReaderNocIndex;
-}
 
 struct ConvertLoadOp : public OpConversionPattern<triton::LoadOp> {
   using OpConversionPattern<triton::LoadOp>::OpConversionPattern;

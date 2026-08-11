@@ -263,6 +263,8 @@ struct ConvertTritonNPUToTTKernelPass
     mlir::RewritePatternSet patterns(context);
     populateMemoryOpConversionPattern(typeConverter, patterns,
                                       &pointerInfoAnalysis, PatternBenefit(1));
+    populateAtomicOpConversionPattern(typeConverter, patterns,
+                                      &pointerInfoAnalysis, PatternBenefit(1));
     populateComputeOpConversionPattern(typeConverter, patterns,
                                        PatternBenefit(1));
     populateDotOpConversionPattern(typeConverter, patterns, PatternBenefit(1));

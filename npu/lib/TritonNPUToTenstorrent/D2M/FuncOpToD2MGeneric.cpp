@@ -154,12 +154,23 @@ LogicalResult ArgConversionHelper::convertFunctionArguments(
     Type argType = oldArg.getType();
 
     if (isa<PointerType>(argType)) {
-      RankedTensorType tritonType;
-
       auto ioTypeAttr = dyn_cast_or_null<tt::IOTypeAttr>(
           funcOp.getArgAttr(idx, kIOTypeAttrName));
-      if (!ioTypeAttr)
-        return funcOp.emitError("missing IOType attribute on tensor argument");
+      if (!ioTypeAttr) {
+        // TagInputOutputs only tags pointers reachable from an ordinary
+        // tt.load/tt.store (or descriptor load/store). A pointer used only
+        // by an atomic op (no ordinary load/store on it) is never tagged --
+        // treat it like a plain scalar argument instead of erroring; the
+        // atomic-op lowering resolves its address independently via
+        // PointerInfoAnalysis-style tracing, not through the tensor/memref
+        // machinery below.
+        auto convertedType = typeConverter->convertType(argType);
+        convertedArgTypes.push_back(convertedType);
+        argLocs.push_back(oldArg.getLoc());
+        continue;
+      }
+
+      RankedTensorType tritonType;
 
       if (ioTypeAttr.getValue() == tt::IOType::INPUT) {
         auto loadOp =

@@ -39,6 +39,11 @@ void populateMemoryOpConversionPattern(TypeConverter &typeConverter,
                                        PointerInfoAnalysis *pointerInfoAnalysis,
                                        PatternBenefit benefit);
 
+void populateAtomicOpConversionPattern(TypeConverter &typeConverter,
+                                       RewritePatternSet &patterns,
+                                       PointerInfoAnalysis *pointerInfoAnalysis,
+                                       PatternBenefit benefit);
+
 void populatePrintOpConversionPattern(TypeConverter &typeConverter,
                                       RewritePatternSet &patterns,
                                       PatternBenefit benefit);
