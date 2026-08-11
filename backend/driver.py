@@ -60,75 +60,45 @@ def library_dirs():
     return lib_dirs
 
 
-def get_nexus_runtime():
-    import nexus
-    return nexus.get_runtime("tt-metal")
+class TTUtils(object):
 
+    def __init__(self, driver):
+        self.driver = driver
 
-class CpuUtils(object):
-
-    def __init__(self, runtime):
-        self.runtime = runtime
-
-    def load_binary(self, name, kernel, shared_mem, device):
-        ## TODO: change to load_library from kernel string so the tmp files are not needed
-        ## tmpfile must be persistent since the file will be jit compiled on the first run
-        device = self.runtime.get_device(device)
-        with tempfile.NamedTemporaryFile(mode="wb", suffix=".cpp", delete=False) as f:
-            f.write(kernel)
-            f.flush()
-            os.fsync(f.fileno())
-            os.stat(f.name)
-            lib = device.load_library(f.name)
-            kernel = lib.get_kernel(name)
-            # TODO: properly handle num registers / max number threads
-            return (lib, kernel, 1, shared_mem, 2**12)
+    def load_binary(self, name, kernel, shared_mem, device_id):
+        device = self.driver.get_device(device_id)
+        print(f"LoadBinary {name}:")
+        print(kernel)
+        lib = device.load_library(kernel, len(kernel))
+        kernel = lib.get_kernel(name)
+        return (lib, kernel, 1, shared_mem, 2**12)
 
     def get_device_properties(self, *args):
-        # import nexus
-        core_count = 130  # self.device.get_property_int(nexus.property.Size)
+        import knexus
+        core_count = self.driver.get_device().get_property_int(knexus.property.Size)
         return {
             "max_num_regs": core_count * 4, "max_shared_mem": 1024 * 1024 * 1024, "multiprocessor_count": core_count,
             "warpSize": 1
         }
 
 
-def ty_to_cpp(ty):
-    if ty[0] == '*':
-        return "void*"
-    return {
-        "i1": "int32_t",
-        "i8": "int8_t",
-        "i16": "int16_t",
-        "i32": "int32_t",
-        "i64": "int64_t",
-        "u1": "uint32_t",
-        "u8": "uint8_t",
-        "u16": "uint16_t",
-        "u32": "uint32_t",
-        "u64": "uint64_t",
-        "fp16": "float",
-        "bf16": "float",
-        "fp32": "float",
-        "f32": "float",
-        "fp64": "double",
-    }[ty]
-
-
-class CPULauncher(object):
+class TTLauncher(object):
 
     def __init__(self, src, metadata):
-        runtime = get_nexus_runtime()
-        self.device = runtime.get_device(0)
+        import torch
+        import torch_nexus
+        self.device = torch.nexus.get_device()
         self.schedule = None
+        self.command = None
         constants = src.constants if hasattr(src, "constants") else dict()
         arg_idx = lambda x: (src.fn.arg_names.index(x), ) if isinstance(x, str) else x
         self.constants = {arg_idx(idx): value for idx, value in constants.items()}
         self.signature = {idx: value for idx, value in src.signature.items()}
 
     def __call__(self, gridX, gridY, gridZ, stream, function, *args):
-        import nexus
-        #self.launch(gridX, gridY, gridZ, stream, function, *args)
+        import knexus
+        import torch
+
         kernel_metadata = args[0]
         num_warps = kernel_metadata[0]
         # num_ctas = kernel_metadata[1] # should be 1
@@ -140,116 +110,64 @@ class CPULauncher(object):
         launch_enter_hook = args[2]
         launch_exit_hook = args[3]
 
-        if self.schedule is None:
-            self.schedule = self.device.create_schedule()
-            schedule = self.schedule
-            command = schedule.create_command(function)
-            import torch
-            ## TODO: Get CB depth from TuningConfig
-            cb_depth = 1
-            buffers = []
-            sig_types = list(self.signature.values())
-            idx = 0
-            add_arg = lambda arg: (command.set_arg(idx, arg), idx + 1)
-            cb_idx = 0
-            for i, arg in enumerate(args[4:]):
-                ty = sig_types[i]
-                if ty == "constexpr":
-                    continue
-                if isinstance(arg, torch.Tensor) or isinstance(arg, nexus.buffer):
-                    command.set_const(cb_idx, cb_depth, "CB", nexus.get_data_type(arg))
-                    cb_idx += 1
-                    arg = self.device.create_buffer(arg)
-                    _, idx = add_arg(arg)
-                    buffers.append(arg)
-                elif isinstance(arg, TensorDescriptor):
-                    arg_base = arg.base
-                    command.set_const(cb_idx, cb_depth, "CB", nexus.get_data_type(arg_base))
-                    cb_idx += 1
-                    arg_buf = self.device.create_buffer(arg.base)
-                    _, idx = add_arg(arg_buf)
-                    # shape flattened
-                    for dim in arg.shape:
-                        _, idx = add_arg(dim)
-                    # strides flattened
-                    for stride in arg.strides:
-                        _, idx = add_arg(stride)
-                    padded = 1  # arg.padding == "nan"
-                    _, idx = add_arg(padded)
-                    ##  Repeat since the tensor descriptor is lowered with redundant information
-                    # shape flattened
-                    for dim in arg.shape:
-                        _, idx = add_arg(dim)
-                    # strides flattened
-                    for stride in arg.strides:
-                        _, idx = add_arg(stride)
-                    # block shape? Not used by kernel
-                    buffers.append(arg_buf)
-                else:
-                    _, idx = add_arg(arg)
+        # TODO: also check for changes to launch parameters
+        #if self.schedule is None:
+        self.schedule = self.device.create_schedule()
+        self.command = self.schedule.create_command(function)
+        ## TODO: Get CB depth from TuningConfig
+        cb_depth = 8
+        sig_types = list(self.signature.values())
+        idx = 0
 
-            command.finalize([gridX, gridY, gridZ], [num_warps, 1, 1], shared_memory)
+        def add_arg(arg):
+            nonlocal idx
+            self.command.set_arg(idx, arg)
+            idx += 1
+
+        cb_idx = 0
+
+        def add_const(arg):
+            nonlocal cb_idx
+            self.command.set_const(cb_idx, cb_depth, "CB", knexus.get_data_type(arg))
+            cb_idx += 1
+
+        for i, arg in enumerate(args[4:]):
+            ty = sig_types[i]
+            if ty == "constexpr":
+                continue
+            if isinstance(arg, torch.Tensor) or isinstance(arg, knexus.Buffer):
+                add_const(arg)
+                add_arg(arg)
+            elif isinstance(arg, TensorDescriptor):
+                arg_base = arg.base
+                add_const(arg_base)
+                add_arg(arg_base)
+                # shape flattened
+                for dim in arg.shape:
+                    add_arg(dim)
+                # strides flattened
+                for stride in arg.strides:
+                    add_arg(stride)
+
+                # padding
+                add_arg(1)
+                # shape flattened
+                for dim in arg.shape:
+                    add_arg(dim)
+                # strides flattened
+                for stride in arg.strides:
+                    add_arg(stride)
+
+            else:
+                add_arg(arg)
+
+        self.command.finalize([gridX, gridY, gridZ], [num_warps, 1, 1], shared_memory)
 
         if launch_enter_hook is not None:
             launch_enter_hook(launch_metadata)
         self.schedule.run()
         if launch_exit_hook is not None:
             launch_exit_hook(launch_metadata)
-
-
-class CPUDeviceInterface:
-
-    class HooksTimeAccessor:
-
-        def __init__(self, di):
-            self.di = di
-            self.record_idx = 0
-
-        def elapsed_time(self, end_event) -> float:
-            total_time = 0
-            for i in range(self.record_idx, end_event.record_idx):
-                total_time += self.di.kernel_times[i]
-            return total_time * 1000
-
-        def record(self):
-            self.record_idx = len(self.di.kernel_times)
-
-    class TimerEvent:
-
-        def __init__(self):
-            self.timer = 0
-
-        def elapsed_time(self, end_event) -> float:
-            return (end_event.timer - self.timer) * 1000
-
-        def record(self):
-            self.timer = time.perf_counter()
-
-    def __init__(self):
-        self.kernel_times = []
-        self.last_start = 0
-        self.use_hooks = False
-        triton.compiler.CompiledKernel.launch_enter_hook = None
-        triton.compiler.CompiledKernel.launch_exit_hook = None
-
-    def enable_hook_timing(self):
-        self.use_hooks = True
-        triton.compiler.CompiledKernel.launch_enter_hook = lambda arg: self._enter_hook()
-        triton.compiler.CompiledKernel.launch_exit_hook = lambda arg: self._exit_hook()
-
-    def synchronize(self):
-        pass
-
-    def _enter_hook(self):
-        self.last_start = time.perf_counter()
-
-    def _exit_hook(self):
-        self.kernel_times.append(time.perf_counter() - self.last_start)
-
-    def Event(self, enable_timing=True):
-        if self.use_hooks:
-            return CPUDeviceInterface.HooksTimeAccessor(self)
-        return CPUDeviceInterface.TimerEvent()
 
 
 class TTRTUtils(object):
@@ -289,7 +207,7 @@ class TTRTUtils(object):
         # TODO we can probably eliminate this line
         ttrt.runtime.set_compatible_device_runtime(binary.fbb if hasattr(binary, "fbb") else binary)
         self._init_device()
-        function = (binary, 0)  # program_index 0 — extend if multi-program later
+        function = (binary, 0)  # program_index 0 <E2><80><94> extend if multi-program later
         return (binary, function, 0, 0, 1)  # module, function, n_regs, n_spills, n_max_threads
 
     def get_device_properties(self, *args):
@@ -321,7 +239,7 @@ class TTRTLauncher(object):
         tensor. Returns (runtime tensor, torch tensor to keep alive, is_tensor_arg).
 
         is_tensor_arg is True for actual tensors (real torch tensors / TensorDescriptors)
-        and False for wrapped scalars — used downstream to decide which slots are
+        and False for wrapped scalars <E2><80><94> used downstream to decide which slots are
         candidate output buffers.
         """
         import ttrt.runtime
@@ -336,14 +254,14 @@ class TTRTLauncher(object):
             torch.uint8: ttrt.runtime.DataType.UInt8,
         }
 
-        # Tensor or TensorDescriptor → existing path.
+        # Tensor or TensorDescriptor <E2><86><92> existing path.
         if hasattr(arg, "base") or isinstance(arg, torch.Tensor):
             t = arg.base if hasattr(arg, "base") else arg
             # if t.dtype in _TORCH_DTYPE_PROMOTION:
             #     t = t.to(_TORCH_DTYPE_PROMOTION[t.dtype]).contiguous()
             # ttrt.to_layout tilizes by the host tensor's *own* shape, and the
             # device layout for these args is a 2D (32x32) tile. A flat rank-1
-            # [N] vector tilizes as [1, N] — only one populated row per tile —
+            # [N] vector tilizes as [1, N] <E2><80><94> only one populated row per tile <E2><80><94>
             # so promote it to 2D to map onto whole tiles. .view() shares the
             # same storage, so the output writeback (a memcpy into data_ptr)
             # still lands in the caller's tensor.
@@ -364,7 +282,7 @@ class TTRTLauncher(object):
             )
             return rt, t, True
 
-        # Python scalar → 1-elem torch buffer. Choose dtype by Python type.
+        # Python scalar <E2><86><92> 1-elem torch buffer. Choose dtype by Python type.
         # TODO: use src.signature[i] from metadata to pick the exact dtype the
         # binary expects (e.g. i32 vs u32 vs fp32). For now, heuristic by type.
         if isinstance(arg, bool):
@@ -418,7 +336,7 @@ class TTRTLauncher(object):
         # wrap inputs and copy to device
         wrapped = [self._to_runtime_input(a) for a in kernel_args]
         host_inputs = [w[0] for w in wrapped]
-        # Borrowed host tensors hold raw pointers into the torch buffers — keep the
+        # Borrowed host tensors hold raw pointers into the torch buffers <E2><80><94> keep the
         # torch tensors alive until submit + wait finish.
         keepalive = [w[1] for w in wrapped]
         is_tensor = [w[2] for w in wrapped]
@@ -469,44 +387,124 @@ class TTRTLauncher(object):
         del keepalive
 
 
-class CPUDriver(DriverBase):
+class TTDeviceInterface:
+
+    class HooksTimeAccessor:
+
+        def __init__(self, di):
+            self.di = di
+            self.record_idx = 0
+
+        def elapsed_time(self, end_event) -> float:
+            total_time = 0
+            for i in range(self.record_idx, end_event.record_idx):
+                total_time += self.di.kernel_times[i]
+            return total_time * 1000
+
+        def record(self):
+            self.record_idx = len(self.di.kernel_times)
+
+    class TimerEvent:
+
+        def __init__(self):
+            self.timer = 0
+
+        def elapsed_time(self, end_event) -> float:
+            return (end_event.timer - self.timer) * 1000
+
+        def record(self):
+            self.timer = time.perf_counter()
+
+    def __init__(self):
+        self.kernel_times = []
+        self.last_start = 0
+        self.use_hooks = False
+        triton.compiler.CompiledKernel.launch_enter_hook = None
+        triton.compiler.CompiledKernel.launch_exit_hook = None
+
+    def enable_hook_timing(self):
+        self.use_hooks = True
+        triton.compiler.CompiledKernel.launch_enter_hook = lambda arg: self._enter_hook()
+        triton.compiler.CompiledKernel.launch_exit_hook = lambda arg: self._exit_hook()
+
+    def synchronize(self):
+        pass
+
+    def _enter_hook(self):
+        self.last_start = time.perf_counter()
+
+    def _exit_hook(self):
+        self.kernel_times.append(time.perf_counter() - self.last_start)
+
+    def Event(self, enable_timing=True):
+        if self.use_hooks:
+            return TTDeviceInterface.HooksTimeAccessor(self)
+        return TTDeviceInterface.TimerEvent()
+
+
+class TTDriver(DriverBase):
+    torch_device = None
+    is_d2m = os.environ.get("TRITON_TTMLIR_TARGET", "") == "d2m"
+
+    @staticmethod
+    def get_torch_runtime():
+        if TTDriver.is_d2m:
+            return TTRTUtils()._init_device()
+        if TTDriver.torch_device is not None:
+            return TTDriver.torch_device
+        try:
+            import torch
+            import torch_nexus
+            TTDriver.torch_device = torch.nexus
+            TTDriver.torch_device.set_runtime("tt-metal")
+        except Exception as e:
+            print(f"Error getting torch runtime: {e}")
+            TTDriver.torch_device = None
+        return TTDriver.torch_device
 
     @staticmethod
     def is_active():
-        # Always active so the off-line compiler doesn't complain
-        # TODO: Fix the off-line compiler
-        return True
-        try:
-            return bool(CPUDriver.get_device())
-        except ImportError:
-            return False
-
-    def get_device(self, device_id=0):
-        if self.runtime is None:
-            self.runtime = get_nexus_runtime()
-        return self.runtime.get_device(device_id)
+        return TTDriver.get_torch_runtime() is not None
 
     def __init__(self):
-        if os.environ.get("TRITON_TTMLIR_TARGET", "") == "d2m":
+        if TTDriver.is_d2m:
             self.utils = TTRTUtils()
             import torch
             self.get_current_stream = lambda idx: torch.cpu.Stream()  # TODO: maybe ttrt/pjrt here?
             self.launcher_cls = TTRTLauncher
         else:
-            self.runtime = None
-            self.utils = CpuUtils(self)
-            import torch
-            self.get_current_stream = lambda idx: torch.cpu.Stream()
-            self.launcher_cls = CPULauncher
+            self.device = None
+            self.utils = TTUtils(self)
+            self.launcher_cls = TTLauncher
 
-    def get_device_interface(self):
-        return CPUDeviceInterface()
+    def get_device(self, device_id=0):
+        runtime = TTDriver.get_torch_runtime()
+        if runtime is None:
+            return None
+        return runtime.get_device(device_id)
 
     def get_current_device(self):
-        return 0
+        if TTDriver.is_d2m:
+            return 0
+        runtime = TTDriver.get_torch_runtime()
+        if runtime is None:
+            return None
+        return runtime.current_device()
 
-    def map_python_to_cpp_type(self, ty: str) -> str:
-        return ty_to_cpp(ty)
+    def set_current_device(self, device):
+        runtime = TTDriver.get_torch_runtime()
+        if runtime is None:
+            return None
+        runtime.set_device(device)
+
+    def get_current_stream(self, device_id=None):
+        runtime = TTDriver.get_torch_runtime()
+        if runtime is None:
+            return None
+        return runtime.get_stream()
+
+    def get_device_interface(self):
+        return TTDeviceInterface()
 
     def get_current_target(self):
         capability = "cpu"
@@ -515,17 +513,13 @@ class CPUDriver(DriverBase):
 
     def get_active_torch_device(self):
         import torch
-        return torch.device("cpu")
+        if TTDriver.is_d2m:
+            return torch.device('cpu')
+        import torch_nexus
+        return torch.device('nexus')
 
-    def get_empty_device_buffer(self, size, dtype):
-        import nexus
-        return self.get_device().create_buffer(size, nexus.get_data_type(dtype))
-
-    def get_device_buffer(self, torch_buffer):
-        return self.get_device().create_buffer(torch_buffer)
-
-    def copy_buffer_to_host(self, device_buffer, host_buffer):
-        return device_buffer.copy(host_buffer)
+    def map_python_to_cpp_type(self, ty: str) -> str:
+        return ty
 
     def get_benchmarker(self):
         from triton.testing import do_bench
