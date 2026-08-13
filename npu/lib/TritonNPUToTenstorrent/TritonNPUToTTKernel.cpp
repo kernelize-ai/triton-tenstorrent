@@ -178,6 +178,11 @@ public:
     }
   }
 
+  // A thread function that does no tile-register compute at all (e.g. a
+  // writer whose only job is a scalar store or atomic) has no PackTileOp,
+  // so none of the tile-register bookkeeping below applies to it.
+  bool hasPackTileOps() const { return !packTileOps.empty(); }
+
   void insertTileRegsOps() {
     // look for groups of `ttkernel::PackTileOp` and insert sequences of
     // TileRegsCommitOp, TileRegsWaitOp, and then (later) TileRegsReleaseOp
@@ -268,6 +273,8 @@ struct ConvertTritonNPUToTTKernelPass
     populateComputeOpConversionPattern(typeConverter, patterns,
                                        PatternBenefit(1));
     populateDotOpConversionPattern(typeConverter, patterns, PatternBenefit(1));
+    populateReduceOpConversionPattern(typeConverter, patterns,
+                                      PatternBenefit(1));
     populateElementwiseOpConversionPattern(typeConverter, patterns,
                                            PatternBenefit(1));
     populateIntrinsicOpConversionPattern(typeConverter, patterns,
@@ -290,6 +297,8 @@ struct ConvertTritonNPUToTTKernelPass
         return;
 
       InitializationHelper initHelper(funcOp);
+      if (!initHelper.hasPackTileOps())
+        return;
       initHelper.insertTileRegsAcquireOps();
       initHelper.insertComputeInitializationOps();
       initHelper.insertTileRegsOps();

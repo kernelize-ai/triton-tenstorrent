@@ -11,6 +11,7 @@ add_triton_library(TritonNPUToTenstorrent
     MemoryOpToTTKernel.cpp
     PointerInfoAnalysis.cpp
     PrintOpToTTKernel.cpp
+    ReduceOpToTTKernel.cpp
     SPMDOpToTTKernel.cpp
     TritonFuncOpToFuncOp.cpp
     TritonNPUToTTKernel.cpp

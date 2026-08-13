@@ -85,6 +85,20 @@ private:
       LDBG("AddExpBuffers: " << op->getName() << " result (" << tiles
                              << "): " << result);
       allocation->addBuffer<BufferT::BufferKind::Explicit>(result, tiles);
+    } else if (isa<ReduceOp>(op)) {
+      // ReduceOpToTTKernel.cpp lowers a rank-1 reduce via sfpu_reduce, which
+      // reduces a DST tile in place; the (scalar) result still occupies one
+      // full physical DST tile until it is packed out, so unlike the
+      // ComputeOps case above the result size isn't derived from its
+      // (non-tensor) type via getNumTiles.
+      for (auto operand : op->getOperands()) {
+        int tiles = getNumTiles(operand.getType());
+        LDBG("AddExpBuffers: " << op->getName() << " operand (" << tiles
+                               << "): " << operand);
+        allocation->addBuffer<BufferT::BufferKind::Explicit>(operand, tiles);
+      }
+      LDBG("AddExpBuffers: " << op->getName() << " result (1): " << result);
+      allocation->addBuffer<BufferT::BufferKind::Explicit>(result, 1);
     }
   }
 

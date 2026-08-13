@@ -108,6 +108,9 @@ struct ConvertTritonFunc : public OpConversionPattern<triton::FuncOp> {
         if (isa<IntegerType>(newType) && newType.getIntOrFloatBitWidth() < 32) {
           getArgVal =
               arith::TruncIOp::create(rewriter, loc, newType, getArgVal);
+        } else if (isa<Float32Type>(newType)) {
+          getArgVal =
+              arith::BitcastOp::create(rewriter, loc, newType, getArgVal);
         }
         return getArgVal;
       };

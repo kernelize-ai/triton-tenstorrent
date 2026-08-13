@@ -64,6 +64,12 @@ public:
     // Collect load/store ops and create shared buffers (one per op).
     func.walk([&](Operation *op) {
       if (isStoreLike(op)) {
+        // Scalar stores (e.g. writing back a single reduced/atomic value)
+        // have no tensor shape/encoding for createSharedBuffer to build a
+        // CB from -- they're confined to the writer thread instead, see
+        // eraseSingleThreadOnlyOps.
+        if (!isa<RankedTensorType>(getStoreLikeValue(op).getType()))
+          return;
         int64_t idx = allocs.size();
         createSharedBuffer(op, getStoreLikeValue(op).getType(), idx);
         op->setAttr(
@@ -167,6 +173,46 @@ public:
     triton::gpu::LocalStoreOp::create(b, loc, op->getResult(0), alloc);
   }
 
+  // Scalar stores (no tensor shape for createSharedBuffer's CB machinery,
+  // see the Specializer constructor) and atomics (NoC read/modify/write ops
+  // with no tensor-CB story at all) only make sense issued from one thread.
+  // Neither is erased by the load/store-specific walks in rewriteReader/
+  // rewriteCompute/rewriteWriter, so left alone they'd be cloned verbatim
+  // into all three thread functions: redundant (and for atomics, actively
+  // wrong -- multiple threads would race the same lock/NoC sequence) work
+  // on reader/compute, and for atomics specifically a crash on compute
+  // (whose TensorAccessorArgs chain is never built for non-tensor buffers --
+  // see TritonFuncOpToFuncOp.cpp's `isComputeThread` skip, since the compute
+  // thread never issues NoC ops). Keep both on the writer thread only.
+  static bool isSingleThreadOnlyOp(Operation *op) {
+    if (isa<triton::AtomicRMWOp, triton::AtomicCASOp>(op))
+      return true;
+    if (isStoreLike(op) &&
+        !isa<RankedTensorType>(getStoreLikeValue(op).getType()))
+      return true;
+    return false;
+  }
+
+  void eraseSingleThreadOnlyOps(triton::FuncOp f) {
+    SmallVector<Operation *> toErase;
+    f.walk([&](Operation *op) {
+      if (isSingleThreadOnlyOp(op))
+        toErase.push_back(op);
+    });
+    for (Operation *op : toErase) {
+      assert(op->getNumResults() <= 1 &&
+             "expected at most one result on a single-thread-only op");
+      if (op->getNumResults() == 1 && !op->getResult(0).use_empty()) {
+        OpBuilder b(op);
+        Type ty = op->getResult(0).getType();
+        auto nullValue =
+            arith::ConstantOp::create(b, op->getLoc(), ty, b.getZeroAttr(ty));
+        op->getResult(0).replaceAllUsesWith(nullValue.getResult());
+      }
+      op->erase();
+    }
+  }
+
   void rewriteReader(triton::FuncOp f) {
     auto allocIdMap = buildAllocMap(f);
 
@@ -174,6 +220,8 @@ public:
     // TODO: handle address loads for subsequent loads
     // TODO: preload first N tiles (needs address logic..)
     f.walk([&](Operation *op) { createReadToSRAM(op, false, allocIdMap); });
+
+    eraseSingleThreadOnlyOps(f);
 
     // Erase all stores and compute ops
     f.walk([&](Operation *op) {
@@ -190,6 +238,8 @@ public:
 
   void rewriteCompute(triton::FuncOp f) {
     auto allocIdMap = buildAllocMap(f);
+
+    eraseSingleThreadOnlyOps(f);
 
     // Replace all loads with local loads
     f.walk([&](Operation *op) {

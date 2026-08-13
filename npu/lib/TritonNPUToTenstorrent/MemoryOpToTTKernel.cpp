@@ -367,6 +367,9 @@ struct ConvertStoreOp : public OpConversionPattern<triton::StoreOp> {
                   ConversionPatternRewriter &rewriter) const override {
     Location loc = op.getLoc();
 
+    if (!isa<RankedTensorType>(op.getValue().getType()))
+      return matchAndRewriteScalar(op, adaptor, rewriter);
+
     auto localLoadOp = op.getValue().getDefiningOp();
     if (!isa<gpu::LocalLoadOp>(localLoadOp)) {
       assert(false && "expected store from a local load op");
@@ -431,6 +434,79 @@ struct ConvertStoreOp : public OpConversionPattern<triton::StoreOp> {
     ttkernel::NocAsyncWriteBarrierOp::create(
         rewriter, loc, createNocId(rewriter, loc, getKernelNocIndex(op)));
     ttkernel::CBPopFrontOp::create(rewriter, loc, cb, numPages);
+
+    rewriter.eraseOp(op);
+    return success();
+  }
+
+  // Store of a plain scalar value (e.g. writing back a reduce/atomic result)
+  // rather than a tensor tile loaded through a CB. There's no CB here at
+  // all, so stage the value through a dedicated scratch L1 slot and NoC-write
+  // it out as a single element -- the same L1-scratch-then-NoC-write shape
+  // AtomicOpToTTKernel.cpp's emitAtomicOp uses for its critical section,
+  // just without the surrounding lock (a plain store has no atomicity to
+  // preserve).
+  LogicalResult matchAndRewriteScalar(triton::StoreOp op, OpAdaptor adaptor,
+                                      ConversionPatternRewriter &rewriter) const {
+    Location loc = op.getLoc();
+    MLIRContext *ctx = rewriter.getContext();
+    Type elemType = op.getValue().getType();
+    int32_t elemSize = elemType.getIntOrFloatBitWidth() / 8;
+
+    auto ptrInfo = pointerInfoAnalysis->getInfo(op);
+    assert(ptrInfo && "expected pointer info for scalar store op");
+    Value baseAddr = ptrInfo->basePtr;
+
+    // Reserve a dedicated scratch semaphore (a 4-byte L1 slot) for this
+    // static store's write-staging, the same way emitAtomicOp reserves its
+    // own lock/scratch semaphores.
+    auto parentFuncOp = op->getParentOfType<func::FuncOp>();
+    assert(parentFuncOp && "expected store op inside a kernel func");
+    auto argSpec = parentFuncOp->getAttrOfType<ttkernel::ArgSpecAttr>(
+        ttkernel::ArgSpecAttr::name);
+    SmallVector<ttkernel::ArgAttr> ctArgs;
+    if (argSpec)
+      ctArgs = llvm::to_vector(argSpec.getCtArgs());
+    int32_t scratchCtIdx = ctArgs.size();
+
+    Value scratchIdxVal = ttkernel::GetCompileArgValOp::create(
+        rewriter, loc, rewriter.getIntegerType(32), scratchCtIdx);
+    Value scratchSem =
+        ttkernel::GetSemaphoreOp::create(rewriter, loc, scratchIdxVal);
+
+    rewriter.modifyOpInPlace(parentFuncOp, [&]() {
+      ttkernel::ArgSpecAttr::appendCompileTimeArg(
+          parentFuncOp, rewriter.getAttr<ttkernel::ArgAttr>(
+                            ttkernel::ArgType::LocalSemaphore, 0));
+    });
+
+    Value scratchL1Ptr = ttkernel::CastToL1PtrOp::create(
+        rewriter, loc, ttkernel::L1AddrPtrType::get(ctx, 32), scratchSem);
+    Value zeroOffset = arith::createConstantI32(loc, rewriter, 0);
+    ttkernel::StoreToL1Op::create(rewriter, loc, adaptor.getValue(),
+                                  scratchL1Ptr, zeroOffset);
+
+    // Recover the pure byte-offset-from-tensor-start (the scalar AddPtr
+    // lowering folds the base address into the value -- see ConvertAddPtrOp
+    // in ElementwiseOpsToTTKernel.cpp), then convert to an element index.
+    Value elemSizeValue = arith::createConstantI32(loc, rewriter, elemSize);
+    Value pureOffset =
+        arith::SubIOp::create(rewriter, loc, adaptor.getPtr(), baseAddr);
+    Value elemIndex = arith::DivUIOp::create(rewriter, loc, pureOffset, elemSizeValue);
+    Value elemIndexAsIndex = arith::IndexCastOp::create(
+        rewriter, loc, rewriter.getIndexType(), elemIndex);
+
+    auto opInsertionPt = rewriter.saveInsertionPoint();
+    rewriter.setInsertionPointAfterValue(baseAddr);
+    Value pageSizeForAccessor = arith::createConstantI32(loc, rewriter, elemSize);
+    Value accessor =
+        createTensorAccessor(rewriter, loc, op, baseAddr, pageSizeForAccessor);
+    rewriter.restoreInsertionPoint(opInsertionPt);
+
+    Value nocId = createNocId(rewriter, loc, getKernelNocIndex(op));
+    ttkernel::NocAsyncWriteTileOp::create(rewriter, loc, elemIndexAsIndex,
+                                         accessor, scratchSem, nocId);
+    ttkernel::NocAsyncWriteBarrierOp::create(rewriter, loc, nocId);
 
     rewriter.eraseOp(op);
     return success();
