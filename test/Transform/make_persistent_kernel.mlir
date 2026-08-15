@@ -5,8 +5,8 @@ module attributes {"ttg.num-ctas" = 1 : i32, "ttg.num-warps" = 1 : i32, ttg.targ
   // CHECK tt.func public @add_kernel
   // CHECK-DAG: %[[BLOCK_START:.*]] = ttc.block_start
   // CHECK-DAG: %[[BLOCK_END:.*]] = ttc.block_end
-  // CHECK-DAG: %[[c1:.*]] = arith.constant 1 : i32
-  // CHECK: scf.for %[[BID:.*]] = %[[BLOCK_START]] to %[[BLOCK_END]] step %[[c1]]
+  // CHECK-DAG: %[[BLOCK_STRIDE:.*]] = ttc.block_stride
+  // CHECK: scf.for %[[BID:.*]] = %[[BLOCK_START]] to %[[BLOCK_END]] step %[[BLOCK_STRIDE]]
   // CHECK: tt.call @add_kernel.impl({{.*}}, %[[BID]])
   // COM: We don't want noinline on the wrapped function - check to make sure it has no attributes in this example
   // CHECK: tt.func private @add_kernel.impl({{.*}}) {

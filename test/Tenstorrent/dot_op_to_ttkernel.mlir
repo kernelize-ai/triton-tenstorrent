@@ -407,7 +407,7 @@ tt.func public @matmul_kernel__writer(%a_ptr: !tt.ptr<f16> {tt.divisibility = 8 
 #blocked1 = #ttg.blocked<{sizePerThread = [1, 32], threadsPerWarp = [1, 1], warpsPerCTA = [1, 1], order = [1, 0]}>
 #shared = #ttg.padded_shared<[1:+1] {order = [1, 0], shape = [32, 32]}>
 #smem = #ttg.shared_memory
-module attributes {"ttg.num-ctas" = 1 : i32, "ttg.num-warps" = 1 : i32, ttg.target = "cpu", "ttg.threads-per-warp" = 1 : i32} {
+module attributes {"ttg.num-ctas" = 1 : i32, "ttg.num-warps" = 1 : i32, ttg.target = "cpu", "ttg.threads-per-warp" = 1 : i32, "tt.device-grid" = #triton_tenstorrent.grid<8, 8>} {
   // CHECK: func.func public @matmul_kernel_tma__compute()
   tt.func public @matmul_kernel_tma__compute(%arg0: !tt.ptr<f16>, %arg1: i32, %arg2: i32, %arg3: i32, %arg4: i32, %arg5: i1, %arg6: i32, %arg7: i32, %arg8: i64, %arg9: i64, %arg10: !tt.ptr<f16>, %arg11: i32, %arg12: i32, %arg13: i32, %arg14: i32, %arg15: i1, %arg16: i32, %arg17: i32, %arg18: i64, %arg19: i64, %arg20: !tt.ptr<f16>, %arg21: i32, %arg22: i32, %arg23: i32, %arg24: i32, %arg25: i1, %arg26: i32, %arg27: i32, %arg28: i64, %arg29: i64, %arg30: i32 {tt.divisibility = 8 : i32}, %arg31: i32 {tt.divisibility = 8 : i32}, %arg32: i32 {tt.divisibility = 8 : i32}) attributes {noinline = false} {
     %c31_i32 = arith.constant 31 : i32
@@ -421,11 +421,15 @@ module attributes {"ttg.num-ctas" = 1 : i32, "ttg.num-warps" = 1 : i32, ttg.targ
     %1 = ttc.block_end
     %2 = ttc.block_start
     // CHECK-DAG: %[[c1_i32:.*]] = arith.constant 1 : i32
-    // CHECK-DAG: %[[c0_index:.*]] = arith.constant 0 : index
-    // CHECK-DAG: %[[c1_index:.*]] = arith.constant 1 : index
     // CHECK: ttkernel.mm_init
-    // CHECK-DAG: %[[START:.*]] = ttkernel.get_arg_val(%[[c0_index]])
-    // CHECK-DAG: %[[END:.*]] = ttkernel.get_arg_val(%[[c1_index]])
+    // CHECK-DAG: %[[MYX:.*]] = ttkernel.my_logical_x_
+    // CHECK-DAG: %[[MYXI32:.*]] = arith.index_cast %[[MYX]]
+    // CHECK-DAG: %[[MYY:.*]] = ttkernel.my_logical_y_
+    // CHECK-DAG: %[[MYYI32:.*]] = arith.index_cast %[[MYY]]
+    // CHECK-DAG: %[[XGRID:.*]] = ttkernel.get_common_arg_val
+    // CHECK-DAG: %[[YGRID:.*]] = ttkernel.get_common_arg_val
+    // CHECK-DAG: %[[START:.*]] = arith.addi %[[MYXI32]]
+    // CHECK-DAG: %[[END:.*]] = arith.muli %[[XGRID]], %[[YGRID]] : i32
 
     %k_tiles = arith.addi %arg32, %c31_i32 : i32
     %k_tiles_0 = arith.divsi %k_tiles, %c32_i32 : i32
@@ -459,7 +463,7 @@ module attributes {"ttg.num-ctas" = 1 : i32, "ttg.num-warps" = 1 : i32, ttg.targ
 #blocked1 = #ttg.blocked<{sizePerThread = [1, 32], threadsPerWarp = [1, 1], warpsPerCTA = [1, 1], order = [1, 0]}>
 #shared = #ttg.padded_shared<[1:+1] {order = [1, 0], shape = [32, 32]}>
 #smem = #ttg.shared_memory
-module attributes {"ttg.num-ctas" = 1 : i32, "ttg.num-warps" = 1 : i32, ttg.target = "cpu", "ttg.threads-per-warp" = 1 : i32} {
+module attributes {"ttg.num-ctas" = 1 : i32, "ttg.num-warps" = 1 : i32, ttg.target = "cpu", "ttg.threads-per-warp" = 1 : i32, "tt.device-grid" = #triton_tenstorrent.grid<8, 8>} {
   // CHECK: func.func public @matmul_kernel_tma__writer()
   tt.func public @matmul_kernel_tma__writer(%arg0: !tt.ptr<f16>, %arg1: i32, %arg2: i32, %arg3: i32, %arg4: i32, %arg5: i1, %arg6: i32, %arg7: i32, %arg8: i64, %arg9: i64, %arg10: !tt.ptr<f16>, %arg11: i32, %arg12: i32, %arg13: i32, %arg14: i32, %arg15: i1, %arg16: i32, %arg17: i32, %arg18: i64, %arg19: i64, %arg20: !tt.ptr<f16>, %arg21: i32, %arg22: i32, %arg23: i32, %arg24: i32, %arg25: i1, %arg26: i32, %arg27: i32, %arg28: i64, %arg29: i64, %arg30: i32 {tt.divisibility = 8 : i32}, %arg31: i32 {tt.divisibility = 8 : i32}, %arg32: i32 {tt.divisibility = 8 : i32}) attributes {noinline = false} {
     %cst = arith.constant dense<32> : tensor<1x32xi32, #blocked1>
@@ -483,10 +487,15 @@ module attributes {"ttg.num-ctas" = 1 : i32, "ttg.num-warps" = 1 : i32, ttg.targ
     %4 = tt.splat %arg20 : !tt.ptr<f16> -> tensor<32x32x!tt.ptr<f16>, #blocked1>
 
     // CHECK-DAG: %[[c1_i32:.*]] = arith.constant 1 : i32
-    // CHECK-DAG: %[[c0_index:.*]] = arith.constant 0 : index
-    // CHECK-DAG: %[[c1_index:.*]] = arith.constant 1 : index
-    // CHECK-DAG: %[[START:.*]] = ttkernel.get_arg_val(%[[c0_index]])
-    // CHECK-DAG: %[[END:.*]] = ttkernel.get_arg_val(%[[c1_index]])
+    // CHECK: ttkernel.TensorAccessor(
+    // CHECK-DAG: %[[MYX:.*]] = ttkernel.my_logical_x_
+    // CHECK-DAG: %[[MYXI32:.*]] = arith.index_cast %[[MYX]]
+    // CHECK-DAG: %[[MYY:.*]] = ttkernel.my_logical_y_
+    // CHECK-DAG: %[[MYYI32:.*]] = arith.index_cast %[[MYY]]
+    // CHECK-DAG: %[[XGRID:.*]] = ttkernel.get_common_arg_val
+    // CHECK-DAG: %[[YGRID:.*]] = ttkernel.get_common_arg_val
+    // CHECK-DAG: %[[START:.*]] = arith.addi %[[MYXI32]]
+    // CHECK-DAG: %[[END:.*]] = arith.muli %[[XGRID]], %[[YGRID]] : i32
 
     // CHECK: scf.for %[[arg0:.*]] = %[[START]] to %[[END]] step %[[c1_i32]] : i32 {
     scf.for %arg33 = %2 to %1 step %c1_i32  : i32 {

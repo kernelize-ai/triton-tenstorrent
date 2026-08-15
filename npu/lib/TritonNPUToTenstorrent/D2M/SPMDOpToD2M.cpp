@@ -35,145 +35,100 @@ struct CurrentBlockConversion
   }
 };
 
-// Derive each core's block range from the Triton grid instead of passing block
-// start/end as per-kernel args. The Triton grid dimensions arrive as uniforms
-// (SPMD args); we map that grid onto the device grid and split blocks as evenly
-// as possible across cores. For a device grid {deviceGridWidth,
-// deviceGridHeight} with numCores = deviceGridWidth * deviceGridHeight:
+// Derive each core's grid-stride loop parameters from the Triton grid instead
+// of passing block start/end/stride as per-kernel args. The Triton grid
+// dimensions arrive as uniforms (SPMD args); we map that grid onto the device
+// grid and have every core walk the full block range at a uniform stride
+// equal to the core count, rather than owning a fixed contiguous sub-range.
+// For a device grid {deviceGridWidth, deviceGridHeight} with numCores =
+// deviceGridWidth * deviceGridHeight:
 //
-//   coreIndex                 = MyLogicalX + MyLogicalY * deviceGridWidth  //
-//   linear core id numBlocks                 = tritonGridX * tritonGridY
-//   baseBlocksPerCore         = numBlocks / numCores
-//   coresWithExtraBlock       = numBlocks % numCores
-//   extraBlocksBeforeThisCore = min(coreIndex, coresWithExtraBlock)
-//   blockStart = coreIndex * baseBlocksPerCore + extraBlocksBeforeThisCore
+//   coreIndex   = MyLogicalX + MyLogicalY * deviceGridWidth  // linear core id
+//   numBlocks   = tritonGridX * tritonGridY
+//   blockStart  = coreIndex
+//   blockStride = numCores
+//   blockEnd    = numBlocks
 //
-// The first coresWithExtraBlock cores take one extra block; the rest take
-// baseBlocksPerCore, so every block in [0, numBlocks) is covered exactly once
+// i.e. core `coreIndex` processes blocks coreIndex, coreIndex + numCores,
+// coreIndex + 2*numCores, ... until reaching numBlocks. Every block in
+// [0, numBlocks) is covered exactly once regardless of whether numBlocks is
+// evenly divisible by numCores.
+
+static Value computeCoreIndex(Location loc,
+                              ConversionPatternRewriter &rewriter,
+                              ModuleOp mod) {
+  auto gridAttr = tt::TritonTenstorrentDialect::getGridAttr(mod);
+  SmallVector<int64_t> deviceGrid = llvm::to_vector(gridAttr.getShape());
+  assert(deviceGrid.size() == 2 && "expected rank-2 device grid");
+  const int64_t deviceGridWidth = deviceGrid[0];
+
+  Value xLogicalIndex = arith::IndexCastOp::create(
+      rewriter, loc, rewriter.getI32Type(),
+      ttkernel::MyLogicalXOp::create(rewriter, loc));
+  Value yLogicalIndex = arith::IndexCastOp::create(
+      rewriter, loc, rewriter.getI32Type(),
+      ttkernel::MyLogicalYOp::create(rewriter, loc));
+  // linear core ID on the device grid
+  return arith::AddIOp::create(
+      rewriter, loc, xLogicalIndex,
+      arith::MulIOp::create(
+          rewriter, loc, yLogicalIndex,
+          arith::createConstantI32(loc, rewriter, deviceGridWidth)));
+}
+
+static Value computeNumCores(Location loc, ConversionPatternRewriter &rewriter,
+                             ModuleOp mod) {
+  auto gridAttr = tt::TritonTenstorrentDialect::getGridAttr(mod);
+  SmallVector<int64_t> deviceGrid = llvm::to_vector(gridAttr.getShape());
+  assert(deviceGrid.size() == 2 && "expected rank-2 device grid");
+  return arith::createConstantI32(loc, rewriter, deviceGrid[0] * deviceGrid[1]);
+}
+
+static Value computeNumBlocks(Location loc, ConversionPatternRewriter &rewriter,
+                              func::FuncOp func) {
+  Value tritonGridX = getSpmdArg(func, SpmdArg::x_grid);
+  Value tritonGridY = getSpmdArg(func, SpmdArg::y_grid);
+  return arith::MulIOp::create(rewriter, loc, tritonGridX, tritonGridY);
+}
+
 struct BlockStartOpConversion : public OpConversionPattern<cpu::BlockStartOp> {
   using OpConversionPattern<cpu::BlockStartOp>::OpConversionPattern;
 
   LogicalResult
   matchAndRewrite(cpu::BlockStartOp op, OpAdaptor adaptor,
                   ConversionPatternRewriter &rewriter) const override {
-    Location loc = op.getLoc();
-
     ModuleOp mod = op->getParentOfType<ModuleOp>();
-    auto gridAttr = tt::TritonTenstorrentDialect::getGridAttr(mod);
-    SmallVector<int64_t> deviceGrid = llvm::to_vector(gridAttr.getShape());
-    assert(deviceGrid.size() == 2 && "expected rank-2 device grid");
-
-    const int64_t deviceGridWidth = deviceGrid[0];
-    const int64_t deviceGridHeight = deviceGrid[1];
-    const int64_t numCoresConst = deviceGridWidth * deviceGridHeight;
-
-    Value xLogicalIndex = arith::IndexCastOp::create(
-        rewriter, loc, rewriter.getI32Type(),
-        ttkernel::MyLogicalXOp::create(rewriter, loc));
-    Value yLogicalIndex = arith::IndexCastOp::create(
-        rewriter, loc, rewriter.getI32Type(),
-        ttkernel::MyLogicalYOp::create(rewriter, loc));
-    // linear core ID on the device grid
-    Value coreIndex = arith::AddIOp::create(
-        rewriter, loc, xLogicalIndex,
-        arith::MulIOp::create(
-            rewriter, loc, yLogicalIndex,
-            arith::createConstantI32(loc, rewriter, deviceGridWidth)));
-
-    func::FuncOp func = op->getParentOfType<func::FuncOp>();
-    assert(func && "expected op to have MLIR func dialect FuncOp parent during "
-                   "Triton NPU to D2M op lowering");
-    Value tritonGridX = getSpmdArg(func, SpmdArg::x_grid);
-    Value tritonGridY = getSpmdArg(func, SpmdArg::y_grid);
-    Value numBlocks =
-        arith::MulIOp::create(rewriter, loc, tritonGridX, tritonGridY);
-
-    Value numCoresVal = arith::createConstantI32(loc, rewriter, numCoresConst);
-    Value baseBlocksPerCore =
-        arith::FloorDivSIOp::create(rewriter, loc, numBlocks, numCoresVal);
-
-    Value baseBlockStart =
-        arith::MulIOp::create(rewriter, loc, coreIndex, baseBlocksPerCore);
-    // leftover blocks => first coresWithExtraBlock cores get one more
-    Value coresWithExtraBlock =
-        arith::RemSIOp::create(rewriter, loc, numBlocks, numCoresVal);
-    Value extraBlocksBeforeThisCore =
-        arith::MinSIOp::create(rewriter, loc, coreIndex, coresWithExtraBlock);
-
-    Value blockStart = arith::AddIOp::create(rewriter, loc, baseBlockStart,
-                                             extraBlocksBeforeThisCore);
-
-    rewriter.replaceOp(op, blockStart);
-
+    rewriter.replaceOp(op, computeCoreIndex(op.getLoc(), rewriter, mod));
     return success();
   }
 };
 
-// blockEnd = blockStart + baseBlocksPerCore + (coreIndex < coresWithExtraBlock
-// ? 1 : 0) Recomputes blockStart via cpu.block_start; the duplicated arithmetic
-// CSEs away.
+// Every core walks the same block range [0, numBlocks); the range itself
+// does not depend on which core is asking, only the start offset and stride
+// (see BlockStartOpConversion / BlockStrideOpConversion) do.
 struct BlockEndOpConversion : public OpConversionPattern<cpu::BlockEndOp> {
   using OpConversionPattern<cpu::BlockEndOp>::OpConversionPattern;
 
   LogicalResult
   matchAndRewrite(cpu::BlockEndOp op, OpAdaptor adaptor,
                   ConversionPatternRewriter &rewriter) const override {
-    Location loc = op.getLoc();
-
-    Value blockStart = cpu::BlockStartOp::create(rewriter, loc);
-
-    ModuleOp mod = op->getParentOfType<ModuleOp>();
-    auto gridAttr = tt::TritonTenstorrentDialect::getGridAttr(mod);
-    SmallVector<int64_t> deviceGrid = llvm::to_vector(gridAttr.getShape());
-    assert(deviceGrid.size() == 2 && "expected rank-2 device grid");
-
     func::FuncOp func = op->getParentOfType<func::FuncOp>();
     assert(func && "expected op to have MLIR func dialect FuncOp parent during "
                    "Triton NPU to D2M op lowering");
-    Value tritonGridX = getSpmdArg(func, SpmdArg::x_grid);
-    Value tritonGridY = getSpmdArg(func, SpmdArg::y_grid);
-    Value numBlocks =
-        arith::MulIOp::create(rewriter, loc, tritonGridX, tritonGridY);
+    rewriter.replaceOp(op, computeNumBlocks(op.getLoc(), rewriter, func));
+    return success();
+  }
+};
 
-    const int64_t deviceGridWidth = deviceGrid[0];
-    const int64_t deviceGridHeight = deviceGrid[1];
-    const int64_t numCoresConst = deviceGridWidth * deviceGridHeight;
+struct BlockStrideOpConversion
+    : public OpConversionPattern<cpu::BlockStrideOp> {
+  using OpConversionPattern<cpu::BlockStrideOp>::OpConversionPattern;
 
-    Value xLogicalIndex = arith::IndexCastOp::create(
-        rewriter, loc, rewriter.getI32Type(),
-        ttkernel::MyLogicalXOp::create(rewriter, loc));
-    Value yLogicalIndex = arith::IndexCastOp::create(
-        rewriter, loc, rewriter.getI32Type(),
-        ttkernel::MyLogicalYOp::create(rewriter, loc));
-    // linear core ID on the device grid
-    Value coreIndex = arith::AddIOp::create(
-        rewriter, loc, xLogicalIndex,
-        arith::MulIOp::create(
-            rewriter, loc, yLogicalIndex,
-            arith::createConstantI32(loc, rewriter, deviceGridWidth)));
-
-    Value numCoresVal = arith::createConstantI32(loc, rewriter, numCoresConst);
-    Value baseBlocksPerCore =
-        arith::FloorDivSIOp::create(rewriter, loc, numBlocks, numCoresVal);
-    // leftover blocks => first coresWithExtraBlock cores get one more
-    Value coresWithExtraBlock =
-        arith::RemSIOp::create(rewriter, loc, numBlocks, numCoresVal);
-
-    Value baseBlockEnd =
-        arith::AddIOp::create(rewriter, loc, blockStart, baseBlocksPerCore);
-
-    Value thisCoreGetsExtra =
-        arith::CmpIOp::create(rewriter, loc, arith::CmpIPredicate::slt,
-                              coreIndex, coresWithExtraBlock);
-    Value oneIfThisCoreGetsExtra =
-        arith::SelectOp::create(rewriter, loc, thisCoreGetsExtra,
-                                arith::createConstantI32(loc, rewriter, 1),
-                                arith::createConstantI32(loc, rewriter, 0));
-
-    Value blockEnd = arith::AddIOp::create(rewriter, loc, baseBlockEnd,
-                                           oneIfThisCoreGetsExtra);
-
-    rewriter.replaceOp(op, blockEnd);
+  LogicalResult
+  matchAndRewrite(cpu::BlockStrideOp op, OpAdaptor adaptor,
+                  ConversionPatternRewriter &rewriter) const override {
+    ModuleOp mod = op->getParentOfType<ModuleOp>();
+    rewriter.replaceOp(op, computeNumCores(op.getLoc(), rewriter, mod));
     return success();
   }
 };
@@ -185,6 +140,7 @@ void populateSPMDOpConversionPattern(TypeConverter &typeConverter,
                                      PatternBenefit benefit) {
   patterns.add<BlockStartOpConversion>(typeConverter, patterns.getContext());
   patterns.add<BlockEndOpConversion>(typeConverter, patterns.getContext());
+  patterns.add<BlockStrideOpConversion>(typeConverter, patterns.getContext());
   patterns.add<CurrentBlockConversion>(typeConverter, patterns.getContext());
 }
 

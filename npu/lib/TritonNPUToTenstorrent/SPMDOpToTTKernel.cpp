@@ -1,13 +1,16 @@
 #include "PatternTritonNPUToTenstorrent.h"
 
+#include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Transforms/DialectConversion.h"
 
 #include "cpu/include/Dialect/TritonCPU/IR/Dialect.h" // BlockIndexOps from MakePersistentKernel
+#include "npu/include/Dialect/TritonTenstorrent/IR/Attributes.h"
 #include "npu/include/Dialect/TritonTenstorrent/IR/Dialect.h"
 
 #include "ttmlir/Dialect/TTKernel/IR/TTKernel.h"
 #include "ttmlir/Dialect/TTKernel/IR/TTKernelOps.h"
 
+#include "D2M/SPMDArgs.h"
 #include "Utility.h"
 
 namespace mlir {
@@ -68,40 +71,111 @@ struct ConvertGetNumProgramsOp : public OpConversionPattern<GetNumProgramsOp> {
     return success();
   }
 };
-template <typename OpTy>
-class BlockIndexOpConversion : public OpConversionPattern<OpTy> {
-  using OpConversionPattern<OpTy>::OpConversionPattern;
-  using OpAdaptor = typename OpTy::Adaptor;
+// Derive each core's grid-stride loop parameters the same way as the D2M
+// pipeline (see D2M/SPMDOpToD2M.cpp): every core walks the *entire* Triton
+// grid at a uniform stride equal to the physical core count, instead of
+// owning a fixed contiguous sub-range baked as a per-core runtime arg.
+//
+//   coreIndex   = MyLogicalX + MyLogicalY * deviceGridWidth  // linear core id
+//   numBlocks   = tritonGridX * tritonGridY
+//   blockStart  = coreIndex
+//   blockStride = numCores
+//   blockEnd    = numBlocks
+//
+// Unlike D2M -- where x_grid/y_grid arrive as trailing function arguments --
+// this pipeline's converted functions take no arguments at all (see
+// ConvertTritonFunc in TritonFuncOpToFuncOp.cpp): every value is read out of
+// the common/per-core runtime arg arrays via GetCommonArgValOp/GetArgValOp.
+// x_grid and y_grid are common args (identical on every core), so they are
+// read here as two extra common args living right after the user args
+// counted by kTTNumCommonArgsAttr.
+static Value getSpmdCommonArg(Location loc, ConversionPatternRewriter &rewriter,
+                              func::FuncOp func, SpmdArg a) {
+  auto numUserArgs =
+      func->getAttrOfType<IntegerAttr>(kTTNumCommonArgsAttr).getInt();
+  Value argIndex =
+      arith::createIndexConstant(loc, rewriter, numUserArgs + (int)a);
+  return ttkernel::GetCommonArgValOp::create(rewriter, loc,
+                                             rewriter.getI32Type(), argIndex);
+}
 
-public:
-  explicit BlockIndexOpConversion(TypeConverter &typeConverter,
-                                  const int funcArgIndexOffset,
-                                  MLIRContext *context)
-      : OpConversionPattern<OpTy>(typeConverter, context),
-        funcArgIndexOffset(funcArgIndexOffset) {}
+static Value computeCoreIndex(Location loc,
+                              ConversionPatternRewriter &rewriter,
+                              ModuleOp mod) {
+  auto gridAttr = tt::TritonTenstorrentDialect::getGridAttr(mod);
+  SmallVector<int64_t> deviceGrid = llvm::to_vector(gridAttr.getShape());
+  assert(deviceGrid.size() == 2 && "expected rank-2 device grid");
+  const int64_t deviceGridWidth = deviceGrid[0];
+
+  Value xLogicalIndex = arith::IndexCastOp::create(
+      rewriter, loc, rewriter.getI32Type(),
+      ttkernel::MyLogicalXOp::create(rewriter, loc));
+  Value yLogicalIndex = arith::IndexCastOp::create(
+      rewriter, loc, rewriter.getI32Type(),
+      ttkernel::MyLogicalYOp::create(rewriter, loc));
+  // linear core ID on the device grid
+  return arith::AddIOp::create(
+      rewriter, loc, xLogicalIndex,
+      arith::MulIOp::create(
+          rewriter, loc, yLogicalIndex,
+          arith::createConstantI32(loc, rewriter, deviceGridWidth)));
+}
+
+static Value computeNumCores(Location loc, ConversionPatternRewriter &rewriter,
+                             ModuleOp mod) {
+  auto gridAttr = tt::TritonTenstorrentDialect::getGridAttr(mod);
+  SmallVector<int64_t> deviceGrid = llvm::to_vector(gridAttr.getShape());
+  assert(deviceGrid.size() == 2 && "expected rank-2 device grid");
+  return arith::createConstantI32(loc, rewriter, deviceGrid[0] * deviceGrid[1]);
+}
+
+static Value computeNumBlocks(Location loc, ConversionPatternRewriter &rewriter,
+                              func::FuncOp func) {
+  Value tritonGridX = getSpmdCommonArg(loc, rewriter, func, SpmdArg::x_grid);
+  Value tritonGridY = getSpmdCommonArg(loc, rewriter, func, SpmdArg::y_grid);
+  return arith::MulIOp::create(rewriter, loc, tritonGridX, tritonGridY);
+}
+
+struct BlockStartOpConversion : public OpConversionPattern<cpu::BlockStartOp> {
+  using OpConversionPattern<cpu::BlockStartOp>::OpConversionPattern;
 
   LogicalResult
-  matchAndRewrite(OpTy op, typename OpTy::Adaptor adaptor,
+  matchAndRewrite(cpu::BlockStartOp op, OpAdaptor adaptor,
                   ConversionPatternRewriter &rewriter) const override {
-    Location loc = op.getLoc();
-
-    auto funcOp = op->template getParentOfType<FunctionOpInterface>();
-    assert(funcOp && "expected FuncOp as a parent of BlockIndexOp");
-
-    auto launchParamIndex =
-        funcOp->template getAttrOfType<IntegerAttr>(kTTNumPerCoreArgsAttr)
-            .getInt();
-    Value paramIndexValue = arith::createIndexConstant(
-        loc, rewriter, launchParamIndex + funcArgIndexOffset);
-    auto launchParam = ttkernel::GetArgValOp::create(
-        rewriter, loc, rewriter.getI32Type(), paramIndexValue);
-    rewriter.replaceOp(op, launchParam);
-
+    ModuleOp mod = op->getParentOfType<ModuleOp>();
+    rewriter.replaceOp(op, computeCoreIndex(op.getLoc(), rewriter, mod));
     return success();
   }
+};
 
-private:
-  const int funcArgIndexOffset;
+// Every core walks the same block range [0, numBlocks); the range itself
+// does not depend on which core is asking, only the start offset and stride
+// (see BlockStartOpConversion / BlockStrideOpConversion) do.
+struct BlockEndOpConversion : public OpConversionPattern<cpu::BlockEndOp> {
+  using OpConversionPattern<cpu::BlockEndOp>::OpConversionPattern;
+
+  LogicalResult
+  matchAndRewrite(cpu::BlockEndOp op, OpAdaptor adaptor,
+                  ConversionPatternRewriter &rewriter) const override {
+    auto func = op->getParentOfType<func::FuncOp>();
+    assert(func && "expected op to have MLIR func dialect FuncOp parent during "
+                   "Triton NPU to TTKernel op lowering");
+    rewriter.replaceOp(op, computeNumBlocks(op.getLoc(), rewriter, func));
+    return success();
+  }
+};
+
+struct BlockStrideOpConversion
+    : public OpConversionPattern<cpu::BlockStrideOp> {
+  using OpConversionPattern<cpu::BlockStrideOp>::OpConversionPattern;
+
+  LogicalResult
+  matchAndRewrite(cpu::BlockStrideOp op, OpAdaptor adaptor,
+                  ConversionPatternRewriter &rewriter) const override {
+    ModuleOp mod = op->getParentOfType<ModuleOp>();
+    rewriter.replaceOp(op, computeNumCores(op.getLoc(), rewriter, mod));
+    return success();
+  }
 };
 
 struct CurrentBlockConversion
@@ -123,10 +197,9 @@ void populateSPMDOpConversionPattern(TypeConverter &typeConverter,
                                      PatternBenefit benefit) {
   patterns.add<ConvertGetProgramIdOp>(typeConverter, patterns.getContext());
   patterns.add<ConvertGetNumProgramsOp>(typeConverter, patterns.getContext());
-  patterns.add<BlockIndexOpConversion<mlir::triton::cpu::BlockStartOp>>(
-      typeConverter, PerCoreArgOffsets::kBlockStart, patterns.getContext());
-  patterns.add<BlockIndexOpConversion<mlir::triton::cpu::BlockEndOp>>(
-      typeConverter, PerCoreArgOffsets::kBlockEnd, patterns.getContext());
+  patterns.add<BlockStartOpConversion>(typeConverter, patterns.getContext());
+  patterns.add<BlockEndOpConversion>(typeConverter, patterns.getContext());
+  patterns.add<BlockStrideOpConversion>(typeConverter, patterns.getContext());
   patterns.add<CurrentBlockConversion>(typeConverter, patterns.getContext());
 }
 

@@ -83,6 +83,23 @@ def TTC_BlockEndOp : TTC_Op<"block_end", [Pure]> {
   let assemblyFormat = "attr-dict";
 }
 
+def TTC_BlockStrideOp : TTC_Op<"block_stride", [Pure]> {
+  let summary = "Get the block ID stride for this kernel invocation.";
+
+  let arguments = (ins);
+
+  let results = (outs I32:$stride);
+
+  let description = [{
+    Get the stride between consecutive block IDs processed by this kernel
+    invocation, i.e. the step of the persistent-kernel loop from block_start
+    to block_end. For a grid-stride loop this is the number of parallel
+    invocations (e.g. cores) sharing the block range.
+  }];
+
+  let assemblyFormat = "attr-dict";
+}
+
 def TTC_MaskedLoadOp : TTC_Op<"masked_load", [
   TypesMatchWith<"mask size matches false val size", "falseVal", "mask", "mlir::getI1SameShape($_self)">,
   TypesMatchWith<"result type matches false val type", "result", "falseVal", "$_self">,

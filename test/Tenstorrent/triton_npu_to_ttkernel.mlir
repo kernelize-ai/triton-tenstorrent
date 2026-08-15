@@ -510,7 +510,7 @@ module attributes {"ttg.num-ctas" = 1 : i32, "ttg.num-warps" = 1 : i32, ttg.targ
 #blocked = #ttg.blocked<{sizePerThread = [1024], threadsPerWarp = [1], warpsPerCTA = [1], order = [0]}>
 #shared = #ttg.padded_shared<[1:+1] {order = [0], shape = [1024]}>
 #smem = #ttg.shared_memory
-module attributes {"ttg.num-ctas" = 1 : i32, "ttg.num-warps" = 1 : i32, ttg.target = "cpu", "ttg.threads-per-warp" = 1 : i32} {
+module attributes {"ttg.num-ctas" = 1 : i32, "ttg.num-warps" = 1 : i32, ttg.target = "cpu", "ttg.threads-per-warp" = 1 : i32, "tt.device-grid" = #triton_tenstorrent.grid<8, 8>} {
   tt.func public @add_kernel__reader(%arg0: !tt.ptr<f16>, %arg1: !tt.ptr<f16>, %arg2: !tt.ptr<f16>, %arg3: i32) attributes {noinline = false} {
     %c1024_i32 = arith.constant 1024 : i32
     %c1_i32 = arith.constant 1 : i32
@@ -525,10 +525,15 @@ module attributes {"ttg.num-ctas" = 1 : i32, "ttg.num-warps" = 1 : i32, ttg.targ
     %x_2 = tt.splat %arg0 : !tt.ptr<f16> -> tensor<1024x!tt.ptr<f16>, #blocked>
     %y_3 = tt.splat %arg1 : !tt.ptr<f16> -> tensor<1024x!tt.ptr<f16>, #blocked>
     // CHECK-DAG: %[[c1_i32:.*]] = arith.constant 1 : i32
-    // CHECK-DAG: %[[c0_index:.*]] = arith.constant 0 : index
-    // CHECK-DAG: %[[c1_index:.*]] = arith.constant 1 : index
-    // CHECK-DAG: %[[START:.*]] = ttkernel.get_arg_val(%[[c0_index]])
-    // CHECK-DAG: %[[END:.*]] = ttkernel.get_arg_val(%[[c1_index]])
+    // CHECK: ttkernel.TensorAccessor(
+    // CHECK-DAG: %[[MYX:.*]] = ttkernel.my_logical_x_
+    // CHECK-DAG: %[[MYXI32:.*]] = arith.index_cast %[[MYX]]
+    // CHECK-DAG: %[[MYY:.*]] = ttkernel.my_logical_y_
+    // CHECK-DAG: %[[MYYI32:.*]] = arith.index_cast %[[MYY]]
+    // CHECK-DAG: %[[XGRID:.*]] = ttkernel.get_common_arg_val
+    // CHECK-DAG: %[[YGRID:.*]] = ttkernel.get_common_arg_val
+    // CHECK-DAG: %[[START:.*]] = arith.addi %[[MYXI32]]
+    // CHECK-DAG: %[[END:.*]] = arith.muli %[[XGRID]], %[[YGRID]] : i32
     // CHECK: scf.for %[[arg0:.*]] = %[[START]] to %[[END]] step %[[c1_i32]]
     scf.for %arg4 = %1 to %0 step %c1_i32  : i32 {
       // CHECK: %[[block_start:.*]] = arith.muli %[[arg0]]

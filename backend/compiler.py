@@ -328,6 +328,14 @@ class TTBackend(BaseBackend):
             cpu.passes.tenstorrent.add_materialize_multicasts(pm)
         cpu.passes.tenstorrent.add_register_allocation(pm)
         cpu.passes.tenstorrent.add_canonicalize_matmul_loops(pm)
+
+        # The ttkernel conversion needs the device grid (via getGridAttr) to
+        # compute each core's grid-stride persistent-kernel block range, so
+        # the device must be registered before add_to_ttkernel_dialect runs,
+        # same as make_d2m/make_ttnn_generic do for their own conversions.
+        sys_desc_path = os.getenv("TT_SYSTEM_DESC_PATH", "")
+        cpu.passes.tenstorrent.add_ttcore_register_device_pass(pm, sys_desc_path)
+
         cpu.passes.tenstorrent.add_to_ttkernel_dialect(pm)
         passes.common.add_canonicalizer(pm)
 

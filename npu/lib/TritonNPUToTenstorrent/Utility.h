@@ -17,8 +17,6 @@ static constexpr llvm::StringLiteral kAccessorBaseArgIndexAttr =
     "tt.accessor_base_arg_index";
 
 namespace PerCoreArgOffsets {
-constexpr int kBlockStart = 0;
-constexpr int kBlockEnd = 1;
 constexpr int kNumBlocks = 2;
 constexpr int kThreadId = 3;
 } // namespace PerCoreArgOffsets

@@ -173,8 +173,7 @@ static triton::FuncOp buildWrapper(ModuleOp mod, triton::FuncOp kernel,
   OpBuilder wb(entry, entry->end());
   Value bEnd = triton::cpu::BlockEndOp::create(wb, wrap.getLoc(), i32Ty);
   Value bStart = triton::cpu::BlockStartOp::create(wb, wrap.getLoc(), i32Ty);
-  Value bStep = arith::ConstantOp::create(wb, wrap.getLoc(), i32Ty,
-                                          wb.getIntegerAttr(i32Ty, 1));
+  Value bStep = triton::cpu::BlockStrideOp::create(wb, wrap.getLoc(), i32Ty);
 
   scf::ForOp forOp =
       scf::ForOp::create(wb, wrap.getLoc(), bStart, bEnd, bStep, ValueRange{});
