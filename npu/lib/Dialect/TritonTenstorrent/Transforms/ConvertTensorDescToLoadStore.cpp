@@ -13,10 +13,11 @@
 #include "mlir/IR/Attributes.h"
 #include "mlir/IR/BuiltinAttributes.h"
 #include "mlir/IR/Operation.h"
+#include "mlir/IR/PatternMatch.h"
 #include "mlir/IR/ValueRange.h"
 #include "mlir/Pass/Pass.h"
 #include "mlir/Support/LLVM.h"
-#include "mlir/Transforms/DialectConversion.h"
+#include "mlir/Transforms/GreedyPatternRewriteDriver.h"
 #include "llvm/Support/Debug.h"
 
 using namespace mlir;
@@ -54,16 +55,15 @@ filterSegmentSizes(mlir::ArrayRef<NamedAttribute> attrs) {
   });
   return ret;
 }
-struct RewriteLoadPattern : OpConversionPattern<triton::DescriptorLoadOp> {
-  using OpConversionPattern<triton::DescriptorLoadOp>::OpConversionPattern;
+struct RewriteLoadPattern : OpRewritePattern<triton::DescriptorLoadOp> {
+  using OpRewritePattern<triton::DescriptorLoadOp>::OpRewritePattern;
 
-  LogicalResult
-  matchAndRewrite(triton::DescriptorLoadOp op, OneToNOpAdaptor adaptor,
-                  ConversionPatternRewriter &rewriter) const override {
+  LogicalResult matchAndRewrite(triton::DescriptorLoadOp op,
+                                PatternRewriter &rewriter) const override {
     auto loc = op.getLoc();
     const auto blockShape = op.getDesc().getType().getBlockType().getShape();
     auto descTy = op.getDesc().getType();
-    auto desc = TensorDescriptorUnpacked(descTy, adaptor.getDesc());
+    auto desc = TensorDescriptorUnpacked(descTy, op.getDesc());
     auto offsets = op.getIndices();
 
     auto blockTy = descTy.getSignlessBlockType();
@@ -81,16 +81,15 @@ struct RewriteLoadPattern : OpConversionPattern<triton::DescriptorLoadOp> {
   }
 };
 
-struct RewriteStorePattern : OpConversionPattern<triton::DescriptorStoreOp> {
-  using OpConversionPattern<triton::DescriptorStoreOp>::OpConversionPattern;
+struct RewriteStorePattern : OpRewritePattern<triton::DescriptorStoreOp> {
+  using OpRewritePattern<triton::DescriptorStoreOp>::OpRewritePattern;
 
-  LogicalResult
-  matchAndRewrite(triton::DescriptorStoreOp op, OneToNOpAdaptor adaptor,
-                  ConversionPatternRewriter &rewriter) const override {
+  LogicalResult matchAndRewrite(triton::DescriptorStoreOp op,
+                                PatternRewriter &rewriter) const override {
     auto loc = op.getLoc();
     const auto blockShape = op.getDesc().getType().getBlockType().getShape();
     auto descTy = op.getDesc().getType();
-    auto desc = TensorDescriptorUnpacked(descTy, adaptor.getDesc());
+    auto desc = TensorDescriptorUnpacked(descTy, op.getDesc());
     auto offsets = op.getIndices();
 
     Value mask = desc.generateMask(rewriter, loc, blockShape);
@@ -114,54 +113,10 @@ public:
     MLIRContext *context = &getContext();
     ModuleOp mod = getOperation();
 
-    mlir::ConversionTarget target(getContext());
-    target.addDynamicallyLegalDialect<mlir::arith::ArithDialect,
-                                      mlir::scf::SCFDialect,
-                                      mlir::triton::TritonDialect>(
-        [](mlir::Operation *op) {
-          return !hasATensorDescriptorType(op->getOperandTypes()) &&
-                 !hasATensorDescriptorType(op->getResultTypes());
-        });
-    target.addDynamicallyLegalOp<triton::FuncOp>([](triton::FuncOp funcOp) {
-      return !hasATensorDescriptorType(funcOp.getFunctionType().getInputs()) &&
-             !hasATensorDescriptorType(funcOp.getFunctionType().getResults());
-    });
-
-    mlir::TypeConverter converter;
-
-    converter.addConversion([](mlir::Type t) {
-      // Most types don't require any conversion
-      return t;
-    });
-    converter.addConversion([](mlir::triton::TensorDescType t,
-                               llvm::SmallVectorImpl<mlir::Type> &out) {
-      // We convert a tensor descriptor into an pointer, and a shape and stride
-      // for each dimension, and padding option. i.e., we create 1+2*rank+1
-      // values. Note that tensor descriptors may be signed/unsigned integers
-      // whereas pointers should always be signless.
-      auto tensorType = t.getSignlessBlockType();
-      out.push_back(triton::getPointerType(tensorType.getElementType()));
-      out.insert(out.end(), 2 * tensorType.getRank(),
-                 mlir::IntegerType::get(t.getContext(), 32));
-      out.push_back(mlir::IntegerType::get(t.getContext(), 1));
-      return mlir::success();
-    });
-
     mlir::RewritePatternSet patterns(context);
+    patterns.add<RewriteLoadPattern, RewriteStorePattern>(context);
 
-    // Populate conversion patterns to handle loops, function calls, and arith
-    // ops.
-    triton::populateFunctionTypeConversions(converter, patterns);
-    mlir::scf::populateSCFStructuralTypeConversions(converter, patterns);
-    triton::populateArithTypeConversions(converter, patterns);
-
-    patterns.add<RewriteLoadPattern, RewriteStorePattern>(converter, context);
-
-    ConversionConfig config;
-    config.buildMaterializations = false;
-
-    if (mlir::failed(mlir::applyPartialConversion(
-            mod, target, std::move(patterns), config))) {
+    if (mlir::failed(mlir::applyPatternsGreedily(mod, std::move(patterns)))) {
       signalPassFailure();
     }
   }

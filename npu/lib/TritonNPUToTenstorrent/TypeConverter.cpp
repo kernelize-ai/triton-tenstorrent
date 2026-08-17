@@ -101,18 +101,9 @@ TritonNPUToTenstorrentTypeConverter::TritonNPUToTenstorrentTypeConverter(
     return UnrealizedConversionCastOp::create(builder, loc, type, inputs)
         .getResult(0);
   });
-  addConversion([](mlir::triton::TensorDescType t,
-                   llvm::SmallVectorImpl<mlir::Type> &out) {
-    // We convert a tensor descriptor into an pointer, and a shape and stride
-    // for each dimension, and padding option. i.e., we create 1+2*rank+1
-    // values. Note that tensor descriptors may be signed/unsigned integers
-    // whereas pointers should always be signless.
-    auto tensorType = t.getSignlessBlockType();
-    out.push_back(triton::getPointerType(tensorType.getElementType()));
-    out.insert(out.end(), 2 * tensorType.getRank(),
-               mlir::IntegerType::get(t.getContext(), 32));
-    out.push_back(mlir::IntegerType::get(t.getContext(), 1));
-    return mlir::success();
+  addConversion([](mlir::triton::TensorDescType t) -> Type {
+    // convert tensor descriptor to i32
+    return IntegerType::get(t.getContext(), 32);
   });
   addSourceMaterialization([](OpBuilder &builder,
                               mlir::triton::TensorDescType type,
