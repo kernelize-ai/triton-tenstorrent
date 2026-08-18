@@ -3,10 +3,19 @@
 
 #include "mlir/Transforms/DialectConversion.h"
 
+#include "llvm/ADT/ArrayRef.h"
+
 namespace mlir {
 namespace triton {
 namespace npu {
 namespace experimental {
+
+// Populates the TensorDescType/RankedTensorType conversions shared by every
+// triton::FuncOp-consuming pass in this pipeline (ConvertTritonNPUToD2M,
+// ConvertTritonNPUToTTNNGeneric). `gridShape` is the tenstorrent grid shape
+// read off the module's `tt.device-grid` attribute.
+void populateTritonNPUTypeConversions(TypeConverter &typeConverter,
+                                      ArrayRef<int64_t> gridShape);
 
 void populateComputeOpConversionPattern(TypeConverter &typeConverter,
                                         RewritePatternSet &patterns,

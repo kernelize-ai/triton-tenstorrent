@@ -294,14 +294,10 @@ class TTRTLauncher(object):
         else:
             raise TypeError(f"Don't know how to wrap arg of type {type(arg).__name__}")
 
+        from ttrt.runtime._ttmlir_runtime.runtime import create_scalar_tensor  # TODO: add to ttrt/runtime/init.py
+
         buf = torch.tensor([arg], dtype=scalar_dtype)
-        rt = ttrt.runtime.create_borrowed_host_tensor(
-            buf.data_ptr(),
-            [1],
-            [1],
-            buf.element_size(),
-            _TORCH_TO_TTRT_DTYPE[buf.dtype],
-        )
+        rt = create_scalar_tensor(arg)
         return rt, buf, False
 
     def __call__(self, gridX, gridY, gridZ, stream, function, *args):
@@ -444,11 +440,12 @@ class TTDeviceInterface:
 
 class TTDriver(DriverBase):
     torch_device = None
-    is_d2m = os.environ.get("TRITON_TTMLIR_TARGET", "") == "d2m"
+    ttmlir_target = os.environ.get("TRITON_TTMLIR_TARGET", "")
+    use_ttrt = ttmlir_target == "d2m" or ttmlir_target == "ttnn"
 
     @staticmethod
     def get_torch_runtime():
-        if TTDriver.is_d2m:
+        if TTDriver.use_ttrt:
             return TTRTUtils()._init_device()
         if TTDriver.torch_device is not None:
             return TTDriver.torch_device
@@ -467,11 +464,12 @@ class TTDriver(DriverBase):
         return TTDriver.get_torch_runtime() is not None
 
     def __init__(self):
-        if TTDriver.is_d2m:
+        if TTDriver.use_ttrt:
             self.utils = TTRTUtils()
             import torch
             self.get_current_stream = lambda idx: torch.cpu.Stream()  # TODO: maybe ttrt/pjrt here?
             self.launcher_cls = TTRTLauncher
+            os.environ["CPATH"] = os.path.dirname(dirname)
         else:
             self.device = None
             self.utils = TTUtils(self)
@@ -484,7 +482,7 @@ class TTDriver(DriverBase):
         return runtime.get_device(device_id)
 
     def get_current_device(self):
-        if TTDriver.is_d2m:
+        if TTDriver.use_ttrt:
             return 0
         runtime = TTDriver.get_torch_runtime()
         if runtime is None:
@@ -513,7 +511,7 @@ class TTDriver(DriverBase):
 
     def get_active_torch_device(self):
         import torch
-        if TTDriver.is_d2m:
+        if TTDriver.use_ttrt:
             return torch.device('cpu')
         import torch_nexus
         return torch.device('nexus')
