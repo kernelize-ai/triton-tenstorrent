@@ -41,13 +41,6 @@ LogicalResult ArgConversionHelper::convertFunctionArguments(
       auto ioTypeAttr = dyn_cast_or_null<tt::IOTypeAttr>(
           funcOp.getArgAttr(idx, kIOTypeAttrName));
       if (!ioTypeAttr) {
-        // TagInputOutputs only tags pointers reachable from an ordinary
-        // tt.load/tt.store (or descriptor load/store). A pointer used only
-        // by an atomic op (no ordinary load/store on it) is never tagged --
-        // treat it like a plain scalar argument instead of erroring; the
-        // atomic-op lowering resolves its address independently via
-        // PointerInfoAnalysis-style tracing, not through the tensor/memref
-        // machinery below.
         auto convertedType = typeConverter->convertType(argType);
         convertedArgTypes.push_back(convertedType);
         argLocs.push_back(oldArg.getLoc());
@@ -68,10 +61,6 @@ LogicalResult ArgConversionHelper::convertFunctionArguments(
             findLoadStoreOpForTensorArg<triton::StoreOp>(oldArg, funcOp);
         assert(storeOp && "expected to find dependent store for OUTPUT type "
                           "function argument");
-        // storeOp.getPtr() is the tensor-of-pointers being stored through
-        // (element type !tt.ptr<T>); the stored value's own type already
-        // has the correct scalar element type T, matching how the INPUT
-        // branch above reads it off the load's result rather than its ptr.
         tritonType = cast<RankedTensorType>(storeOp.getValue().getType());
       } else {
         llvm_unreachable("unexpected IOTypeAttr for function argument");
