@@ -188,8 +188,7 @@ ArgConversionHelper::generateNewFunction(triton::FuncOp origFunc,
                                  ttmlir::utils::FunctionType::ForwardDevice);
 
   Region &newRegion = newFunc.getBody();
-  rewriter.createBlock(&newRegion, newRegion.end(), convertedArgTypes,
-                       argLocs);
+  rewriter.createBlock(&newRegion, newRegion.end(), convertedArgTypes, argLocs);
   return newFunc;
 }
 

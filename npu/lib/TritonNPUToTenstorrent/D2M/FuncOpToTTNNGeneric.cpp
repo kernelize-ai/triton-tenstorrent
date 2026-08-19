@@ -45,10 +45,10 @@ ttnn::CoreRangeSetAttr fullGridCoreRangeSet(MLIRContext *ctx,
                                             ttcore::GridAttr grid) {
   ArrayRef<int64_t> gridShape = grid.getShape();
   return ttnn::CoreRangeSetAttr::get(
-      ctx, ttnn::CoreRangeAttr::get(
-               ctx, ttnn::CoreCoordAttr::get(ctx, 0, 0),
-               ttnn::CoreCoordAttr::get(ctx, gridShape[1] - 1,
-                                        gridShape[0] - 1)));
+      ctx,
+      ttnn::CoreRangeAttr::get(
+          ctx, ttnn::CoreCoordAttr::get(ctx, 0, 0),
+          ttnn::CoreCoordAttr::get(ctx, gridShape[1] - 1, gridShape[0] - 1)));
 }
 
 // Builds a double-buffered CB for one tensor input/output: sized to hold
@@ -83,20 +83,25 @@ perCoreWorkRangeArgs(MLIRContext *ctx, ttcore::GridAttr grid) {
   return {};
 }
 
-// Builds the #ttnn.program's three kernel descriptors, each with an inline 
+// Builds the #ttnn.program's three kernel descriptors, each with an inline
 // `source` string that includes the kernel header file.
-SmallVector<mlir::Attribute> kernelDescriptors(
-    MLIRContext *ctx, const std::string &kernelName,
-    ttnn::CoreRangeSetAttr coreRanges, llvm::ArrayRef<mlir::Attribute> commonRtArgs,
-    llvm::ArrayRef<mlir::tt::ttnn::CoreRuntimeArgsAttr> rtArgs, llvm::ArrayRef<mlir::Attribute> ctArgs) {
-  auto readerSource = mlir::StringAttr::get(ctx, "#define READER_KERNEL\n#include \"" + kernelName + ".h\"");
+SmallVector<mlir::Attribute>
+kernelDescriptors(MLIRContext *ctx, const std::string &kernelName,
+                  ttnn::CoreRangeSetAttr coreRanges,
+                  llvm::ArrayRef<mlir::Attribute> commonRtArgs,
+                  llvm::ArrayRef<mlir::tt::ttnn::CoreRuntimeArgsAttr> rtArgs,
+                  llvm::ArrayRef<mlir::Attribute> ctArgs) {
+  auto readerSource = mlir::StringAttr::get(
+      ctx, "#define READER_KERNEL\n#include \"" + kernelName + ".h\"");
   auto readKernel = ttnn::SourceReadKernelAttr::get(
       ctx, readerSource, coreRanges, commonRtArgs, rtArgs, ctArgs);
 
-  auto writerSource = mlir::StringAttr::get(ctx, "#define WRITER_KERNEL\n#include \"" + kernelName + ".h\"");
+  auto writerSource = mlir::StringAttr::get(
+      ctx, "#define WRITER_KERNEL\n#include \"" + kernelName + ".h\"");
   auto writeKernel = ttnn::SourceWriteKernelAttr::get(
       ctx, writerSource, coreRanges, commonRtArgs, rtArgs, ctArgs);
-  auto computeSource = mlir::StringAttr::get(ctx, "#define COMPUTE_KERNEL\n#include \"" + kernelName + ".h\"");
+  auto computeSource = mlir::StringAttr::get(
+      ctx, "#define COMPUTE_KERNEL\n#include \"" + kernelName + ".h\"");
   auto computeKernel = ttnn::SourceComputeKernelAttr::get(
       ctx, computeSource, coreRanges, ttnn::ComputeKernelMathFidelity::HiFi4,
       /*fp32DestAccEn=*/false, /*dstFullSyncEn=*/false,
@@ -173,7 +178,8 @@ struct ConvertTritonFuncToTTNNGeneric
     // Get the number of pipeline stages from the function attribute
     int64_t numStages = 2;
     const char *pipelineStagesAttrName = "tt.num_stages";
-    auto pipelineStagesAttr = funcOp->getAttrOfType<IntegerAttr>(pipelineStagesAttrName);
+    auto pipelineStagesAttr =
+        funcOp->getAttrOfType<IntegerAttr>(pipelineStagesAttrName);
     if (pipelineStagesAttr) {
       numStages = pipelineStagesAttr.getInt();
     }
@@ -182,18 +188,20 @@ struct ConvertTritonFuncToTTNNGeneric
         ios.push_back(arg);
         commonRtArgs.push_back(
             ttnn::KernelArgAddressOfTensorAttr::get(context, tensorIndex));
-        cbs.push_back(doubleBufferedCB(context, helper.inputTensorMap.lookup(index), numStages,
-                                       coreRanges,
-                                       static_cast<uint32_t>(tensorIndex)));
-        ctArgs.push_back(ttnn::KernelArgCBBufferIndexAttr::get(context, cbs.size() - 1));
+        cbs.push_back(doubleBufferedCB(
+            context, helper.inputTensorMap.lookup(index), numStages, coreRanges,
+            static_cast<uint32_t>(tensorIndex)));
+        ctArgs.push_back(
+            ttnn::KernelArgCBBufferIndexAttr::get(context, cbs.size() - 1));
         tensorIndex++;
       } else if (helper.isOutputTensorArg(index)) {
         commonRtArgs.push_back(ttnn::KernelArgAddressOfTensorAttr::get(
             context, outputTensorIndex));
         cbs.push_back(doubleBufferedCB(
-            context, helper.outputTensorMap.lookup(index), numStages, coreRanges,
-            static_cast<uint32_t>(outputTensorIndex)));
-        ctArgs.push_back(ttnn::KernelArgCBBufferIndexAttr::get(context, cbs.size() - 1));
+            context, helper.outputTensorMap.lookup(index), numStages,
+            coreRanges, static_cast<uint32_t>(outputTensorIndex)));
+        ctArgs.push_back(
+            ttnn::KernelArgCBBufferIndexAttr::get(context, cbs.size() - 1));
         outputTensorIndex++;
       } else {
         commonRtArgs.push_back(
@@ -214,7 +222,9 @@ struct ConvertTritonFuncToTTNNGeneric
     // TODO: add semaphores
 
     ttnn::ProgramAttr program = ttnn::ProgramAttr::get(
-        context, kernelDescriptors(context, kernelName, coreRanges, commonRtArgs, rtArgs, ctArgs),
+        context,
+        kernelDescriptors(context, kernelName, coreRanges, commonRtArgs, rtArgs,
+                          ctArgs),
         cbs, /*semaphores=*/{});
 
     ttnn::GenericOp::create(rewriter, loc, ios, helper.getScalarArgs(newFunc),
