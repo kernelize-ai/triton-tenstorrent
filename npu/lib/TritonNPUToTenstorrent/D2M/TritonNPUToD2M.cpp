@@ -157,6 +157,81 @@ SmallVector<int64_t> calculateShardShape(RankedTensorType tensorType,
 
 } // namespace
 
+namespace experimental {
+
+// Shared by ConvertTritonNPUToD2MPass and ConvertTritonNPUToTTNNGenericPass:
+// both start from the same triton::FuncOp argument shapes (tensors get a
+// tiled memref conversion; tensor descriptors are handled by
+// ArgConversionHelper directly against this same TypeConverter), so they
+// need an identical TypeConverter to produce the same converted function
+// signature.
+void populateTritonNPUTypeConversions(TypeConverter &typeConverter,
+                                      ArrayRef<int64_t> gridShape) {
+  typeConverter.addConversion([gridShape](
+                                  mlir::triton::TensorDescType t,
+                                  llvm::SmallVectorImpl<mlir::Type> &out) {
+    // We convert a tensor descriptor into a memref, and a shape and
+    // stride for each dimension, and padding option. i.e., we create
+    // 1+2*rank+1 values. Note that tensor descriptors may be
+    // signed/unsigned integers whereas pointers should always be
+    // signless.
+    auto tensorType = t.getSignlessBlockType();
+    auto eType = tensorType.getElementType();
+    auto tileType = ttcore::TileType::get(t.getContext(),
+                                          ttcore::TileType::getDefaultShape(),
+                                          ttcore::elementTypeToDataType(eType));
+    SmallVector<int64_t> shardShape = calculateShardShape(tensorType, tileType);
+
+    // interleaved layout requires unit grid
+    SmallVector<int64_t> shape(gridShape.size(), 1);
+    shape.append(shardShape.begin(), shardShape.end());
+    auto memRefType = MemRefType::get(
+        shape, tileType,
+        ttcore::InterleavedLayoutAttr::get(shardShape, tileType),
+        ttcore::MemorySpaceAttr::get(t.getContext(),
+                                     ttcore::MemorySpace::DeviceDRAM));
+    out.push_back(memRefType);
+    out.insert(out.end(), 2 * tensorType.getRank(),
+               mlir::IntegerType::get(t.getContext(), 32));
+    out.push_back(mlir::IntegerType::get(t.getContext(), 1));
+    return mlir::success();
+  });
+  typeConverter.addConversion([](RankedTensorType tensorType) -> Type {
+    auto eType = tensorType.getElementType();
+    if (auto ptrType = dyn_cast<triton::PointerType>(eType)) {
+      eType = ptrType.getPointeeType();
+    }
+    if (!tensorType.getEncoding()) {
+      return RankedTensorType::get(tensorType.getShape(), eType);
+    }
+    if (isa<npu::tt::TiledEncodingAttr>(tensorType.getEncoding()) ||
+        isa<npu::tt::TiledDotOperandEncodingAttr>(tensorType.getEncoding()) ||
+        isa<gpu::DotOperandEncodingAttr>(tensorType.getEncoding()) ||
+        isa<gpu::BlockedEncodingAttr>(tensorType.getEncoding())) {
+      // Convert to memref in L1.
+      auto tileType = ttcore::TileType::get(
+          tensorType.getContext(), ttcore::TileType::getDefaultShape(),
+          ttcore::elementTypeToDataType(eType));
+      SmallVector<int64_t> shardShape =
+          calculateShardShape(tensorType, tileType);
+
+      // Assume all L1 allocations are in double-buffered CBs.
+      auto cbLayout =
+          ttcore::CBLayoutAttr::get(tensorType.getContext(), shardShape,
+                                    ttcore::getElementSizeBytes(tileType),
+                                    /*buffers=*/2);
+      auto memRefType = MemRefType::get(
+          shardShape, tileType, cbLayout,
+          ttcore::MemorySpaceAttr::get(tensorType.getContext(),
+                                       ttcore::MemorySpace::DeviceL1));
+      return memRefType;
+    }
+    return tensorType;
+  });
+}
+
+} // namespace experimental
+
 struct ConvertTritonNPUToD2MPass
     : public impl::ConvertTritonNPUToD2MBase<ConvertTritonNPUToD2MPass> {
   void runOnOperation() override {
@@ -166,68 +241,7 @@ struct ConvertTritonNPUToD2MPass
     SmallVector<int64_t> gridShape = llvm::to_vector(gridAttr.getShape());
 
     TritonNPUToTenstorrentTypeConverter typeConverter(context);
-    typeConverter.addConversion(
-        [gridShape](mlir::triton::TensorDescType t,
-                    llvm::SmallVectorImpl<mlir::Type> &out) {
-          // We convert a tensor descriptor into a memref, and a shape and
-          // stride for each dimension, and padding option. i.e., we create
-          // 1+2*rank+1 values. Note that tensor descriptors may be
-          // signed/unsigned integers whereas pointers should always be
-          // signless.
-          auto tensorType = t.getSignlessBlockType();
-          auto eType = tensorType.getElementType();
-          auto tileType = ttcore::TileType::get(
-              t.getContext(), ttcore::TileType::getDefaultShape(),
-              ttcore::elementTypeToDataType(eType));
-          SmallVector<int64_t> shardShape =
-              calculateShardShape(tensorType, tileType);
-
-          // interleaved layout requires unit grid
-          SmallVector<int64_t> shape(gridShape.size(), 1);
-          shape.append(shardShape.begin(), shardShape.end());
-          auto memRefType = MemRefType::get(
-              shape, tileType,
-              ttcore::InterleavedLayoutAttr::get(shardShape, tileType),
-              ttcore::MemorySpaceAttr::get(t.getContext(),
-                                           ttcore::MemorySpace::DeviceDRAM));
-          out.push_back(memRefType);
-          out.insert(out.end(), 2 * tensorType.getRank(),
-                     mlir::IntegerType::get(t.getContext(), 32));
-          out.push_back(mlir::IntegerType::get(t.getContext(), 1));
-          return mlir::success();
-        });
-    typeConverter.addConversion([](RankedTensorType tensorType) -> Type {
-      auto eType = tensorType.getElementType();
-      if (auto ptrType = dyn_cast<triton::PointerType>(eType)) {
-        eType = ptrType.getPointeeType();
-      }
-      if (!tensorType.getEncoding()) {
-        return RankedTensorType::get(tensorType.getShape(), eType);
-      }
-      if (isa<npu::tt::TiledEncodingAttr>(tensorType.getEncoding()) ||
-          isa<npu::tt::TiledDotOperandEncodingAttr>(tensorType.getEncoding()) ||
-          isa<gpu::DotOperandEncodingAttr>(tensorType.getEncoding()) ||
-          isa<gpu::BlockedEncodingAttr>(tensorType.getEncoding())) {
-        // Convert to memref in L1.
-        auto tileType = ttcore::TileType::get(
-            tensorType.getContext(), ttcore::TileType::getDefaultShape(),
-            ttcore::elementTypeToDataType(eType));
-        SmallVector<int64_t> shardShape =
-            calculateShardShape(tensorType, tileType);
-
-        // Assume all L1 allocations are in double-buffered CBs.
-        auto cbLayout =
-            ttcore::CBLayoutAttr::get(tensorType.getContext(), shardShape,
-                                      ttcore::getElementSizeBytes(tileType),
-                                      /*buffers=*/2);
-        auto memRefType = MemRefType::get(
-            shardShape, tileType, cbLayout,
-            ttcore::MemorySpaceAttr::get(tensorType.getContext(),
-                                         ttcore::MemorySpace::DeviceL1));
-        return memRefType;
-      }
-      return tensorType;
-    });
+    experimental::populateTritonNPUTypeConversions(typeConverter, gridShape);
 
     mlir::ConversionTarget funcTarget(*context);
     funcTarget.addIllegalOp<triton::FuncOp>();

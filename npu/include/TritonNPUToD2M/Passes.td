@@ -22,6 +22,29 @@ def ConvertTritonNPUToD2M : Pass<"convert-triton-npu-to-d2m", "mlir::ModuleOp"> 
                             ];
 }
 
+def ConvertTritonNPUToTTNNGeneric : Pass<"convert-triton-npu-to-ttnn-generic", "mlir::ModuleOp"> {
+    let summary = "Convert a Triton NPU kernel func directly into a ttnn.generic op";
+
+    let description = [{
+        The `convert-triton-npu-to-ttnn-generic` pass rewrites each Triton kernel
+        function into a func.func containing a single `ttnn.generic` op, built
+        directly from the triton function's signature (grid, input/output
+        tensors, scalar args) -- it does not go through `d2m.generic` or any of
+        the D2M/TTKernel/EmitC lowering passes. The generic's kernel descriptors
+        (two data-movement kernels and one compute kernel) carry an inline,
+        `source` string rather than a `symbol_ref` to a kernel `func.func`; no
+        kernel bodies are created.
+    }];
+
+    let dependentDialects = ["mlir::triton::TritonDialect",
+                             "mlir::triton::gpu::TritonGPUDialect",
+                             "mlir::tt::ttnn::TTNNDialect",
+                             "mlir::arith::ArithDialect",
+                             "func::FuncDialect",
+                             "mlir::triton::npu::tt::TritonTenstorrentDialect"
+                            ];
+}
+
 def TensorizeScalars : Pass<"tensorize-scalars", "mlir::ModuleOp"> {
     let summary = "Convert scalar arguments to a function into 0D tensors";
     let description = [{

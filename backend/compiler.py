@@ -58,7 +58,11 @@ class TTBackend(BaseBackend):
 
     def __init__(self, target: GPUTarget) -> None:
         super().__init__(target)
-        self.binary_ext = "flatbuffer" if os.environ.get("TRITON_TTMLIR_TARGET", "") == "d2m" else "cpp"
+        ttmlir_target = os.environ.get("TRITON_TTMLIR_TARGET", "")
+        if ttmlir_target == "d2m" or ttmlir_target == "ttnn":
+            self.binary_ext = "flatbuffer"
+        else:
+            self.binary_ext = "cpp"
         self.device = 'Tenstorrent'
 
     def parse_options(self, options):
@@ -286,6 +290,36 @@ class TTBackend(BaseBackend):
         return mod
 
     @staticmethod
+    def make_ttnn_generic(mod, metadata, options):
+        pm = ir.pass_manager(mod.context)
+        pm.enable_debug()
+
+        cpu.passes.tenstorrent.add_accelerate_matmul(pm)
+        passes.ttgpuir.add_remove_layout_conversions(pm)
+        cpu.passes.tenstorrent.add_convert_compute_ops(pm)
+        cpu.passes.tenstorrent.add_remove_dot_load_layout_conversions(pm)
+        passes.ttgpuir.add_remove_layout_conversions(pm)
+        cpu.passes.tenstorrent.remove_redundant_masks(pm)
+        passes.common.add_canonicalizer(pm)
+
+        passes.common.add_symbol_dce(pm)
+        passes.common.add_sccp(pm)
+        passes.common.add_cse(pm)
+        passes.common.add_canonicalizer(pm)
+
+        cpu.passes.tenstorrent.add_tag_ios(pm)
+
+        sys_desc_path = os.getenv("TT_SYSTEM_DESC_PATH", "")
+        cpu.passes.tenstorrent.add_ttcore_register_device_pass(pm, sys_desc_path)
+
+        # Builds a ttnn.generic directly from the triton func
+        cpu.passes.tenstorrent.add_to_ttnn_generic_dialect(pm)
+        cpu.passes.tenstorrent.add_tensorize_scalars(pm)
+
+        pm.run(mod, "make_ttnn_generic")
+        return mod
+
+    @staticmethod
     def make_ttkernel(mod, metadata, options):
         pm = ir.pass_manager(mod.context)
         pm.enable_debug()
@@ -492,6 +526,9 @@ class TTBackend(BaseBackend):
                 stages["d2m"] = lambda src, metadata: self.make_d2m(src, metadata, options)
                 stages["ttkernel"] = lambda src, metadata: self.make_ttkernel(src, metadata, options)
                 stages["ttnn"] = lambda src, metadata: self.make_emitc(src, metadata, options, d2m=True)
+                stages["flatbuffer"] = lambda src, metadata: self.make_flatbuffer(src, metadata, options)
+            elif options.ttmlir_target == "ttnn":
+                stages["ttnn"] = lambda src, metadata: self.make_ttnn_generic(src, metadata, options)
                 stages["flatbuffer"] = lambda src, metadata: self.make_flatbuffer(src, metadata, options)
             else:
                 raise ValueError(f"Unsupported TTMLIR target: {options.ttmlir_target}")
